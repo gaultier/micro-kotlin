@@ -46,13 +46,45 @@ typedef struct {
 } cp_info_t;
 
 typedef struct {
-} field_info_t;
+} class_file_field_t;
+
+typedef struct class_file_attribute_t class_file_attribute_t;
+
+struct class_file_attribute_t {
+  enum class_file_attribute_kind_t {
+    CAK_SOURCE_FILE,
+    CAK_CODE,
+    CAK_LINE_NUMBER_TABLE,
+    CAK_STACK_MAP_TABLE,
+  } kind;
+
+  u16 name;
+
+  union {
+    struct class_file_attribute_code_t {
+      u16 max_stack;
+      u16 max_locals;
+      u32 code_count;
+      u8 *code;
+      u16 exception_table_count;
+      void *exception_table; // TODO
+      u16 attributes_count;
+      class_file_attribute_t *attributes;
+    } code;
+
+    struct class_file_attribute_source_file_t {
+      u16 source_file;
+    } source_file;
+  } v;
+};
 
 typedef struct {
-} method_info_t;
-
-typedef struct {
-} attribute_info_t;
+  u16 access_flags;
+  u16 name;
+  u16 descriptor;
+  u16 attributes_count;
+  class_file_attribute_t *attributes;
+} class_file_method_t;
 
 const u32 CLASS_FILE_MAGIC_NUMBER = 0xbebafeca;
 const u16 CLASS_FILE_MAJOR_VERSION_6 = 50;
@@ -69,11 +101,11 @@ typedef struct {
   u16 super_class;
   u16 interfaces_count;
   u16 fields_count;
-  field_info_t *fields;
+  class_file_field_t *fields;
   u16 methods_count;
-  method_info_t *methods;
+  class_file_method_t *methods;
   u16 attribute_count;
-  attribute_info_t attributes;
+  class_file_attribute_t attributes;
 } class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
@@ -130,7 +162,7 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
     assert(0 && "unimplemented");
     break;
   default:
-    __builtin_unreachable();
+    assert(0 && "unreachable");
   }
 }
 
@@ -145,15 +177,71 @@ void class_file_write_constant_pool(const class_file_t *class_file,
   }
 }
 void class_file_write_interfaces(const class_file_t *class_file, FILE *file) {
-  assert(0 && "unimplemented");
+  file_write_be_16(file, class_file->interfaces_count);
+
+  assert(class_file->interfaces_count == 0 && "unimplemented");
 }
 
 void class_file_write_fields(const class_file_t *class_file, FILE *file) {
-  assert(0 && "unimplemented");
+  file_write_be_16(file, class_file->fields_count);
+
+  assert(class_file->fields_count == 0 && "unimplemented");
+}
+
+void class_file_write_attribute(const class_file_t *class_file, FILE *file,
+                                const class_file_attribute_t *attribute) {
+  file_write_be_16(file, attribute->name);
+
+  switch (attribute->kind) {
+  case CAK_SOURCE_FILE: {
+                          const u32 size = 0; // FIXME
+                                              file_write_be_32(file, size);
+
+                                              const struct class_file_attribute_source_file_t *const source = &attribute->v;
+                                              file_write_be_16(file, source);
+    break;
+  }
+  case CAK_CODE: {
+    break;
+  }
+  case CAK_LINE_NUMBER_TABLE: {
+    break;
+  }
+  case CAK_STACK_MAP_TABLE: {
+    break;
+  }
+  default:
+    assert(0 && "unreachable");
+  }
+}
+
+void class_file_write_attributes(const class_file_t *class_file, FILE *file,
+                                 u16 attribute_count,
+                                 const class_file_attribute_t *attributes) {
+  file_write_be_16(file, attribute_count);
+
+  for (uint64_t i = 0; i < attribute_count; i++) {
+    const class_file_attribute_t *const attribute = &attributes[i];
+    class_file_write_attribute(class_file, file, attribute);
+  }
+}
+
+void class_file_write_method(const class_file_t *class_file, FILE *file,
+                             const class_file_method_t *method) {
+  file_write_be_16(file, method->access_flags);
+  file_write_be_16(file, method->name);
+  file_write_be_16(file, method->descriptor);
+
+  // TODO: attributes.
 }
 
 void class_file_write_methods(const class_file_t *class_file, FILE *file) {
-  assert(0 && "unimplemented");
+  file_write_be_16(file, class_file->methods_count);
+
+  for (uint64_t i = 0; i < class_file->methods_count; i++) {
+    const class_file_method_t *const method = &class_file->methods[i];
+    class_file_write_method(class_file, file, method);
+  }
 }
 
 void class_file_write(const class_file_t *class_file, FILE *file) {
