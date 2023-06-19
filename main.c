@@ -556,6 +556,18 @@ void class_file_method_init(class_file_method_t *method, arena_t *arena) {
       arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
 }
 
+u16 class_file_add_constant_cstring(class_file_t *class_file, char *s) {
+  assert(class_file != NULL);
+  assert(s != NULL);
+
+  const class_file_constant_t constant = {.kind = CIK_UTF8,
+                                          .v = {.s = {
+                                                    .len = __builtin_strlen(s),
+                                                    .s = (u8 *)s,
+                                                }}};
+  return class_file_add_constant(class_file, &constant);
+}
+
 int main() {
   arena_t arena = {0};
   arena_init(&arena, 1 << 26);
@@ -569,27 +581,18 @@ int main() {
 
   class_file_init(&class_file, &arena);
 
-  const class_file_constant_t constant_class_object_name = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 16, .s = (u8 *)"java/lang/Object"}}};
-  const u16 constant_class_object_name_i =
-      class_file_add_constant(&class_file, &constant_class_object_name);
+  const u16 constant_java_lang_object_string_i =
+      class_file_add_constant_cstring(&class_file, "java/lang/Object");
 
-  const class_file_constant_t
-      constant_class_object_name_and_type_type_descriptor = {
-          .kind = CIK_UTF8, .v = {.s = {.len = 3, .s = (u8 *)"()V"}}};
-  const u16 constant_class_object_name_and_type_type_descriptor_i =
-      class_file_add_constant(
-          &class_file, &constant_class_object_name_and_type_type_descriptor);
+  const u16 constant_void_method_descriptor_string_i =
+      class_file_add_constant_cstring(&class_file, "()V");
 
-  const class_file_constant_t constant_class_object_name_and_type_name = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 6, .s = (u8 *)"<init>"}}};
   const u16 constant_class_object_name_and_type_name_i =
-      class_file_add_constant(&class_file,
-                              &constant_class_object_name_and_type_name);
+      class_file_add_constant_cstring(&class_file, "<init>");
 
   const class_file_constant_t constant_class_object = {
       .kind = CIK_CLASS_INFO,
-      .v = {.class_name = constant_class_object_name_i}};
+      .v = {.class_name = constant_java_lang_object_string_i}};
   const u16 constant_class_object_i =
       class_file_add_constant(&class_file, &constant_class_object);
   class_file.super_class = constant_class_object_i;
@@ -598,8 +601,7 @@ int main() {
       .kind = CIK_NAME_AND_TYPE,
       .v = {.name_and_type = {
                 .name = constant_class_object_name_and_type_name_i,
-                .type_descriptor =
-                    constant_class_object_name_and_type_type_descriptor_i}}};
+                .type_descriptor = constant_void_method_descriptor_string_i}}};
   const u16 constant_class_object_name_and_type_i = class_file_add_constant(
       &class_file, &constant_class_object_name_and_type);
 
@@ -611,46 +613,31 @@ int main() {
   const u16 constant_object_method_ref_constructor_i = class_file_add_constant(
       &class_file, &constant_object_method_ref_constructor);
 
-  const class_file_constant_t constant_class_name = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 6, .s = (u8 *)"PgMain"}}};
+  const u16 constant_this_class_name_i =
+      class_file_add_constant_cstring(&class_file, "PgMain");
   const class_file_constant_t constant_this_class = {
-      .kind = CIK_CLASS_INFO,
-      .v = {.class_name =
-                class_file_add_constant(&class_file, &constant_class_name)}};
+      .kind = CIK_CLASS_INFO, .v = {.class_name = constant_this_class_name_i}};
   const u16 constant_this_class_i =
       class_file_add_constant(&class_file, &constant_this_class);
   class_file.this_class = constant_this_class_i;
 
-  const class_file_constant_t constant_string_code = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 4, .s = (u8 *)"Code"}}};
   const u16 constant_string_code_i =
-      class_file_add_constant(&class_file, &constant_string_code);
+      class_file_add_constant_cstring(&class_file, "Code");
 
-  const class_file_constant_t constant_string_line_number_table = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 15, .s = (u8 *)"LineNumberTable"}}};
   const u16 constant_string_line_number_table_i =
-      class_file_add_constant(&class_file, &constant_string_line_number_table);
+      class_file_add_constant_cstring(&class_file, "LineNumberTable");
 
-  const class_file_constant_t constant_string_main = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 4, .s = (u8 *)"main"}}};
   const u16 constant_string_main_i =
-      class_file_add_constant(&class_file, &constant_string_main);
+      class_file_add_constant_cstring(&class_file, "main");
 
-  const class_file_constant_t constant_string_main_type_descriptor = {
-      .kind = CIK_UTF8,
-      .v = {.s = {.len = 22, .s = (u8 *)"([Ljava/lang/String;)V"}}};
-  const u16 constant_string_main_type_descriptor_i = class_file_add_constant(
-      &class_file, &constant_string_main_type_descriptor);
+  const u16 constant_string_main_type_descriptor_i =
+      class_file_add_constant_cstring(&class_file, "([Ljava/lang/String;)V");
 
-  const class_file_constant_t constant_string_source_file = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 10, .s = (u8 *)"SourceFile"}}};
   const u16 constant_string_source_file_i =
-      class_file_add_constant(&class_file, &constant_string_source_file);
+      class_file_add_constant_cstring(&class_file, "SourceFile");
 
-  const class_file_constant_t constant_string_file = {
-      .kind = CIK_UTF8, .v = {.s = {.len = 11, .s = (u8 *)"PgMain.java"}}};
   const u16 constant_string_file_i =
-      class_file_add_constant(&class_file, &constant_string_file);
+      class_file_add_constant_cstring(&class_file, "PgMain.java");
 
   const class_file_attribute_t source_file_attribute = {
       .kind = CAK_SOURCE_FILE,
@@ -675,7 +662,7 @@ int main() {
     class_file_method_t constructor = {
         .access_flags = CAF_ACC_PUBLIC,
         .name = constant_class_object_name_and_type_name_i,
-        .descriptor = constant_class_object_name_and_type_type_descriptor_i,
+        .descriptor = constant_void_method_descriptor_string_i,
     };
     class_file_method_init(&constructor, &arena);
     class_file_attribute_t constructor_attribute_code = {
