@@ -633,7 +633,8 @@ int main() {
 
   const class_file_constant_t constant_string_main = {
       .kind = CIK_UTF8, .v = {.s = {.len = 4, .s = (u8 *)"main"}}};
-  class_file_add_constant(&class_file, &constant_string_main);
+  const u16 constant_string_main_i =
+      class_file_add_constant(&class_file, &constant_string_main);
 
   const class_file_constant_t constant_string_main_type_descriptor = {
       .kind = CIK_UTF8,
@@ -687,13 +688,13 @@ int main() {
 
     class_file_add_method(&class_file, &constructor);
   }
-#if 0
   {
     class_file_attribute_code_t main_code = {.max_stack = 0, .max_locals = 1};
     class_file_attribute_code_init(&main_code, &arena);
     class_file_add_code_op(main_code.code, &main_code.code_count, CFO_RETURN);
 
     class_file_method_t main = {
+        .name = constant_string_main_i,
         .access_flags = CAF_ACC_PUBLIC | CAF_ACC_STATIC,
         .descriptor = constant_string_main_type_descriptor_i,
     };
@@ -707,7 +708,6 @@ int main() {
 
     class_file_add_method(&class_file, &main);
   }
-#endif
 
   FILE *file = fopen("PgMain.class", "w");
   assert(file != NULL);
