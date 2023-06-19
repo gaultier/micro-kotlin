@@ -77,6 +77,9 @@ struct class_file_attribute_t {
     } source_file;
   } v;
 };
+
+typedef struct class_file_attribute_code_t class_file_attribute_code_t;
+
 typedef struct class_file_attribute_source_file_t
     class_file_attribute_source_file_t;
 
@@ -190,6 +193,9 @@ void class_file_write_fields(const class_file_t *class_file, FILE *file) {
   assert(class_file->fields_count == 0 && "unimplemented");
 }
 
+void class_file_write_attributes(const class_file_t *class_file, FILE *file,
+                                 u16 attribute_count,
+                                 const class_file_attribute_t *attributes);
 void class_file_write_attribute(const class_file_t *class_file, FILE *file,
                                 const class_file_attribute_t *attribute) {
   file_write_be_16(file, attribute->name);
@@ -206,12 +212,34 @@ void class_file_write_attribute(const class_file_t *class_file, FILE *file,
     break;
   }
   case CAK_CODE: {
+    const u32 size = 0; // FIXME
+    file_write_be_32(file, size);
+
+    const class_file_attribute_code_t *const code =
+        (const class_file_attribute_code_t *)&attribute->v;
+
+    file_write_be_16(file, code->max_stack);
+
+    file_write_be_16(file, code->max_locals);
+
+    file_write_be_32(file, code->code_count);
+    fwrite(code->code, code->code_count, sizeof(u8), file);
+
+    file_write_be_16(file, code->exception_table_count);
+
+    assert(code->exception_table == NULL && "unimplemented");
+
+    class_file_write_attributes(class_file, file, code->attributes_count,
+                                code->attributes);
+
     break;
   }
   case CAK_LINE_NUMBER_TABLE: {
+    assert( "unimplemented");
     break;
   }
   case CAK_STACK_MAP_TABLE: {
+    assert( "unimplemented");
     break;
   }
   default:
