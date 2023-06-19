@@ -17,6 +17,9 @@ typedef enum {
   CFO_ALOAD_0 = 0x2a,
   CFO_INVOKE_SPECIAL = 0xb7,
   CFO_RETURN = 0xb1,
+  CFO_GET_STATIC = 0xb2,
+  CFO_LDC = 0x12,
+  CFO_INVOKE_VIRTUAL = 0xb6,
 } class_file_op_kind_t;
 
 typedef struct {
@@ -95,7 +98,8 @@ typedef struct {
     // CIK_DOUBLE_LOW,
   } kind;
   union {
-    string_t s; // CIK_UTF8
+    string_t s;        // CIK_UTF8
+    u16 string_utf8_i; // CIK_STRING
     struct class_file_constant_method_ref_t {
       u16 class;
       u16 name_and_type;
@@ -250,7 +254,8 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
     file_write_be_16(file, constant->v.class_name);
     break;
   case CIK_STRING:
-    assert(0 && "unimplemented");
+    fwrite(&constant->kind, sizeof(u8), 1, file);
+    file_write_be_16(file, constant->v.string_utf8_i);
     break;
   case CIK_FIELD_REF: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
@@ -529,7 +534,7 @@ u16 class_file_add_method(class_file_t *class_file,
   return class_file->method_count++;
 }
 
-u32 class_file_add_code_op(u8 *code, u32 *code_count, u8 op) {
+u32 class_file_add_code_u8(u8 *code, u32 *code_count, u8 op) {
   assert(code != NULL);
   assert(code_count != NULL);
   assert(*code_count < UINT16_MAX); // TODO: UINT32_MAX vs ENOMEM
@@ -579,6 +584,17 @@ u16 class_file_add_constant_cstring(class_file_t *class_file, char *s) {
                                                     .len = __builtin_strlen(s),
                                                     .s = (u8 *)s,
                                                 }}};
+  return class_file_add_constant(class_file, &constant);
+}
+
+u16 class_file_add_constant_jstring(class_file_t *class_file,
+                                    u16 constant_utf8_i) {
+  assert(class_file != NULL);
+  assert(constant_utf8_i > 0);
+
+  const class_file_constant_t constant = {
+      .kind = CIK_STRING, .v = {.string_utf8_i = constant_utf8_i}};
+
   return class_file_add_constant(class_file, &constant);
 }
 
@@ -664,19 +680,18 @@ int main() {
   const u16 constant_string_out_i =
       class_file_add_constant_cstring(&class_file, "out");
 
-  const u16 constant_string_println_i =
-      class_file_add_constant_cstring(&class_file, "println");
-
   const u16 constant_string_java_io_printstream_i =
       class_file_add_constant_cstring(&class_file, "java/io/PrintStream");
 
   const class_file_constant_t constant_string_java_io_printstream_class = {
       .kind = CIK_CLASS_INFO,
       .v = {.class_name = constant_string_java_io_printstream_i}};
-  const u16 constant_string_java_io_printstream_class_i = class_file_add_constant(&class_file, &constant_string_java_io_printstream_class);
+  const u16 constant_string_java_io_printstream_class_i =
+      class_file_add_constant(&class_file,
+                              &constant_string_java_io_printstream_class);
 
   const u16 constant_string_java_io_printstream_descriptor_i =
-      class_file_add_constant_cstring(&class_file, "Ljava/io/PrintStream");
+      class_file_add_constant_cstring(&class_file, "Ljava/io/PrintStream;");
 
   const class_file_constant_t constant_out_name_and_type = {
       .kind = CIK_NAME_AND_TYPE,
@@ -701,18 +716,42 @@ int main() {
   class_file_add_attribute(class_file.attributes, &class_file.attribute_count,
                            &source_file_attribute);
 
+  const u16 constant_string_hello_i =
+      class_file_add_constant_cstring(&class_file, "Hello, world!");
+  const u16 constant_jstring_hello_i =
+      class_file_add_constant_jstring(&class_file, constant_string_hello_i);
+
+  const u16 constant_string_println_i =
+      class_file_add_constant_cstring(&class_file, "println");
+  const u16 constant_println_method_descriptor_string_i =
+      class_file_add_constant_cstring(&class_file, "(Ljava/lang/String;)V");
+  const class_file_constant_t constant_println_name_and_type = {
+      .kind = CIK_NAME_AND_TYPE,
+      .v = {
+          .name_and_type = {.name = constant_string_println_i,
+                            .type_descriptor =
+                                constant_println_method_descriptor_string_i}}};
+  const u16 constant_println_name_and_type_i =
+      class_file_add_constant(&class_file, &constant_println_name_and_type);
+  const class_file_constant_t constant_println_method_ref = {
+      .kind = CIK_METHOD_REF,
+      .v = {.method_ref = {.class = constant_string_java_io_printstream_class_i,
+                           .name_and_type = constant_println_name_and_type_i}}};
+  const u16 constant_println_method_ref_i =
+      class_file_add_constant(&class_file, &constant_println_method_ref);
+
   // This's class Constructor
   {
     class_file_attribute_code_t constructor_code = {.max_stack = 1,
                                                     .max_locals = 1};
     class_file_attribute_code_init(&constructor_code, &arena);
-    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+    class_file_add_code_u8(constructor_code.code, &constructor_code.code_count,
                            CFO_ALOAD_0);
-    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+    class_file_add_code_u8(constructor_code.code, &constructor_code.code_count,
                            CFO_INVOKE_SPECIAL);
     class_file_add_code_u16(constructor_code.code, &constructor_code.code_count,
                             constant_object_method_ref_constructor_i);
-    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+    class_file_add_code_u8(constructor_code.code, &constructor_code.code_count,
                            CFO_RETURN);
 
     class_file_method_t constructor = {
@@ -733,9 +772,24 @@ int main() {
   }
   // This's class main
   {
-    class_file_attribute_code_t main_code = {.max_stack = 0, .max_locals = 1};
+    class_file_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
     class_file_attribute_code_init(&main_code, &arena);
-    class_file_add_code_op(main_code.code, &main_code.code_count, CFO_RETURN);
+
+    class_file_add_code_u8(main_code.code, &main_code.code_count,
+                           CFO_GET_STATIC);
+    class_file_add_code_u16(main_code.code, &main_code.code_count,
+                            constant_out_fieldref_i);
+
+    class_file_add_code_u8(main_code.code, &main_code.code_count, CFO_LDC);
+    class_file_add_code_u8(main_code.code, &main_code.code_count,
+                           constant_jstring_hello_i);
+
+    class_file_add_code_u8(main_code.code, &main_code.code_count,
+                           CFO_INVOKE_VIRTUAL);
+    class_file_add_code_u16(main_code.code, &main_code.code_count,
+                            constant_println_method_ref_i);
+
+    class_file_add_code_u8(main_code.code, &main_code.code_count, CFO_RETURN);
 
     class_file_method_t main = {
         .name = constant_string_main_i,
