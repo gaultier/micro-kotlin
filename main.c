@@ -11,24 +11,36 @@
 #define u8 uint8_t
 #define i8 int8_t
 
+typedef enum {
+  CAF_ACC_SUPER = 0x0020,
+} class_file_access_flags_t;
+
+typedef struct {
+  u16 len;
+  u8 *s;
+} string_t;
+
 typedef struct {
   enum cp_info_kind_t {
-    CIK_UTF8,
-    CIK_CLASS_INFO,
-    CIK_METHOD_REF,
-    CIK_FIELD_REF,
-    CIK_NAME_AND_TYPE,
-    CIK_CString,
-    CIK_INT,
-    CIK_FLOAT,
-    CIK_LONG,
-    CIK_LONG_HIGH,
-    CIK_LONG_LOW,
-    CIK_DOUBLE,
-    CIK_DOUBLE_HIGH,
-    CIK_DOUBLE_LOW,
+    CIK_UTF8 = 1,
+    CIK_INT = 3,
+    CIK_FLOAT = 4,
+    CIK_LONG = 5,
+    CIK_DOUBLE = 6,
+    CIK_CLASS_INFO = 7,
+    CIK_STRING = 8,
+    CIK_FIELD_REF = 9,
+    CIK_METHOD_REF = 10,
+    CIK_INSTANCE_METHOD_REF = 11,
+    CIK_NAME_AND_TYPE = 12,
+    CIK_INVOKE_DYNAMIC = 18,
+    // CIK_LONG_HIGH,
+    // CIK_LONG_LOW,
+    // CIK_DOUBLE_HIGH,
+    // CIK_DOUBLE_LOW,
   } kind;
   union {
+    string_t s;
   } v;
 } cp_info_t;
 
@@ -73,15 +85,42 @@ void file_write_be_32(FILE *file, u32 x) {
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
-void class_file_write(class_file_t *const class_file, FILE *file) {
-  fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
-
-  file_write_be_16(file, class_file->minor_version);
-  file_write_be_16(file, class_file->major_version);
-}
-
 void class_file_write_constant(class_file_t *const class_file, FILE *file,
-                               const cp_info_t *constant) {}
+                               const cp_info_t *constant) {
+  switch (constant->kind) {
+  case CIK_UTF8: {
+    fwrite(&constant->kind, sizeof(constant->kind), 1, file);
+    const string_t *const s = (string_t *)&constant->v;
+    file_write_be_16(file, s->len);
+    fwrite(s->s, sizeof(u8), s->len, file);
+    break;
+  }
+  case CIK_INT:
+    break;
+  case CIK_FLOAT:
+    break;
+  case CIK_LONG:
+    break;
+  case CIK_DOUBLE:
+    break;
+  case CIK_CLASS_INFO:
+    break;
+  case CIK_STRING:
+    break;
+  case CIK_FIELD_REF:
+    break;
+  case CIK_METHOD_REF:
+    break;
+  case CIK_INSTANCE_METHOD_REF:
+    break;
+  case CIK_NAME_AND_TYPE:
+    break;
+  case CIK_INVOKE_DYNAMIC:
+    break;
+  default:
+    __builtin_unreachable();
+  }
+}
 
 void class_file_write_constant_pool(class_file_t *const class_file,
                                     FILE *file) {
@@ -92,6 +131,20 @@ void class_file_write_constant_pool(class_file_t *const class_file,
     const cp_info_t *const constant = &class_file->constant_pool[i];
     class_file_write_constant(class_file, file, constant);
   }
+}
+
+void class_file_write_access_flags(class_file_t *const class_file, FILE *file,
+                                   u16 flag) {
+  file_write_be_16(file, flag);
+}
+
+void class_file_write(class_file_t *const class_file, FILE *file) {
+  fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
+
+  file_write_be_16(file, class_file->minor_version);
+  file_write_be_16(file, class_file->major_version);
+  class_file_write_constant_pool(class_file, file);
+  class_file_write_access_flags(class_file, file, CAF_ACC_SUPER);
 }
 
 int main() {
