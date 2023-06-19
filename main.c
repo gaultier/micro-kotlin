@@ -66,6 +66,7 @@ static void arena_reset_at(arena_t *arena, u64 offset) {
 
 typedef enum {
   CAF_ACC_PUBLIC = 0x0001,
+  CAF_ACC_STATIC = 0x0008,
   CAF_ACC_SUPER = 0x0020,
 } class_file_access_flags_t;
 
@@ -490,7 +491,7 @@ u32 class_file_add_code_op(u8 *code, u32 *code_count, u8 op) {
   assert(code != NULL);
   assert(code_count != NULL);
   assert(*code_count < UINT16_MAX); // TODO: UINT32_MAX vs ENOMEM
-                                    
+
   code[*code_count] = op;
   *code_count += 1;
   return *code_count - 1;
@@ -569,6 +570,7 @@ int main() {
       .kind = CIK_CLASS_INFO,
       .v = {.class_name =
                 class_file_add_constant(&class_file, &constant_class_name)}};
+  class_file_add_constant(&class_file, &constant_class);
 
   const class_file_constant_t constant_string_code = {
       .kind = CIK_UTF8, .v = {.s = {.len = 4, .s = (u8 *)"Code"}}};
@@ -586,7 +588,8 @@ int main() {
   const class_file_constant_t constant_string_main_type_descriptor = {
       .kind = CIK_UTF8,
       .v = {.s = {.len = 22, .s = (u8 *)"([Ljava/lang/String;)V"}}};
-  class_file_add_constant(&class_file, &constant_string_main_type_descriptor);
+  const u16 constant_string_main_type_descriptor_i = class_file_add_constant(
+      &class_file, &constant_string_main_type_descriptor);
 
   const class_file_constant_t constant_string_source_file = {
       .kind = CIK_UTF8, .v = {.s = {.len = 10, .s = (u8 *)"SourceFile"}}};
@@ -596,30 +599,51 @@ int main() {
       .kind = CIK_UTF8, .v = {.s = {.len = 10, .s = (u8 *)"Empty.java"}}};
   class_file_add_constant(&class_file, &constant_string_file);
 
-  class_file_attribute_code_t constructor_code = {.max_stack = 1,
-                                                  .max_locals = 0};
-  class_file_attribute_code_init(&constructor_code, &arena);
-  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
-                         CFO_ALOAD_0);
-  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
-                         CFO_INVOKE_SPECIAL);
-  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
-                         CFO_RETURN);
+  {
+    class_file_attribute_code_t constructor_code = {.max_stack = 1,
+                                                    .max_locals = 0};
+    class_file_attribute_code_init(&constructor_code, &arena);
+    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                           CFO_ALOAD_0);
+    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                           CFO_INVOKE_SPECIAL);
+    class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                           CFO_RETURN);
 
-  class_file_method_t constructor = {
-      .access_flags = CAF_ACC_PUBLIC,
-      .descriptor = constant_class_object_name_and_type_type_descriptor_i,
-  };
-  class_file_method_init(&constructor, &arena);
-  class_file_attribute_t constructor_attribute_code = {
-      .kind = CAK_CODE,
-      .name = constant_string_code_i,
-      .v = {.code = constructor_code}};
-  class_file_add_attribute(constructor.attributes,
-                           &constructor.attributes_count,
-                           &constructor_attribute_code);
+    class_file_method_t constructor = {
+        .access_flags = CAF_ACC_PUBLIC,
+        .descriptor = constant_class_object_name_and_type_type_descriptor_i,
+    };
+    class_file_method_init(&constructor, &arena);
+    class_file_attribute_t constructor_attribute_code = {
+        .kind = CAK_CODE,
+        .name = constant_string_code_i,
+        .v = {.code = constructor_code}};
+    class_file_add_attribute(constructor.attributes,
+                             &constructor.attributes_count,
+                             &constructor_attribute_code);
 
-  class_file_add_method(&class_file, &constructor);
+    class_file_add_method(&class_file, &constructor);
+  }
+  {
+    class_file_attribute_code_t main_code = {.max_stack = 0, .max_locals = 1};
+    class_file_attribute_code_init(&main_code, &arena);
+    class_file_add_code_op(main_code.code, &main_code.code_count, CFO_RETURN);
+
+    class_file_method_t main = {
+        .access_flags = CAF_ACC_PUBLIC | CAF_ACC_STATIC,
+        .descriptor = constant_string_main_type_descriptor_i,
+    };
+    class_file_method_init(&main, &arena);
+    class_file_attribute_t main_attribute_code = {.kind = CAK_CODE,
+                                                  .name =
+                                                      constant_string_code_i,
+                                                  .v = {.code = main_code}};
+    class_file_add_attribute(main.attributes, &main.attributes_count,
+                             &main_attribute_code);
+
+    class_file_add_method(&class_file, &main);
+  }
 
   FILE *file = fopen("PgMain.class", "w");
   assert(file != NULL);
