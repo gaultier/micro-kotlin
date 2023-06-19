@@ -77,6 +77,8 @@ struct class_file_attribute_t {
     } source_file;
   } v;
 };
+typedef struct class_file_attribute_source_file_t
+    class_file_attribute_source_file_t;
 
 typedef struct {
   u16 access_flags;
@@ -194,11 +196,13 @@ void class_file_write_attribute(const class_file_t *class_file, FILE *file,
 
   switch (attribute->kind) {
   case CAK_SOURCE_FILE: {
-                          const u32 size = 0; // FIXME
-                                              file_write_be_32(file, size);
+    const u32 size = 0; // FIXME
+    file_write_be_32(file, size);
 
-                                              const struct class_file_attribute_source_file_t *const source = &attribute->v;
-                                              file_write_be_16(file, source);
+    const class_file_attribute_source_file_t *const source_file =
+        (const class_file_attribute_source_file_t *)&attribute->v;
+    file_write_be_16(file, source_file->source_file);
+
     break;
   }
   case CAK_CODE: {
