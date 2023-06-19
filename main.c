@@ -13,6 +13,12 @@
 #define u8 uint8_t
 #define i8 int8_t
 
+typedef enum {
+  CFO_ALOAD_0 = 0x2a,
+  CFO_INVOKE_SPECIAL = 0xb7,
+  CFO_RETURN = 0xb1,
+} class_file_op_kind_t;
+
 typedef struct {
   u8 *base;
   u64 current_offset;
@@ -59,6 +65,7 @@ static void arena_reset_at(arena_t *arena, u64 offset) {
 }
 
 typedef enum {
+  CAF_ACC_PUBLIC = 0x0001,
   CAF_ACC_SUPER = 0x0020,
 } class_file_access_flags_t;
 
@@ -168,24 +175,32 @@ typedef struct {
   u16 interfaces_count;
   u16 fields_count;
   class_file_field_t *fields;
-  u16 methods_count;
+  u16 method_count;
   class_file_method_t *methods;
   u16 attribute_count;
   class_file_attribute_t *attributes;
 } class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
+  assert(file != NULL);
+
   const u16 x_be = htons(x);
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
 void file_write_be_32(FILE *file, u32 x) {
+  assert(file != NULL);
+
   const u32 x_be = htonl(x);
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
 void class_file_write_constant(const class_file_t *class_file, FILE *file,
                                const class_file_constant_t *constant) {
+  assert(class_file != NULL);
+  assert(file != NULL);
+  assert(constant != NULL);
+
   switch (constant->kind) {
   case CIK_UTF8: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
@@ -249,6 +264,9 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
 
 void class_file_write_constant_pool(const class_file_t *class_file,
                                     FILE *file) {
+  assert(class_file != NULL);
+  assert(file != NULL);
+
   const u16 len = class_file->constant_pool_count + 1;
   file_write_be_16(file, len);
 
@@ -259,18 +277,26 @@ void class_file_write_constant_pool(const class_file_t *class_file,
   }
 }
 void class_file_write_interfaces(const class_file_t *class_file, FILE *file) {
+  assert(class_file != NULL);
+  assert(file != NULL);
+
   file_write_be_16(file, class_file->interfaces_count);
 
   assert(class_file->interfaces_count == 0 && "unimplemented");
 }
 
 void class_file_write_fields(const class_file_t *class_file, FILE *file) {
+  assert(class_file != NULL);
+  assert(file != NULL);
+
   file_write_be_16(file, class_file->fields_count);
 
   assert(class_file->fields_count == 0 && "unimplemented");
 }
 
 u32 class_file_compute_attribute_size(const class_file_attribute_t *attribute) {
+  assert(attribute != NULL);
+
   switch (attribute->kind) {
   case CAK_SOURCE_FILE:
     return 2 + 4 + 2;
@@ -305,6 +331,10 @@ void class_file_write_attributes(const class_file_t *class_file, FILE *file,
                                  const class_file_attribute_t *attributes);
 void class_file_write_attribute(const class_file_t *class_file, FILE *file,
                                 const class_file_attribute_t *attribute) {
+  assert(class_file != NULL);
+  assert(file != NULL);
+  assert(attribute != NULL);
+
   file_write_be_16(file, attribute->name);
 
   switch (attribute->kind) {
@@ -375,9 +405,12 @@ void class_file_write_method(const class_file_t *class_file, FILE *file,
 }
 
 void class_file_write_methods(const class_file_t *class_file, FILE *file) {
-  file_write_be_16(file, class_file->methods_count);
+  assert(class_file != NULL);
+  assert(file != NULL);
 
-  for (uint64_t i = 0; i < class_file->methods_count; i++) {
+  file_write_be_16(file, class_file->method_count);
+
+  for (uint64_t i = 0; i < class_file->method_count; i++) {
     const class_file_method_t *const method = &class_file->methods[i];
     class_file_write_method(class_file, file, method);
   }
@@ -410,31 +443,87 @@ u16 class_file_add_constant(class_file_t *class_file,
 }
 
 void class_file_init(class_file_t *class_file, arena_t *arena) {
+  assert(class_file != NULL);
+  assert(arena != NULL);
+
   class_file->constant_pool =
       arena_alloc(arena, UINT16_MAX * sizeof(class_file_constant_t));
+  class_file->attributes =
+      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
+
+  class_file->methods =
+      arena_alloc(arena, UINT16_MAX * sizeof(class_file_method_t));
+
+  class_file->attributes =
+      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
 
   // Constant pool is 1-indexed so we insert a dummy at position 0.
   const class_file_constant_t dummy = {0};
   class_file_add_constant(class_file, &dummy);
 }
 
-u16 class_file_add_attributer(class_file_t *class_file,
-                              class_file_attribute_t *attribute) {
-  assert(class_file->attribute_count < UINT16_MAX);
-  class_file->attributes[class_file->attribute_count] = *attribute;
+u16 class_file_add_attribute(class_file_attribute_t *attributes,
+                             u16 *attribute_count,
+                             const class_file_attribute_t *attribute) {
+  assert(*attribute_count < UINT16_MAX);
+  assert(attributes != NULL);
+  assert(attribute != NULL);
 
-  return class_file->attribute_count++;
+  attributes[*attribute_count] = *attribute;
+
+  *attribute_count += 1;
+  return *attribute_count - 1;
+}
+
+u16 class_file_add_method(class_file_t *class_file,
+                          const class_file_method_t *method) {
+  assert(class_file != NULL);
+  assert(method != NULL);
+
+  assert(class_file->method_count < UINT16_MAX);
+  class_file->methods[class_file->method_count] = *method;
+
+  return class_file->method_count++;
+}
+
+u32 class_file_add_code_op(u8 *code, u32 *code_count, u8 op) {
+  assert(code != NULL);
+  assert(code_count != NULL);
+  assert(*code_count < UINT16_MAX); // TODO: UINT32_MAX vs ENOMEM
+                                    
+  code[*code_count] = op;
+  *code_count += 1;
+  return *code_count - 1;
+}
+
+void class_file_attribute_code_init(class_file_attribute_code_t *code,
+                                    arena_t *arena) {
+  assert(code != NULL);
+  assert(arena != NULL);
+
+  code->code = arena_alloc(arena, UINT16_MAX * sizeof(u8));
+  code->attributes =
+      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
+}
+
+void class_file_method_init(class_file_method_t *method, arena_t *arena) {
+  assert(method != NULL);
+  assert(arena != NULL);
+
+  method->attributes = arena_alloc(arena, UINT16_MAX * sizeof(u8));
+  method->attributes =
+      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
 }
 
 int main() {
   arena_t arena = {0};
-  arena_init(&arena, 1 << 24);
+  arena_init(&arena, 1 << 26);
 
   class_file_t class_file = {
       .magic = CLASS_FILE_MAGIC_NUMBER,
       .minor_version = CLASS_FILE_MINOR_VERSION,
       .major_version = CLASS_FILE_MAJOR_VERSION_6,
-      .access_flags = CAF_ACC_SUPER,
+      .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
   };
 
   class_file_init(&class_file, &arena);
@@ -445,6 +534,9 @@ int main() {
   const class_file_constant_t
       constant_class_object_name_and_type_type_descriptor = {
           .kind = CIK_UTF8, .v = {.s = {.len = 3, .s = (u8 *)"()V"}}};
+  const u16 constant_class_object_name_and_type_type_descriptor_i =
+      class_file_add_constant(
+          &class_file, &constant_class_object_name_and_type_type_descriptor);
 
   const class_file_constant_t constant_class_object_name_and_type_name = {
       .kind = CIK_UTF8, .v = {.s = {.len = 6, .s = (u8 *)"<init>"}}};
@@ -459,9 +551,8 @@ int main() {
       .v = {.name_and_type = {
                 .name = class_file_add_constant(
                     &class_file, &constant_class_object_name_and_type_name),
-                .type_descriptor = class_file_add_constant(
-                    &class_file,
-                    &constant_class_object_name_and_type_type_descriptor)}}};
+                .type_descriptor =
+                    constant_class_object_name_and_type_type_descriptor_i}}};
 
   const class_file_constant_t constant_object = {
       .kind = CIK_METHOD_REF,
@@ -481,7 +572,8 @@ int main() {
 
   const class_file_constant_t constant_string_code = {
       .kind = CIK_UTF8, .v = {.s = {.len = 4, .s = (u8 *)"Code"}}};
-  class_file_add_constant(&class_file, &constant_string_code);
+  const u16 constant_string_code_i =
+      class_file_add_constant(&class_file, &constant_string_code);
 
   const class_file_constant_t constant_string_line_number_table = {
       .kind = CIK_UTF8, .v = {.s = {.len = 15, .s = (u8 *)"LineNumberTable"}}};
@@ -503,6 +595,31 @@ int main() {
   const class_file_constant_t constant_string_file = {
       .kind = CIK_UTF8, .v = {.s = {.len = 10, .s = (u8 *)"Empty.java"}}};
   class_file_add_constant(&class_file, &constant_string_file);
+
+  class_file_attribute_code_t constructor_code = {.max_stack = 1,
+                                                  .max_locals = 0};
+  class_file_attribute_code_init(&constructor_code, &arena);
+  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                         CFO_ALOAD_0);
+  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                         CFO_INVOKE_SPECIAL);
+  class_file_add_code_op(constructor_code.code, &constructor_code.code_count,
+                         CFO_RETURN);
+
+  class_file_method_t constructor = {
+      .access_flags = CAF_ACC_PUBLIC,
+      .descriptor = constant_class_object_name_and_type_type_descriptor_i,
+  };
+  class_file_method_init(&constructor, &arena);
+  class_file_attribute_t constructor_attribute_code = {
+      .kind = CAK_CODE,
+      .name = constant_string_code_i,
+      .v = {.code = constructor_code}};
+  class_file_add_attribute(constructor.attributes,
+                           &constructor.attributes_count,
+                           &constructor_attribute_code);
+
+  class_file_add_method(&class_file, &constructor);
 
   FILE *file = fopen("PgMain.class", "w");
   assert(file != NULL);
