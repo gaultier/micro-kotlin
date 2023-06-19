@@ -12,6 +12,24 @@
 #define i8 int8_t
 
 typedef struct {
+  enum cp_info_kind_t {
+    CIK_UTF8,
+    CIK_CLASS_INFO,
+    CIK_METHOD_REF,
+    CIK_FIELD_REF,
+    CIK_NAME_AND_TYPE,
+    CIK_CString,
+    CIK_INT,
+    CIK_FLOAT,
+    CIK_LONG,
+    CIK_LONG_HIGH,
+    CIK_LONG_LOW,
+    CIK_DOUBLE,
+    CIK_DOUBLE_HIGH,
+    CIK_DOUBLE_LOW,
+  } kind;
+  union {
+  } v;
 } cp_info_t;
 
 typedef struct {
@@ -55,11 +73,25 @@ void file_write_be_32(FILE *file, u32 x) {
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
-void class_file_write(class_file_t *class_file, FILE *file) {
+void class_file_write(class_file_t *const class_file, FILE *file) {
   fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
 
   file_write_be_16(file, class_file->minor_version);
   file_write_be_16(file, class_file->major_version);
+}
+
+void class_file_write_constant(class_file_t *const class_file, FILE *file,
+                               const cp_info_t *constant) {}
+
+void class_file_write_constant_pool(class_file_t *const class_file,
+                                    FILE *file) {
+  const u16 len = class_file->constant_pool_count + 1;
+  file_write_be_16(file, len);
+
+  for (u64 i = 0; i < class_file->constant_pool_count; i++) {
+    const cp_info_t *const constant = &class_file->constant_pool[i];
+    class_file_write_constant(class_file, file, constant);
+  }
 }
 
 int main() {
