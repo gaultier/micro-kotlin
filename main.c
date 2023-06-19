@@ -463,6 +463,7 @@ void class_file_write(const class_file_t *class_file, FILE *file) {
   class_file_write_methods(class_file, file);
   class_file_write_attributes(file, class_file->attribute_count,
                               class_file->attributes);
+  fflush(file);
 }
 
 u16 class_file_add_constant(class_file_t *class_file,
