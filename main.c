@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -85,7 +86,7 @@ void file_write_be_32(FILE *file, u32 x) {
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
-void class_file_write_constant(class_file_t *const class_file, FILE *file,
+void class_file_write_constant(const class_file_t *class_file, FILE *file,
                                const cp_info_t *constant) {
   switch (constant->kind) {
   case CIK_UTF8: {
@@ -96,33 +97,44 @@ void class_file_write_constant(class_file_t *const class_file, FILE *file,
     break;
   }
   case CIK_INT:
+    assert(0 && "unimplemented");
     break;
   case CIK_FLOAT:
+    assert(0 && "unimplemented");
     break;
   case CIK_LONG:
+    assert(0 && "unimplemented");
     break;
   case CIK_DOUBLE:
+    assert(0 && "unimplemented");
     break;
   case CIK_CLASS_INFO:
+    assert(0 && "unimplemented");
     break;
   case CIK_STRING:
+    assert(0 && "unimplemented");
     break;
   case CIK_FIELD_REF:
+    assert(0 && "unimplemented");
     break;
   case CIK_METHOD_REF:
+    assert(0 && "unimplemented");
     break;
   case CIK_INSTANCE_METHOD_REF:
+    assert(0 && "unimplemented");
     break;
   case CIK_NAME_AND_TYPE:
+    assert(0 && "unimplemented");
     break;
   case CIK_INVOKE_DYNAMIC:
+    assert(0 && "unimplemented");
     break;
   default:
     __builtin_unreachable();
   }
 }
 
-void class_file_write_constant_pool(class_file_t *const class_file,
+void class_file_write_constant_pool(const class_file_t *class_file,
                                     FILE *file) {
   const u16 len = class_file->constant_pool_count + 1;
   file_write_be_16(file, len);
@@ -132,19 +144,31 @@ void class_file_write_constant_pool(class_file_t *const class_file,
     class_file_write_constant(class_file, file, constant);
   }
 }
-
-void class_file_write_access_flags(class_file_t *const class_file, FILE *file,
-                                   u16 flag) {
-  file_write_be_16(file, flag);
+void class_file_write_interfaces(const class_file_t *class_file, FILE *file) {
+  assert(0 && "unimplemented");
 }
 
-void class_file_write(class_file_t *const class_file, FILE *file) {
+void class_file_write_fields(const class_file_t *class_file, FILE *file) {
+  assert(0 && "unimplemented");
+}
+
+void class_file_write_methods(const class_file_t *class_file, FILE *file) {
+  assert(0 && "unimplemented");
+}
+
+void class_file_write(const class_file_t *class_file, FILE *file) {
   fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
 
   file_write_be_16(file, class_file->minor_version);
   file_write_be_16(file, class_file->major_version);
   class_file_write_constant_pool(class_file, file);
-  class_file_write_access_flags(class_file, file, CAF_ACC_SUPER);
+  file_write_be_16(file, class_file->access_flags);
+  file_write_be_16(file, class_file->this_class);
+  file_write_be_16(file, class_file->super_class);
+
+  class_file_write_interfaces(class_file, file);
+  class_file_write_fields(class_file, file);
+  class_file_write_methods(class_file, file);
 }
 
 int main() {
@@ -152,6 +176,7 @@ int main() {
       .magic = CLASS_FILE_MAGIC_NUMBER,
       .minor_version = CLASS_FILE_MINOR_VERSION,
       .major_version = CLASS_FILE_MAJOR_VERSION_6,
+      .access_flags = CAF_ACC_SUPER,
   };
 
   class_file_write(&class_file, stdout);
