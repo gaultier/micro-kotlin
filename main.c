@@ -105,6 +105,10 @@ typedef struct {
       u16 name;
       u16 type_descriptor;
     } name_and_type; // CIK_NAME_AND_TYPE
+    struct class_file_constant_field_ref_t {
+      u16 name;
+      u16 type_descriptor;
+    } field_ref; // CIK_FIELD_REF
   } v;
 } class_file_constant_t;
 
@@ -113,6 +117,8 @@ typedef struct class_file_constant_method_ref_t
 
 typedef struct class_file_constant_name_and_type_t
     class_file_constant_name_and_type_t;
+
+typedef struct class_file_constant_field_ref_t class_file_constant_field_ref_t;
 
 typedef struct {
 } class_file_field_t;
@@ -246,14 +252,21 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
   case CIK_STRING:
     assert(0 && "unimplemented");
     break;
-  case CIK_FIELD_REF:
-    assert(0 && "unimplemented");
+  case CIK_FIELD_REF: {
+    fwrite(&constant->kind, sizeof(u8), 1, file);
+
+    const class_file_constant_field_ref_t *const field_ref =
+        &constant->v.field_ref;
+
+    file_write_be_16(file, field_ref->name);
+    file_write_be_16(file, field_ref->type_descriptor);
     break;
+  }
   case CIK_METHOD_REF: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const class_file_constant_method_ref_t *const method_ref =
-        (const class_file_constant_method_ref_t *)&constant->v.method_ref;
+        &constant->v.method_ref;
 
     file_write_be_16(file, method_ref->class);
     file_write_be_16(file, method_ref->name_and_type);
@@ -266,7 +279,7 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
     fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const class_file_constant_name_and_type_t *const name_and_type =
-        (const class_file_constant_name_and_type_t *)&constant->v.name_and_type;
+        &constant->v.name_and_type;
 
     file_write_be_16(file, name_and_type->name);
     file_write_be_16(file, name_and_type->type_descriptor);
@@ -640,6 +653,47 @@ int main() {
   const u16 constant_string_file_i =
       class_file_add_constant_cstring(&class_file, "PgMain.java");
 
+  const u16 constant_string_java_lang_system_class_i =
+      class_file_add_constant_cstring(&class_file, "java/lang/System");
+  const class_file_constant_t constant_java_lang_system_class_info = {
+      .kind = CIK_CLASS_INFO,
+      .v = {.class_name = constant_string_java_lang_system_class_i}};
+  const u16 constant_java_lang_system_class_info_i = class_file_add_constant(
+      &class_file, &constant_java_lang_system_class_info);
+
+  const u16 constant_string_out_i =
+      class_file_add_constant_cstring(&class_file, "out");
+
+  const u16 constant_string_println_i =
+      class_file_add_constant_cstring(&class_file, "println");
+
+  const u16 constant_string_java_io_printstream_i =
+      class_file_add_constant_cstring(&class_file, "java/io/PrintStream");
+
+  const class_file_constant_t constant_string_java_io_printstream_class = {
+      .kind = CIK_CLASS_INFO,
+      .v = {.class_name = constant_string_java_io_printstream_i}};
+  const u16 constant_string_java_io_printstream_class_i = class_file_add_constant(&class_file, &constant_string_java_io_printstream_class);
+
+  const u16 constant_string_java_io_printstream_descriptor_i =
+      class_file_add_constant_cstring(&class_file, "Ljava/io/PrintStream");
+
+  const class_file_constant_t constant_out_name_and_type = {
+      .kind = CIK_NAME_AND_TYPE,
+      .v = {.name_and_type = {
+                .name = constant_string_out_i,
+                .type_descriptor =
+                    constant_string_java_io_printstream_descriptor_i}}};
+  const u16 constant_out_name_and_type_i =
+      class_file_add_constant(&class_file, &constant_out_name_and_type);
+
+  const class_file_constant_t constant_out_fieldref = {
+      .kind = CIK_FIELD_REF,
+      .v = {.field_ref = {.name = constant_java_lang_system_class_info_i,
+                          .type_descriptor = constant_out_name_and_type_i}}};
+  const u16 constant_out_fieldref_i =
+      class_file_add_constant(&class_file, &constant_out_fieldref);
+
   const class_file_attribute_t source_file_attribute = {
       .kind = CAK_SOURCE_FILE,
       .name = constant_string_source_file_i,
@@ -647,6 +701,7 @@ int main() {
   class_file_add_attribute(class_file.attributes, &class_file.attribute_count,
                            &source_file_attribute);
 
+  // This's class Constructor
   {
     class_file_attribute_code_t constructor_code = {.max_stack = 1,
                                                     .max_locals = 1};
@@ -676,6 +731,7 @@ int main() {
 
     class_file_add_method(&class_file, &constructor);
   }
+  // This's class main
   {
     class_file_attribute_code_t main_code = {.max_stack = 0, .max_locals = 1};
     class_file_attribute_code_init(&main_code, &arena);
