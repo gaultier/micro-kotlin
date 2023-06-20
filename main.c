@@ -56,8 +56,8 @@ int main() {
   const u16 constant_string_code_i =
       cf_add_constant_cstring(&class_file.constant_pool, "Code");
 
-//  const u16 constant_string_line_number_table_i =
-//      cf_add_constant_cstring(&class_file.constant_pool, "LineNumberTable");
+  //  const u16 constant_string_line_number_table_i =
+  //      cf_add_constant_cstring(&class_file.constant_pool, "LineNumberTable");
 
   const u16 constant_string_main_i =
       cf_add_constant_cstring(&class_file.constant_pool, "main");

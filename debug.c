@@ -7,8 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static char constant_pool_strings[100][256] = {0};
-static u64 constant_pool_len = 0;
+static cf_constant_array_t constant_pool = {0};
 
 #define pg_assert(condition)                                                   \
   do {                                                                         \
@@ -57,13 +56,15 @@ void read_attribute(u8 *buf, u8 **current, u64 read_bytes) {
   printf("attribute name_i=%hu size=%u\n", name_i, size);
   pg_assert(*current + size <= buf + read_bytes);
 
-  assert(name_i < constant_pool_len);
-  char *attribute_name = constant_pool_strings[name_i - 1]; // 1-indexed.
+  assert(name_i < constant_pool.len);
+  cf_constant_t constant = constant_pool.values[name_i - 1];
+  assert(constant.kind == CIK_UTF8);
+  string_t attribute_name = constant.v.s;
 
-  if (strcmp(attribute_name, "SourceFile") == 0) {
+  if (string_eq_c(attribute_name, "SourceFile")) {
     u16 source_file_i = read_be_16(buf, current, read_bytes);
     printf("attribute_source_file source_file_i=%hu\n", source_file_i);
-  } else if (strcmp(attribute_name, "Code") == 0) {
+  } else if (string_eq_c(attribute_name, "Code")) {
 
     u16 max_stack = read_be_16(buf, current, read_bytes);
     u16 max_locals = read_be_16(buf, current, read_bytes);
@@ -79,6 +80,10 @@ void read_attribute(u8 *buf, u8 **current, u64 read_bytes) {
            "exception_table_len=%hu attribute_count=%hu\n",
            max_stack, max_locals, code_len, exception_table_len,
            attribute_count);
+
+    pg_assert(attribute_count == 0); // TODO
+  } else {
+    pg_assert(0 && "unreachable");
   }
 }
 
@@ -93,6 +98,10 @@ void read_attributes(u8 *buf, u8 **current, u64 read_bytes) {
 
 int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
+
+  arena_t arena = {0};
+  arena_init(&arena, 1 << 26);
+  constant_pool = cf_constant_array_make(1024, &arena);
 
   int fd = open(argv[1], O_RDONLY);
   pg_assert(fd > 0);
@@ -134,14 +143,16 @@ int main(int argc, char *argv[]) {
       u16 len = read_be_16(buf, &current, read_bytes);
       pg_assert(len > 0);
 
-      u8 s[UINT16_MAX] = {0};
-      read_n(buf, &current, read_bytes, s, len);
+      u8 *s = current;
+      u8 dummy[UINT16_MAX] = {0};
+      read_n(buf, &current, read_bytes, dummy, len);
 
       printf("[%lu/%hu] CIK_UTF8 len=%u s=%.*s\n", i, constant_pool_size, len,
              len, s);
 
-      // HACK
-      memcpy(constant_pool_strings[constant_pool_len], s, 256);
+      cf_constant_t constant = {.kind = CIK_UTF8,
+                                .v = {.s = {.len = len, .s = s}}};
+      cf_constant_array_push(&constant_pool, &constant);
 
       break;
     }
@@ -164,6 +175,9 @@ int main(int argc, char *argv[]) {
 
       printf("[%lu/%hu] CIK_CLASS_INFO class_name_i=%u\n", i,
              constant_pool_size, class_name_i);
+
+      cf_constant_t constant = {0}; // TODO
+      cf_constant_array_push(&constant_pool, &constant);
       break;
     }
     case CIK_STRING: {
@@ -171,6 +185,9 @@ int main(int argc, char *argv[]) {
       pg_assert(utf8_i > 0);
       pg_assert(utf8_i <= constant_pool_size);
       printf("[%lu/%hu] CIK_STRING utf8_i=%u\n", i, constant_pool_size, utf8_i);
+
+      cf_constant_t constant = {0}; // TODO
+      cf_constant_array_push(&constant_pool, &constant);
       break;
     }
     case CIK_FIELD_REF: {
@@ -184,6 +201,9 @@ int main(int argc, char *argv[]) {
 
       printf("[%lu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u\n", i,
              constant_pool_size, name_i, descriptor_i);
+
+      cf_constant_t constant = {0}; // TODO
+      cf_constant_array_push(&constant_pool, &constant);
       break;
     }
     case CIK_METHOD_REF: {
@@ -197,6 +217,9 @@ int main(int argc, char *argv[]) {
 
       printf("[%lu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u\n", i,
              constant_pool_size, class_i, name_and_type_i);
+
+      cf_constant_t constant = {0}; // TODO
+      cf_constant_array_push(&constant_pool, &constant);
       break;
     }
     case CIK_INSTANCE_METHOD_REF:
@@ -213,6 +236,9 @@ int main(int argc, char *argv[]) {
 
       printf("[%lu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u\n", i,
              constant_pool_size, class_i, name_and_type_i);
+
+      cf_constant_t constant = {0}; // TODO
+      cf_constant_array_push(&constant_pool, &constant);
       break;
     }
     case CIK_INVOKE_DYNAMIC:
@@ -221,7 +247,6 @@ int main(int argc, char *argv[]) {
     default:
       pg_assert(0 && "unreachable");
     }
-    constant_pool_len++;
   }
 
   u16 access_flags = read_be_16(buf, &current, read_bytes);
@@ -252,7 +277,11 @@ int main(int argc, char *argv[]) {
   for (u64 i = 0; i < methods_count; i++) {
     u16 access_flags = read_be_16(buf, &current, read_bytes);
     u16 method_name_i = read_be_16(buf, &current, read_bytes);
+    pg_assert(method_name_i > 0);
+    pg_assert(method_name_i <= constant_pool.len);
     u16 descriptor_i = read_be_16(buf, &current, read_bytes);
+    pg_assert(descriptor_i > 0);
+    pg_assert(descriptor_i <= constant_pool.len);
     printf("[%lu/%u] method access_flags=%x method_name_i=%hu descriptor_i=%hu"
            "\n",
            i, methods_count, access_flags, method_name_i, descriptor_i);
@@ -260,5 +289,8 @@ int main(int argc, char *argv[]) {
   }
 
   read_attributes(buf, &current, read_bytes);
-  printf("read=%ld rem=%ld\n", current - buf, buf + read_bytes - current);
+
+  u64 remaining = buf + read_bytes - current;
+  printf("read=%ld rem=%ld\n", current - buf, remaining);
+  pg_assert(remaining==0);
 }

@@ -2,6 +2,7 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -111,6 +112,15 @@ typedef struct {
   u8 *s;
 } string_t;
 
+bool string_eq(string_t a, string_t b) {
+  return a.len == b.len && memcmp(a.s, b.s, a.len) == 0;
+}
+
+bool string_eq_c(string_t a, char *b) {
+  const u64 b_len = strlen(b);
+  return a.len == b_len && memcmp(a.s, b, a.len) == 0;
+}
+
 typedef struct {
   enum cp_info_kind_t {
     CIK_UTF8 = 1,
@@ -189,7 +199,11 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
   }
 
   array->values[array->len] = *x;
-  return array->len++;
+  const u16 index = array->len + 1;
+  assert(index > 0);
+  assert(index <= array->len + 1);
+  array->len += 1;
+  return index;
 }
 
 typedef struct {
