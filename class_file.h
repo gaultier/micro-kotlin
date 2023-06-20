@@ -35,7 +35,7 @@ static void arena_init(arena_t *arena, u64 capacity) {
   assert(arena != NULL);
 
   arena->base = mmap(NULL, capacity, PROT_READ | PROT_WRITE,
-                     MAP_ANON | MAP_PRIVATE, -1, 0);
+                     MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   assert(arena->base != NULL);
   arena->capacity = capacity;
   arena->current_offset = 0;
@@ -50,7 +50,7 @@ static u64 align_forward_16(u64 n) {
   return n;
 }
 
-static void *arena_alloc(arena_t *arena, u64 len) {
+static u8 *arena_alloc(arena_t *arena, u64 len) {
   assert(arena != NULL);
   assert(arena->current_offset < arena->capacity);
   assert(arena->current_offset + len < arena->capacity);
@@ -221,10 +221,10 @@ cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
   assert(arena != NULL);
 
   return (cf_method_array_t){
-      .cap = cap,
       .len = 0,
-      .arena = arena,
+      .cap = cap,
       .values = arena_alloc(arena, cap * sizeof(cf_method_t)),
+      .arena = arena,
   };
 }
 
@@ -489,11 +489,12 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 }
 
 void cf_write_attributes(FILE *file, const cf_attribute_array_t *attributes) {
+  LOG("action=writing attributes %lu", attributes->len);
   file_write_be_16(file, attributes->len);
 
   for (uint64_t i = 0; i < attributes->len; i++) {
     const cf_attribute_t *const attribute = &attributes->values[i];
-    LOG("action=writing attributes i=%lu/%lu", i, attributes->len);
+    LOG("action=writing attribute i=%lu/%lu", i, attributes->len);
     cf_write_attribute(file, attribute);
   }
 }
