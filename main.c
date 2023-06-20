@@ -144,14 +144,11 @@ int main() {
   {
     cf_attribute_code_t constructor_code = {.max_stack = 1, .max_locals = 1};
     cf_attribute_code_init(&constructor_code, &arena);
-    cf_code_array_push_u8(&constructor_code.code, 
-                   CFO_ALOAD_0);
-    cf_code_array_push_u8(&constructor_code.code, 
-                   CFO_INVOKE_SPECIAL);
+    cf_code_array_push_u8(&constructor_code.code, CFO_ALOAD_0);
+    cf_code_array_push_u8(&constructor_code.code, CFO_INVOKE_SPECIAL);
     cf_code_array_push_u16(&constructor_code.code,
                            constant_object_method_ref_constructor_i);
-    cf_code_array_push_u8(&constructor_code.code, 
-                   CFO_RETURN);
+    cf_code_array_push_u8(&constructor_code.code, CFO_RETURN);
 
     cf_method_t constructor = {
         .access_flags = CAF_ACC_PUBLIC,
@@ -168,27 +165,21 @@ int main() {
 
     cf_method_array_push(&class_file.methods, &constructor);
   }
-#if 0
   // This's class main
   {
     cf_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
     cf_attribute_code_init(&main_code, &arena);
 
-    cf_code_array_push_u8(main_code.code, &main_code.code_count,
-                           CFO_GET_STATIC);
-    cf_add_code_u16(main_code.code, &main_code.code_count,
-                            constant_out_fieldref_i);
+    cf_code_array_push_u8(&main_code.code, CFO_GET_STATIC);
+    cf_code_array_push_u16(&main_code.code, constant_out_fieldref_i);
 
-    cf_code_array_push_u8(main_code.code, &main_code.code_count, CFO_LDC);
-    cf_code_array_push_u8(main_code.code, &main_code.code_count,
-                           constant_jstring_hello_i);
+    cf_code_array_push_u8(&main_code.code, CFO_LDC);
+    cf_code_array_push_u8(&main_code.code, constant_jstring_hello_i);
 
-    cf_code_array_push_u8(main_code.code, &main_code.code_count,
-                           CFO_INVOKE_VIRTUAL);
-    cf_add_code_u16(main_code.code, &main_code.code_count,
-                            constant_println_method_ref_i);
+    cf_code_array_push_u8(&main_code.code, CFO_INVOKE_VIRTUAL);
+    cf_code_array_push_u16(&main_code.code, constant_println_method_ref_i);
 
-    cf_code_array_push_u8(main_code.code, &main_code.code_count, CFO_RETURN);
+    cf_code_array_push_u8(&main_code.code, CFO_RETURN);
 
     cf_method_t main = {
         .name = constant_string_main_i,
@@ -197,14 +188,12 @@ int main() {
     };
     cf_method_init(&main, &arena);
     cf_attribute_t main_attribute_code = {.kind = CAK_CODE,
-                                                  .name =
-                                                      constant_string_code_i,
-                                                  .v = {.code = main_code}};
-    attribute_array_push(&main.attributes, &main_attribute_code);
+                                          .name = constant_string_code_i,
+                                          .v = {.code = main_code}};
+    cf_attribute_array_push(&main.attributes, &main_attribute_code);
 
     cf_method_array_push(&class_file.methods, &main);
   }
-#endif
 
   FILE *file = fopen("PgMain.class", "w");
   assert(file != NULL);
