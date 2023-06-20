@@ -2,7 +2,7 @@
 
 int main() {
   arena_t arena = {0};
-  arena_init(&arena, 1 << 26);
+  arena_init(&arena, 1 << 23);
 
   cf_t class_file = {
       .magic = cf_MAGIC_NUMBER,
@@ -202,4 +202,6 @@ int main() {
   FILE *file = fopen("PgMain.class", "w");
   assert(file != NULL);
   cf_write(&class_file, file);
+
+  LOG("arena=%lu", arena.current_offset);
 }
