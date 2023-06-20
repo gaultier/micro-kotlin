@@ -1,0 +1,12 @@
+-  Add JVM function types
+-  Generate type descriptors
+-  Read class files and keep a map of function name to signature
+- Semantic opcode generation functions
+- Keep track of the stack & locals
+- Call functions
+- Define functions
+- Generate stack map tables
+- Use latest jvm version
+- Makefile/build.sh
+- Track max memory used in arena
+- Write non-trivial program with the API (opcode generation functions)
