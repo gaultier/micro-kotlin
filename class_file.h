@@ -399,11 +399,13 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
     assert(code->exception_table_count == 0 && "unimplemented");
 
+    const u16 exception_table_item_sizeof = 4*sizeof(u16);
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
                sizeof(code->code_count) + code->code_count +
                sizeof(code->exception_table_count) +
+               + code->exception_table_count * exception_table_item_sizeof +
                sizeof(u16) // attributes length
-                           ;
+        ;
 
     for (uint64_t i = 0; i < code->attributes.len; i++) {
       const cf_attribute_t *const attribute = &code->attributes.values[i];
