@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 
 #define u64 uint64_t
@@ -57,14 +58,6 @@ static void *arena_alloc(arena_t *arena, u64 len) {
   assert((arena->current_offset % 16) == 0);
 
   return arena->base + arena->current_offset - len;
-}
-
-static void arena_reset_at(arena_t *arena, u64 offset) {
-  assert(arena != NULL);
-  assert(arena->current_offset < arena->capacity);
-  assert((arena->current_offset % 16) == 0);
-
-  arena->current_offset = offset;
 }
 
 typedef enum {
@@ -128,6 +121,12 @@ typedef struct {
 } class_file_field_t;
 
 typedef struct class_file_attribute_t class_file_attribute_t;
+typedef struct {
+  u64 len;
+  u64 cap;
+  class_file_attribute_t *values;
+  arena_t *arena;
+} attribute_array_t;
 
 typedef struct {
   u16 start_pc;
@@ -153,7 +152,7 @@ struct class_file_attribute_t {
       u16 exception_table_count;
       void *exception_table; // TODO
       u16 attributes_count;
-      class_file_attribute_t *attributes;
+      attribute_array_t attributes;
     } code; // CAK_CODE
 
     struct class_file_attribute_source_file_t {
@@ -175,12 +174,43 @@ typedef struct class_file_attribute_code_t class_file_attribute_code_t;
 typedef struct class_file_attribute_source_file_t
     class_file_attribute_source_file_t;
 
+attribute_array_t attribute_array_make(u64 cap, arena_t *arena) {
+  assert(arena != NULL);
+
+  return (attribute_array_t){
+      .cap = cap,
+      .len = 0,
+      .arena = arena,
+      .values = arena_alloc(arena, cap * sizeof(class_file_attribute_t)),
+  };
+}
+
+void attribute_array_push(attribute_array_t *array,
+                          const class_file_attribute_t *x) {
+  assert(array != NULL);
+  assert(x != NULL);
+  assert(array->len < UINT16_MAX);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    class_file_attribute_t *const new_array =
+        arena_alloc(array->arena, new_cap);
+    memcpy(new_array, array->values,
+           array->len * sizeof(class_file_attribute_t));
+    array->values = new_array;
+    array->cap = new_cap;
+  }
+
+  array->values[array->len] = *x;
+  array->len += 1;
+}
+
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   u16 attributes_count;
-  class_file_attribute_t *attributes;
+  attribute_array_t attributes;
 } class_file_method_t;
 
 const u32 CLASS_FILE_MAGIC_NUMBER = 0xbebafeca;
@@ -202,7 +232,7 @@ typedef struct {
   u16 method_count;
   class_file_method_t *methods;
   u16 attribute_count;
-  class_file_attribute_t *attributes;
+  attribute_array_t attributes;
 } class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
@@ -226,8 +256,6 @@ void class_file_write_constant(const class_file_t *class_file, FILE *file,
   assert(class_file != NULL);
   assert(file != NULL);
   assert(constant != NULL);
-
-  __builtin_dump_struct(constant, &printf);
 
   switch (constant->kind) {
   case CIK_UTF8: {
@@ -308,8 +336,6 @@ void class_file_write_constant_pool(const class_file_t *class_file,
 
   for (u64 i = 0; i < class_file->constant_pool_count; i++) {
     const class_file_constant_t *const constant = &class_file->constant_pool[i];
-    LOG("action=writing constant constant_count=%lu/%u", i,
-        class_file->constant_pool_count);
     class_file_write_constant(class_file, file, constant);
   }
 }
@@ -348,7 +374,9 @@ u32 class_file_compute_attribute_size(const class_file_attribute_t *attribute) {
                sizeof(code->attributes_count);
 
     for (uint64_t i = 0; i < code->attributes_count; i++) {
-      size += class_file_compute_attribute_size(&code->attributes[i]);
+      const class_file_attribute_t *const attribute =
+          &code->attributes.values[i];
+      size += class_file_compute_attribute_size(attribute);
     }
     return size;
   }
@@ -365,8 +393,8 @@ u32 class_file_compute_attribute_size(const class_file_attribute_t *attribute) {
   assert(0 && "unreachable");
 }
 
-void class_file_write_attributes(FILE *file, u16 attribute_count,
-                                 const class_file_attribute_t *attributes);
+void class_file_write_attributes(FILE *file,
+                                 const attribute_array_t *attributes);
 void class_file_write_attribute(FILE *file,
                                 const class_file_attribute_t *attribute) {
   assert(file != NULL);
@@ -402,7 +430,7 @@ void class_file_write_attribute(FILE *file,
 
     assert(code->exception_table == NULL && "unimplemented");
 
-    class_file_write_attributes(file, code->attributes_count, code->attributes);
+    class_file_write_attributes(file, &code->attributes);
 
     break;
   }
@@ -432,26 +460,22 @@ void class_file_write_attribute(FILE *file,
   }
 }
 
-void class_file_write_attributes(FILE *file, u16 attribute_count,
-                                 const class_file_attribute_t *attributes) {
-  file_write_be_16(file, attribute_count);
+void class_file_write_attributes(FILE *file,
+                                 const attribute_array_t *attributes) {
+  file_write_be_16(file, attributes->len);
 
-  for (uint64_t i = 0; i < attribute_count; i++) {
-    const class_file_attribute_t *const attribute = &attributes[i];
-    LOG("action=writing attributes i=%lu/%u", i, attribute_count);
-    __builtin_dump_struct(attribute, &printf);
+  for (uint64_t i = 0; i < attributes->len; i++) {
+    const class_file_attribute_t *const attribute = &attributes->values[i];
     class_file_write_attribute(file, attribute);
   }
 }
 
-void class_file_write_method(const class_file_t *class_file, FILE *file,
-                             const class_file_method_t *method) {
+void class_file_write_method(FILE *file, const class_file_method_t *method) {
   file_write_be_16(file, method->access_flags);
   file_write_be_16(file, method->name);
   file_write_be_16(file, method->descriptor);
 
-  class_file_write_attributes(file, method->attributes_count,
-                              method->attributes);
+  class_file_write_attributes(file, &method->attributes);
 }
 
 void class_file_write_methods(const class_file_t *class_file, FILE *file) {
@@ -462,7 +486,7 @@ void class_file_write_methods(const class_file_t *class_file, FILE *file) {
 
   for (uint64_t i = 0; i < class_file->method_count; i++) {
     const class_file_method_t *const method = &class_file->methods[i];
-    class_file_write_method(class_file, file, method);
+    class_file_write_method( file, method);
   }
 }
 
@@ -479,8 +503,7 @@ void class_file_write(const class_file_t *class_file, FILE *file) {
   class_file_write_interfaces(class_file, file);
   class_file_write_fields(class_file, file);
   class_file_write_methods(class_file, file);
-  class_file_write_attributes(file, class_file->attribute_count,
-                              class_file->attributes);
+  class_file_write_attributes(file, &class_file->attributes);
   fflush(file);
 }
 
@@ -500,27 +523,12 @@ void class_file_init(class_file_t *class_file, arena_t *arena) {
 
   class_file->constant_pool =
       arena_alloc(arena, UINT16_MAX * sizeof(class_file_constant_t));
-  class_file->attributes =
-      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
+  class_file->attributes = attribute_array_make(1024, arena);
 
   class_file->methods =
       arena_alloc(arena, UINT16_MAX * sizeof(class_file_method_t));
 
-  class_file->attributes =
-      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
-}
-
-u16 class_file_add_attribute(class_file_attribute_t *attributes,
-                             u16 *attribute_count,
-                             const class_file_attribute_t *attribute) {
-  assert(*attribute_count < UINT16_MAX);
-  assert(attributes != NULL);
-  assert(attribute != NULL);
-
-  attributes[*attribute_count] = *attribute;
-
-  *attribute_count += 1;
-  return *attribute_count - 1;
+  class_file->attributes = attribute_array_make(1024, arena);
 }
 
 u16 class_file_add_method(class_file_t *class_file,
@@ -562,17 +570,15 @@ void class_file_attribute_code_init(class_file_attribute_code_t *code,
   assert(arena != NULL);
 
   code->code = arena_alloc(arena, UINT16_MAX * sizeof(u8));
-  code->attributes =
-      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
+  code->attributes = attribute_array_make(1024, arena);
 }
 
 void class_file_method_init(class_file_method_t *method, arena_t *arena) {
   assert(method != NULL);
   assert(arena != NULL);
 
-  method->attributes = arena_alloc(arena, UINT16_MAX * sizeof(u8));
-  method->attributes =
-      arena_alloc(arena, UINT16_MAX * sizeof(class_file_attribute_t));
+  method->attributes = attribute_array_make(1024, arena);
+  method->attributes = attribute_array_make(1024, arena);
 }
 
 u16 class_file_add_constant_cstring(class_file_t *class_file, char *s) {
@@ -713,8 +719,7 @@ int main() {
       .kind = CAK_SOURCE_FILE,
       .name = constant_string_source_file_i,
       .v = {.source_file = {.source_file = constant_string_file_i}}};
-  class_file_add_attribute(class_file.attributes, &class_file.attribute_count,
-                           &source_file_attribute);
+  attribute_array_push(&class_file.attributes, &source_file_attribute);
 
   const u16 constant_string_hello_i =
       class_file_add_constant_cstring(&class_file, "Hello, world!");
@@ -764,9 +769,7 @@ int main() {
         .kind = CAK_CODE,
         .name = constant_string_code_i,
         .v = {.code = constructor_code}};
-    class_file_add_attribute(constructor.attributes,
-                             &constructor.attributes_count,
-                             &constructor_attribute_code);
+    attribute_array_push(&constructor.attributes, &constructor_attribute_code);
 
     class_file_add_method(&class_file, &constructor);
   }
@@ -801,8 +804,7 @@ int main() {
                                                   .name =
                                                       constant_string_code_i,
                                                   .v = {.code = main_code}};
-    class_file_add_attribute(main.attributes, &main.attributes_count,
-                             &main_attribute_code);
+    attribute_array_push(&main.attributes, &main_attribute_code);
 
     class_file_add_method(&class_file, &main);
   }
