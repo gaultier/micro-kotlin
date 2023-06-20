@@ -402,7 +402,8 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
                sizeof(code->code_count) + code->code_count +
                sizeof(code->exception_table_count) +
-               sizeof(code->attributes.len);
+               sizeof(u16) // attributes length
+                           ;
 
     for (uint64_t i = 0; i < code->attributes.len; i++) {
       const cf_attribute_t *const attribute = &code->attributes.values[i];
