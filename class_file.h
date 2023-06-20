@@ -1,7 +1,6 @@
 #pragma once
 
 #include <arpa/inet.h>
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,11 +44,11 @@ typedef struct {
 } arena_t;
 
 static void arena_init(arena_t *arena, u64 capacity) {
-  assert(arena != NULL);
+  pg_assert(arena != NULL);
 
   arena->base = mmap(NULL, capacity, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  assert(arena->base != NULL);
+  pg_assert(arena->base != NULL);
   arena->capacity = capacity;
   arena->current_offset = 0;
 }
@@ -59,21 +58,113 @@ static u64 align_forward_16(u64 n) {
   if (modulo != 0)
     n += 16 - modulo;
 
-  assert((n % 16) == 0);
+  pg_assert((n % 16) == 0);
   return n;
 }
 
 static void *arena_alloc(arena_t *arena, u64 len) {
-  assert(arena != NULL);
-  assert(arena->current_offset < arena->capacity);
-  assert(arena->current_offset + len < arena->capacity);
+  pg_assert(arena != NULL);
+  pg_assert(arena->current_offset < arena->capacity);
+  pg_assert(arena->current_offset + len < arena->capacity);
 
   // TODO: align?
   arena->current_offset = align_forward_16(arena->current_offset + len);
-  assert((arena->current_offset % 16) == 0);
+  pg_assert((arena->current_offset % 16) == 0);
 
   return arena->base + arena->current_offset - len;
 }
+
+typedef struct {
+  u16 cap;
+  u16 len;
+  u8 *value;
+  arena_t *arena;
+} string_t;
+
+string_t string_reserve(u16 cap, arena_t *arena) {
+  return (string_t){
+      .cap = cap,
+      .value = arena_alloc(arena, cap),
+      .arena = arena,
+  };
+}
+
+string_t string_make_from_c(char *s, arena_t *arena) {
+  const u64 len = strlen(s);
+  string_t res = string_reserve(len, arena);
+  res.len = len;
+  memcpy(res.value, s, len);
+  return res;
+}
+
+bool string_eq(string_t a, string_t b) {
+  return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
+}
+
+bool string_eq_c(string_t a, char *b) {
+  const u64 b_len = strlen(b);
+  return a.len == b_len && memcmp(a.value, b, a.len) == 0;
+}
+
+void string_append_char(string_t *s, u8 c) {
+  pg_assert(s != NULL);
+  pg_assert(s->cap != 0);
+  pg_assert(s->len <= s->cap);
+  pg_assert(s->arena != NULL);
+
+  if (s->len == s->cap - 1) {
+    s->cap *= 2;
+    u8 *const new_s = arena_alloc(s->arena, s->cap);
+    s->value = memcpy(new_s, s->value, s->len);
+  }
+
+  s->value[s->len] = c;
+  s->len += 1;
+}
+
+void string_append_string(string_t *a, const string_t *b) {
+  pg_assert(a != NULL);
+  pg_assert(b != NULL);
+  pg_assert(a->cap != 0);
+  pg_assert(a->len <= a->cap);
+  pg_assert(a->arena != NULL);
+  pg_assert(b->cap != 0);
+  pg_assert(b->len <= b->cap);
+  pg_assert(b->arena != NULL);
+
+  for (u64 i = 0; i < b->len; i++)
+    string_append_char(a, b->value[i]);
+}
+
+struct cf_type_t;
+
+typedef struct {
+  struct cf_type_t *return_type;
+  u8 argument_count;
+  struct cf_type_t *argument_types;
+} cf_type_method_t;
+
+struct cf_type_t {
+  enum cf_type_kind_t {
+    CTY_VOID,
+    CTY_BYTE,
+    CTY_CHAR,
+    CTY_DOUBLE,
+    CTY_FLOAT,
+    CTY_INT,
+    CTY_LONG,
+    CTY_INSTANCE_REFERENCE,
+    CTY_SHORT,
+    CTY_BOOLEAN,
+    CTY_ARRAY_REFERENCE,
+    CTY_METHOD,
+  } kind;
+  union {
+    string_t class_name;     // CTY_INSTANCE_REFERENCE
+    cf_type_method_t method; // CTY_METHOD
+  } v;
+};
+typedef struct cf_type_t cf_type_t;
 
 typedef struct {
   u64 len;
@@ -83,7 +174,7 @@ typedef struct {
 } cf_code_array_t;
 
 cf_code_array_t cf_code_array_make(u64 cap, arena_t *arena) {
-  assert(arena != NULL);
+  pg_assert(arena != NULL);
 
   return (cf_code_array_t){
       .len = 0,
@@ -94,10 +185,10 @@ cf_code_array_t cf_code_array_make(u64 cap, arena_t *arena) {
 }
 
 void cf_code_array_push_u8(cf_code_array_t *array, u8 x) {
-  assert(array != NULL);
-  assert(array->len < UINT32_MAX);
-  assert(array->values != NULL);
-  assert(array->cap != 0);
+  pg_assert(array != NULL);
+  pg_assert(array->len < UINT32_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
@@ -118,20 +209,6 @@ typedef enum {
   CAF_ACC_STATIC = 0x0008,
   CAF_ACC_SUPER = 0x0020,
 } cf_access_flags_t;
-
-typedef struct {
-  u16 len;
-  u8 *s;
-} string_t;
-
-bool string_eq(string_t a, string_t b) {
-  return a.len == b.len && memcmp(a.s, b.s, a.len) == 0;
-}
-
-bool string_eq_c(string_t a, char *b) {
-  const u64 b_len = strlen(b);
-  return a.len == b_len && memcmp(a.s, b, a.len) == 0;
-}
 
 typedef struct {
   enum cp_info_kind_t {
@@ -185,7 +262,7 @@ typedef struct {
 } cf_constant_array_t;
 
 cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
-  assert(arena != NULL);
+  pg_assert(arena != NULL);
 
   return (cf_constant_array_t){
       .len = 0,
@@ -196,11 +273,11 @@ cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
 }
 
 u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
-  assert(array != NULL);
-  assert(x != NULL);
-  assert(array->len < UINT16_MAX);
-  assert(array->values != NULL);
-  assert(array->cap != 0);
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
@@ -212,10 +289,84 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
 
   array->values[array->len] = *x;
   const u16 index = array->len + 1;
-  assert(index > 0);
-  assert(index <= array->len + 1);
+  pg_assert(index > 0);
+  pg_assert(index <= array->len + 1);
   array->len += 1;
   return index;
+}
+
+void cf_fill_type_descriptor_string(const cf_type_t *type, string_t *type_descriptor) {
+  pg_assert(type != NULL);
+  pg_assert(type_descriptor != NULL);
+
+  switch (type->kind) {
+  case CTY_VOID: {
+    string_append_char(type_descriptor, 'V');
+    break;
+  };
+  case CTY_BYTE: {
+    string_append_char(type_descriptor, 'B');
+    break;
+  };
+  case CTY_CHAR: {
+    string_append_char(type_descriptor, 'C');
+    break;
+  };
+  case CTY_DOUBLE: {
+    string_append_char(type_descriptor, 'D');
+    break;
+  };
+  case CTY_FLOAT: {
+    string_append_char(type_descriptor, 'F');
+    break;
+  };
+  case CTY_INT: {
+    string_append_char(type_descriptor, 'I');
+    break;
+  };
+  case CTY_LONG: {
+    string_append_char(type_descriptor, 'J');
+    break;
+  };
+  case CTY_INSTANCE_REFERENCE: {
+    const string_t class_name = type->v.class_name;
+
+    string_append_char(type_descriptor, 'L');
+    string_append_string(type_descriptor, &class_name);
+    string_append_char(type_descriptor, ';');
+
+    break;
+  };
+  case CTY_SHORT: {
+    string_append_char(type_descriptor, 'S');
+    break;
+  };
+  case CTY_BOOLEAN: {
+    string_append_char(type_descriptor, 'Z');
+    break;
+  };
+  case CTY_ARRAY_REFERENCE: {
+    string_append_char(type_descriptor, '[');
+    break;
+  };
+  case CTY_METHOD: {
+    const cf_type_method_t *const method_type = &type->v.method;
+    string_append_char(type_descriptor, '(');
+
+    for (u64 i = 0; i < method_type->argument_count; i++) {
+      const cf_type_t *const argument_type = &method_type->argument_types[i];
+      cf_fill_type_descriptor_string(argument_type, type_descriptor);
+    }
+
+    string_append_char(type_descriptor, ')');
+
+    cf_fill_type_descriptor_string(method_type->return_type, type_descriptor);
+
+    break;
+  };
+  default:
+    pg_assert(0 && "unreachable");
+  }
 }
 
 typedef struct {
@@ -281,7 +432,7 @@ typedef struct cf_attribute_code_t cf_attribute_code_t;
 typedef struct cf_attribute_source_file_t cf_attribute_source_file_t;
 
 cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
-  assert(arena != NULL);
+  pg_assert(arena != NULL);
 
   return (cf_attribute_array_t){
       .len = 0,
@@ -293,11 +444,11 @@ cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
 
 void cf_attribute_array_push(cf_attribute_array_t *array,
                              const cf_attribute_t *x) {
-  assert(array != NULL);
-  assert(x != NULL);
-  assert(array->len < UINT16_MAX);
-  assert(array->values != NULL);
-  assert(array->cap != 0);
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
@@ -318,7 +469,7 @@ struct cf_method_t {
 };
 
 cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
-  assert(arena != NULL);
+  pg_assert(arena != NULL);
 
   return (cf_method_array_t){
       .len = 0,
@@ -329,11 +480,11 @@ cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
 }
 
 void cf_method_array_push(cf_method_array_t *array, const cf_method_t *x) {
-  assert(array != NULL);
-  assert(x != NULL);
-  assert(array->len < UINT16_MAX);
-  assert(array->values != NULL);
-  assert(array->cap != 0);
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
@@ -366,14 +517,14 @@ typedef struct {
 } cf_class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
-  assert(file != NULL);
+  pg_assert(file != NULL);
 
   const u16 x_be = htons(x);
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
 void file_write_be_32(FILE *file, u32 x) {
-  assert(file != NULL);
+  pg_assert(file != NULL);
 
   const u32 x_be = htonl(x);
   fwrite(&x_be, sizeof(x_be), 1, file);
@@ -383,29 +534,29 @@ void file_write_be_32(FILE *file, u32 x) {
 
 void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
                        const cf_constant_t *constant) {
-  assert(class_file != NULL);
-  assert(file != NULL);
-  assert(constant != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(file != NULL);
+  pg_assert(constant != NULL);
 
   switch (constant->kind) {
   case CIK_UTF8: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
     const string_t *const s = &constant->v.s;
     file_write_be_16(file, s->len);
-    fwrite(s->s, sizeof(u8), s->len, file);
+    fwrite(s->value, sizeof(u8), s->len, file);
     break;
   }
   case CIK_INT:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   case CIK_FLOAT:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   case CIK_LONG:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   case CIK_DOUBLE:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   case CIK_CLASS_INFO:
     fwrite(&constant->kind, sizeof(u8), 1, file);
@@ -434,7 +585,7 @@ void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     break;
   }
   case CIK_INSTANCE_METHOD_REF:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   case CIK_NAME_AND_TYPE: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
@@ -447,16 +598,16 @@ void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     break;
   }
   case CIK_INVOKE_DYNAMIC:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   default:
-    assert(0 && "unreachable");
+    pg_assert(0 && "unreachable");
   }
 }
 
 void cf_write_constant_pool(const cf_class_file_t *class_file, FILE *file) {
-  assert(class_file != NULL);
-  assert(file != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(file != NULL);
 
   const u16 len = class_file->constant_pool.len + 1;
   file_write_be_16(file, len);
@@ -468,25 +619,25 @@ void cf_write_constant_pool(const cf_class_file_t *class_file, FILE *file) {
   }
 }
 void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
-  assert(class_file != NULL);
-  assert(file != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(file != NULL);
 
   file_write_be_16(file, class_file->interfaces_count);
 
-  assert(class_file->interfaces_count == 0 && "unimplemented");
+  pg_assert(class_file->interfaces_count == 0 && "unimplemented");
 }
 
 void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
-  assert(class_file != NULL);
-  assert(file != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(file != NULL);
 
   file_write_be_16(file, class_file->fields_count);
 
-  assert(class_file->fields_count == 0 && "unimplemented");
+  pg_assert(class_file->fields_count == 0 && "unimplemented");
 }
 
 u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
-  assert(attribute != NULL);
+  pg_assert(attribute != NULL);
 
   switch (attribute->kind) {
   case CAK_SOURCE_FILE:
@@ -494,7 +645,7 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   case CAK_CODE: {
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    assert(code->exception_table_count == 0 && "unimplemented");
+    pg_assert(code->exception_table_count == 0 && "unimplemented");
 
     const u16 exception_table_item_sizeof = 4 * sizeof(u16);
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
@@ -518,15 +669,15 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                sizeof(cf_line_number_table_t);
   }
   case CAK_STACK_MAP_TABLE:
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
   }
-  assert(0 && "unreachable");
+  pg_assert(0 && "unreachable");
 }
 
 void cf_write_attributes(FILE *file, const cf_attribute_array_t *attributes);
 void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
-  assert(file != NULL);
-  assert(attribute != NULL);
+  pg_assert(file != NULL);
+  pg_assert(attribute != NULL);
 
   file_write_be_16(file, attribute->name);
 
@@ -556,7 +707,7 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     file_write_be_16(file, code->exception_table_count);
 
-    assert(code->exception_table == NULL && "unimplemented");
+    pg_assert(code->exception_table == NULL && "unimplemented");
 
     cf_write_attributes(file, &code->attributes);
 
@@ -580,11 +731,11 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     break;
   }
   case CAK_STACK_MAP_TABLE: {
-    assert(0 && "unimplemented");
+    pg_assert(0 && "unimplemented");
     break;
   }
   default:
-    assert(0 && "unreachable");
+    pg_assert(0 && "unreachable");
   }
 }
 
@@ -608,8 +759,8 @@ void cf_write_method(FILE *file, const cf_method_t *method) {
 }
 
 void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
-  assert(class_file != NULL);
-  assert(file != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(file != NULL);
 
   file_write_be_16(file, class_file->methods.len);
 
@@ -638,8 +789,8 @@ void cf_write(const cf_class_file_t *class_file, FILE *file) {
 }
 
 void cf_init(cf_class_file_t *class_file, arena_t *arena) {
-  assert(class_file != NULL);
-  assert(arena != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(arena != NULL);
 
   class_file->constant_pool = cf_constant_array_make(1024, arena);
   class_file->attributes = cf_attribute_array_make(1024, arena);
@@ -650,36 +801,36 @@ void cf_init(cf_class_file_t *class_file, arena_t *arena) {
 }
 
 void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
-  assert(code != NULL);
-  assert(arena != NULL);
+  pg_assert(code != NULL);
+  pg_assert(arena != NULL);
 
   code->code = cf_code_array_make(32, arena);
   code->attributes = cf_attribute_array_make(1024, arena);
 }
 
 void cf_method_init(cf_method_t *method, arena_t *arena) {
-  assert(method != NULL);
-  assert(arena != NULL);
+  pg_assert(method != NULL);
+  pg_assert(arena != NULL);
 
   method->attributes = cf_attribute_array_make(1024, arena);
 }
 
 u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s) {
-  assert(constant_pool != NULL);
-  assert(s != NULL);
+  pg_assert(constant_pool != NULL);
+  pg_assert(s != NULL);
 
   const cf_constant_t constant = {.kind = CIK_UTF8,
                                   .v = {.s = {
                                             .len = strlen(s),
-                                            .s = (u8 *)s,
+                                            .value = (u8 *)s,
                                         }}};
   return cf_constant_array_push(constant_pool, &constant);
 }
 
 u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
                             u16 constant_utf8_i) {
-  assert(constant_pool != NULL);
-  assert(constant_utf8_i > 0);
+  pg_assert(constant_pool != NULL);
+  pg_assert(constant_utf8_i > 0);
 
   const cf_constant_t constant = {.kind = CIK_STRING,
                                   .v = {.string_utf8_i = constant_utf8_i}};

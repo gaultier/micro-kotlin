@@ -10,6 +10,7 @@
 - Makefile/build.sh
 - Track max memory used in arena
 - Write non-trivial program with the API (opcode generation functions)
++ Compute class file name
 
 Sugar (nice to have):
 - Line table

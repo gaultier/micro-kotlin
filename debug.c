@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
              len, s);
 
       cf_constant_t constant = {.kind = CIK_UTF8,
-                                .v = {.s = {.len = len, .s = s}}};
+                                .v = {.s = {.len = len, .value = s}}};
       cf_constant_array_push(&constant_pool, &constant);
 
       break;

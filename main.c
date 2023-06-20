@@ -63,9 +63,31 @@ int main(int argc, char *argv[]) {
 
   const u16 constant_string_main_i =
       cf_add_constant_cstring(&class_file.constant_pool, "main");
+  {
+    cf_type_t argument_types[] = {{
+        .kind = CTY_INSTANCE_REFERENCE,
+        .v = {.class_name = string_make_from_c("java/lang/String", &arena)},
+    }};
+    cf_type_t void_type = {.kind = CTY_VOID};
+    cf_type_t println_type = {
+        .kind = CTY_METHOD,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 1,
+                        .return_type = &void_type,
+                        .argument_types = argument_types,
+                    },
+            },
+    };
 
+    string_t println_type_s = string_reserve(30, &arena);
+    cf_fill_type_descriptor_string(&println_type, &println_type_s);
+    fprintf(stderr, "%.*s\n", println_type_s.len, println_type_s.value);
+  }
   const u16 constant_string_main_type_descriptor_i = cf_add_constant_cstring(
-      &class_file.constant_pool, "([Ljava/lang/String;)V");
+      &class_file.constant_pool, "(Ljava/lang/String;)V");
 
   const u16 constant_string_source_file_i =
       cf_add_constant_cstring(&class_file.constant_pool, "SourceFile");
