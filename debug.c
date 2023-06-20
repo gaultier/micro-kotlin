@@ -9,12 +9,6 @@
 
 static cf_constant_array_t constant_pool = {0};
 
-#define pg_assert(condition)                                                   \
-  do {                                                                         \
-    if (!(condition))                                                          \
-      __builtin_trap();                                                        \
-  } while (0)
-
 u16 read_be_16(u8 *buf, u8 **current, u64 size) {
   pg_assert(*current + 2 <= buf + size);
 

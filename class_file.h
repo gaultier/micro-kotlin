@@ -8,6 +8,12 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#ifdef __linux
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS 0x20
+#endif
+#endif
+
 #define u64 uint64_t
 #define i64 int64_t
 #define u32 uint32_t
@@ -16,6 +22,12 @@
 #define i16 int16_t
 #define u8 uint8_t
 #define i8 int8_t
+
+#define pg_assert(condition)                                                   \
+  do {                                                                         \
+    if (!(condition))                                                          \
+      __builtin_trap();                                                        \
+  } while (0)
 
 typedef enum {
   CFO_ALOAD_0 = 0x2a,
@@ -673,4 +685,40 @@ u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
                                   .v = {.string_utf8_i = constant_utf8_i}};
 
   return cf_constant_array_push(constant_pool, &constant);
+}
+
+const char *cf_memrchr(const char *s, char c, u64 n) {
+  pg_assert(s != NULL);
+  pg_assert(n > 0);
+
+  const char *res = s + n - 1;
+  while (res-- != s) {
+    if (*res == c)
+      return res;
+  }
+  return NULL;
+}
+
+char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
+  pg_assert(source_file_name != NULL);
+  pg_assert(arena != NULL);
+
+  const u64 source_file_name_len = strlen(source_file_name);
+  const char *const dot =
+      cf_memrchr(source_file_name, '.', source_file_name_len);
+  pg_assert(dot != NULL);
+
+  const u64 extension_len = sizeof(".class");
+  const u64 before_dot_incl_len = dot - source_file_name;
+  pg_assert(before_dot_incl_len > 0);
+  const u64 class_file_name_len = before_dot_incl_len + extension_len;
+  pg_assert(class_file_name_len > extension_len);
+
+  char *class_file_name = arena_alloc(arena, class_file_name_len);
+  memcpy(class_file_name, source_file_name, before_dot_incl_len);
+  memcpy(class_file_name + before_dot_incl_len, ".class", extension_len);
+
+  class_file_name[class_file_name_len - 1] = 0;
+
+  return class_file_name;
 }

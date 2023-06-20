@@ -1,6 +1,8 @@
 #include "class_file.h"
 
-int main() {
+int main(int argc, char *argv[]) {
+  pg_assert(argc == 2);
+
   arena_t arena = {0};
   arena_init(&arena, 1 << 23);
 
@@ -199,8 +201,13 @@ int main() {
     cf_method_array_push(&class_file.methods, &main);
   }
 
-  FILE *file = fopen("PgMain.class", "w");
-  assert(file != NULL);
+  const char *const source_file_name = argv[1];
+  const char *const class_file_name =
+      cf_make_class_file_name(source_file_name, &arena);
+
+  FILE *file = fopen(class_file_name, "w");
+  pg_assert(file != NULL);
+
   cf_write(&class_file, file);
 
   LOG("arena=%lu", arena.current_offset);
