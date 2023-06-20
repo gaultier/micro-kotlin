@@ -10,3 +10,9 @@
 - Makefile/build.sh
 - Track max memory used in arena
 - Write non-trivial program with the API (opcode generation functions)
+
+Sugar (nice to have):
+- Line table
+- Full debug information
+- Exceptions
+- Multi-threading stuff (volatile, synchronized, etc)
