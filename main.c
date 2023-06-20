@@ -4,7 +4,7 @@ int main() {
   arena_t arena = {0};
   arena_init(&arena, 1 << 23);
 
-  cf_t class_file = {
+  cf_class_file_t class_file = {
       .magic = cf_MAGIC_NUMBER,
       .minor_version = cf_MINOR_VERSION,
       .major_version = cf_MAJOR_VERSION_6,

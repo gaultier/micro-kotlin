@@ -292,5 +292,5 @@ int main(int argc, char *argv[]) {
 
   u64 remaining = buf + read_bytes - current;
   printf("read=%ld rem=%ld\n", current - buf, remaining);
-  pg_assert(remaining==0);
+  pg_assert(remaining == 0);
 }

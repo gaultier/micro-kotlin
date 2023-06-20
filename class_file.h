@@ -351,7 +351,7 @@ typedef struct {
   cf_field_t *fields;
   cf_method_array_t methods;
   cf_attribute_array_t attributes;
-} cf_t;
+} cf_class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
   assert(file != NULL);
@@ -369,7 +369,7 @@ void file_write_be_32(FILE *file, u32 x) {
 
 #define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
 
-void cf_write_constant(const cf_t *class_file, FILE *file,
+void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
                        const cf_constant_t *constant) {
   assert(class_file != NULL);
   assert(file != NULL);
@@ -442,7 +442,7 @@ void cf_write_constant(const cf_t *class_file, FILE *file,
   }
 }
 
-void cf_write_constant_pool(const cf_t *class_file, FILE *file) {
+void cf_write_constant_pool(const cf_class_file_t *class_file, FILE *file) {
   assert(class_file != NULL);
   assert(file != NULL);
 
@@ -455,7 +455,7 @@ void cf_write_constant_pool(const cf_t *class_file, FILE *file) {
     cf_write_constant(class_file, file, constant);
   }
 }
-void cf_write_interfaces(const cf_t *class_file, FILE *file) {
+void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
   assert(class_file != NULL);
   assert(file != NULL);
 
@@ -464,7 +464,7 @@ void cf_write_interfaces(const cf_t *class_file, FILE *file) {
   assert(class_file->interfaces_count == 0 && "unimplemented");
 }
 
-void cf_write_fields(const cf_t *class_file, FILE *file) {
+void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
   assert(class_file != NULL);
   assert(file != NULL);
 
@@ -595,7 +595,7 @@ void cf_write_method(FILE *file, const cf_method_t *method) {
   cf_write_attributes(file, &method->attributes);
 }
 
-void cf_write_methods(const cf_t *class_file, FILE *file) {
+void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
   assert(class_file != NULL);
   assert(file != NULL);
 
@@ -608,7 +608,7 @@ void cf_write_methods(const cf_t *class_file, FILE *file) {
   }
 }
 
-void cf_write(const cf_t *class_file, FILE *file) {
+void cf_write(const cf_class_file_t *class_file, FILE *file) {
   fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
 
   file_write_be_16(file, class_file->minor_version);
@@ -625,7 +625,7 @@ void cf_write(const cf_t *class_file, FILE *file) {
   fflush(file);
 }
 
-void cf_init(cf_t *class_file, arena_t *arena) {
+void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   assert(class_file != NULL);
   assert(arena != NULL);
 
