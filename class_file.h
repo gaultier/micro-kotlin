@@ -62,6 +62,44 @@ static u8 *arena_alloc(arena_t *arena, u64 len) {
   return arena->base + arena->current_offset - len;
 }
 
+typedef struct {
+  u64 len;
+  u64 cap;
+  u8 *values;
+  arena_t *arena;
+} cf_code_array_t;
+
+cf_code_array_t cf_code_array_make(u64 cap, arena_t *arena) {
+  assert(arena != NULL);
+
+  return (cf_code_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(u8)),
+      .arena = arena,
+  };
+}
+
+void cf_code_array_push_u8(cf_code_array_t *array, u8 x) {
+  assert(array != NULL);
+  assert(array->len < UINT32_MAX);
+  assert(array->values != NULL);
+  assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    u8 *const new_array = arena_alloc(array->arena, new_cap);
+    array->values = memcpy(new_array, array->values, array->len * sizeof(u8));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len++] = x;
+}
+void cf_code_array_push_u16(cf_code_array_t *array, u16 x) {
+  cf_code_array_push_u8(array, (u8)(x & 0xff00));
+  cf_code_array_push_u8(array, (u8)(x & 0x00ff));
+}
+
 typedef enum {
   CAF_ACC_PUBLIC = 0x0001,
   CAF_ACC_STATIC = 0x0008,
@@ -155,8 +193,7 @@ struct cf_attribute_t {
     struct cf_attribute_code_t {
       u16 max_stack;
       u16 max_locals;
-      u32 code_count;
-      u8 *code;
+      cf_code_array_t code;
       u16 exception_table_count;
       void *exception_table; // TODO
       cf_attribute_array_t attributes;
@@ -184,10 +221,10 @@ cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
   assert(arena != NULL);
 
   return (cf_attribute_array_t){
-      .cap = cap,
       .len = 0,
-      .arena = arena,
+      .cap = cap,
       .values = arena_alloc(arena, cap * sizeof(cf_attribute_t)),
+      .arena = arena,
   };
 }
 
@@ -399,11 +436,11 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
     assert(code->exception_table_count == 0 && "unimplemented");
 
-    const u16 exception_table_item_sizeof = 4*sizeof(u16);
+    const u16 exception_table_item_sizeof = 4 * sizeof(u16);
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
-               sizeof(code->code_count) + code->code_count +
+               sizeof(u32) + code->code.len +
                sizeof(code->exception_table_count) +
-               + code->exception_table_count * exception_table_item_sizeof +
+               +code->exception_table_count * exception_table_item_sizeof +
                sizeof(u16) // attributes length
         ;
 
@@ -454,8 +491,8 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     file_write_be_16(file, code->max_locals);
 
-    file_write_be_32(file, code->code_count);
-    fwrite(code->code, code->code_count, sizeof(u8), file);
+    file_write_be_32(file, code->code.len);
+    fwrite(code->code.values, code->code.len, sizeof(u8), file);
 
     file_write_be_16(file, code->exception_table_count);
 
@@ -562,33 +599,11 @@ void cf_init(cf_t *class_file, arena_t *arena) {
   class_file->attributes = cf_attribute_array_make(1024, arena);
 }
 
-u32 cf_add_code_u8(u8 *code, u32 *code_count, u8 op) {
-  assert(code != NULL);
-  assert(code_count != NULL);
-  assert(*code_count < UINT16_MAX); // TODO: UINT32_MAX vs ENOMEM
-
-  code[*code_count] = op;
-  *code_count += 1;
-  return *code_count - 1;
-}
-
-u32 cf_add_code_u16(u8 *code, u32 *code_count, u16 x) {
-  assert(code != NULL);
-  assert(code_count != NULL);
-  assert(*code_count < UINT16_MAX - 1); // TODO: UINT32_MAX vs ENOMEM
-
-  code[*code_count] = (u8)((u8)x & 0xff00);
-  *code_count += 1;
-  code[*code_count] = (u8)((u8)x & 0x00ff);
-  *code_count += 1;
-  return *code_count - 1;
-}
-
 void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   assert(code != NULL);
   assert(arena != NULL);
 
-  code->code = arena_alloc(arena, UINT16_MAX * sizeof(u8));
+  code->code = cf_code_array_make(32, arena);
   code->attributes = cf_attribute_array_make(1024, arena);
 }
 

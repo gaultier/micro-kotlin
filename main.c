@@ -144,13 +144,13 @@ int main() {
   {
     cf_attribute_code_t constructor_code = {.max_stack = 1, .max_locals = 1};
     cf_attribute_code_init(&constructor_code, &arena);
-    cf_add_code_u8(constructor_code.code, &constructor_code.code_count,
+    cf_code_array_push_u8(&constructor_code.code, 
                    CFO_ALOAD_0);
-    cf_add_code_u8(constructor_code.code, &constructor_code.code_count,
+    cf_code_array_push_u8(&constructor_code.code, 
                    CFO_INVOKE_SPECIAL);
-    cf_add_code_u16(constructor_code.code, &constructor_code.code_count,
-                    constant_object_method_ref_constructor_i);
-    cf_add_code_u8(constructor_code.code, &constructor_code.code_count,
+    cf_code_array_push_u16(&constructor_code.code,
+                           constant_object_method_ref_constructor_i);
+    cf_code_array_push_u8(&constructor_code.code, 
                    CFO_RETURN);
 
     cf_method_t constructor = {
@@ -174,21 +174,21 @@ int main() {
     cf_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
     cf_attribute_code_init(&main_code, &arena);
 
-    cf_add_code_u8(main_code.code, &main_code.code_count,
+    cf_code_array_push_u8(main_code.code, &main_code.code_count,
                            CFO_GET_STATIC);
     cf_add_code_u16(main_code.code, &main_code.code_count,
                             constant_out_fieldref_i);
 
-    cf_add_code_u8(main_code.code, &main_code.code_count, CFO_LDC);
-    cf_add_code_u8(main_code.code, &main_code.code_count,
+    cf_code_array_push_u8(main_code.code, &main_code.code_count, CFO_LDC);
+    cf_code_array_push_u8(main_code.code, &main_code.code_count,
                            constant_jstring_hello_i);
 
-    cf_add_code_u8(main_code.code, &main_code.code_count,
+    cf_code_array_push_u8(main_code.code, &main_code.code_count,
                            CFO_INVOKE_VIRTUAL);
     cf_add_code_u16(main_code.code, &main_code.code_count,
                             constant_println_method_ref_i);
 
-    cf_add_code_u8(main_code.code, &main_code.code_count, CFO_RETURN);
+    cf_code_array_push_u8(main_code.code, &main_code.code_count, CFO_RETURN);
 
     cf_method_t main = {
         .name = constant_string_main_i,
