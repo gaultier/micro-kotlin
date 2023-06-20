@@ -50,7 +50,7 @@ static u64 align_forward_16(u64 n) {
   return n;
 }
 
-static u8 *arena_alloc(arena_t *arena, u64 len) {
+static void *arena_alloc(arena_t *arena, u64 len) {
   assert(arena != NULL);
   assert(arena->current_offset < arena->capacity);
   assert(arena->current_offset + len < arena->capacity);
@@ -154,6 +154,43 @@ typedef struct cf_constant_method_ref_t cf_constant_method_ref_t;
 typedef struct cf_constant_name_and_type_t cf_constant_name_and_type_t;
 
 typedef struct cf_constant_field_ref_t cf_constant_field_ref_t;
+
+typedef struct {
+  u64 len;
+  u64 cap;
+  cf_constant_t *values;
+  arena_t *arena;
+} cf_constant_array_t;
+
+cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
+  assert(arena != NULL);
+
+  return (cf_constant_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(cf_constant_t)),
+      .arena = arena,
+  };
+}
+
+u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
+  assert(array != NULL);
+  assert(x != NULL);
+  assert(array->len < UINT16_MAX);
+  assert(array->values != NULL);
+  assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    cf_constant_t *const new_array = arena_alloc(array->arena, new_cap);
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len] = *x;
+  return array->len++;
+}
 
 typedef struct {
 } cf_field_t;
@@ -291,8 +328,7 @@ typedef struct {
   u32 magic;
   u16 minor_version;
   u16 major_version;
-  u16 constant_pool_count;
-  cf_constant_t *constant_pool;
+  cf_constant_array_t constant_pool;
   u16 access_flags;
   u16 this_class;
   u16 super_class;
@@ -396,14 +432,12 @@ void cf_write_constant_pool(const cf_t *class_file, FILE *file) {
   assert(class_file != NULL);
   assert(file != NULL);
 
-  const u16 len = class_file->constant_pool_count + 1;
+  const u16 len = class_file->constant_pool.len + 1;
   file_write_be_16(file, len);
 
-  for (u64 i = 0; i < class_file->constant_pool_count; i++) {
-    const cf_constant_t *const constant = &class_file->constant_pool[i];
-    LOG("action=writing constant i=%lu/%u\n", i,
-        class_file->constant_pool_count);
-    __builtin_dump_struct(constant, &printf);
+  for (u64 i = 0; i < class_file->constant_pool.len; i++) {
+    const cf_constant_t *const constant = &class_file->constant_pool.values[i];
+    LOG("action=writing constant i=%lu/%lu", i, class_file->constant_pool.len);
     cf_write_constant(class_file, file, constant);
   }
 }
@@ -577,21 +611,11 @@ void cf_write(const cf_t *class_file, FILE *file) {
   fflush(file);
 }
 
-u16 cf_add_constant(cf_t *class_file, const cf_constant_t *constant) {
-  assert(class_file->constant_pool_count < UINT16_MAX);
-
-  class_file->constant_pool[class_file->constant_pool_count] = *constant;
-
-  // Constant pool is 1-indexed, so we return index + 1.
-  return ++class_file->constant_pool_count;
-}
-
 void cf_init(cf_t *class_file, arena_t *arena) {
   assert(class_file != NULL);
   assert(arena != NULL);
 
-  class_file->constant_pool =
-      arena_alloc(arena, UINT16_MAX * sizeof(cf_constant_t));
+  class_file->constant_pool = cf_constant_array_make(1024, arena);
   class_file->attributes = cf_attribute_array_make(1024, arena);
 
   class_file->methods = cf_method_array_make(1024, arena);
@@ -614,8 +638,8 @@ void cf_method_init(cf_method_t *method, arena_t *arena) {
   method->attributes = cf_attribute_array_make(1024, arena);
 }
 
-u16 cf_add_constant_cstring(cf_t *class_file, char *s) {
-  assert(class_file != NULL);
+u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s) {
+  assert(constant_pool != NULL);
   assert(s != NULL);
 
   const cf_constant_t constant = {.kind = CIK_UTF8,
@@ -623,15 +647,16 @@ u16 cf_add_constant_cstring(cf_t *class_file, char *s) {
                                             .len = strlen(s),
                                             .s = (u8 *)s,
                                         }}};
-  return cf_add_constant(class_file, &constant);
+  return cf_constant_array_push(constant_pool, &constant);
 }
 
-u16 cf_add_constant_jstring(cf_t *class_file, u16 constant_utf8_i) {
-  assert(class_file != NULL);
+u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
+                            u16 constant_utf8_i) {
+  assert(constant_pool != NULL);
   assert(constant_utf8_i > 0);
 
   const cf_constant_t constant = {.kind = CIK_STRING,
                                   .v = {.string_utf8_i = constant_utf8_i}};
 
-  return cf_add_constant(class_file, &constant);
+  return cf_constant_array_push(constant_pool, &constant);
 }
