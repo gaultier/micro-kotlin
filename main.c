@@ -172,11 +172,9 @@ int main(int argc, char *argv[]) {
   {
     cf_attribute_code_t constructor_code = {.max_stack = 1, .max_locals = 1};
     cf_attribute_code_init(&constructor_code, &arena);
-    cf_code_array_push_u8(&constructor_code.code, CFO_ALOAD_0);
-    cf_code_array_push_u8(&constructor_code.code, CFO_INVOKE_SPECIAL);
-    cf_code_array_push_u16(&constructor_code.code,
-                           constant_object_method_ref_constructor_i);
-    cf_code_array_push_u8(&constructor_code.code, CFO_RETURN);
+    cf_asm_call_superclass_constructor(
+        &constructor_code.code, constant_object_method_ref_constructor_i);
+    cf_asm_return(&constructor_code.code);
 
     cf_method_t constructor = {
         .access_flags = CAF_ACC_PUBLIC,
@@ -198,16 +196,10 @@ int main(int argc, char *argv[]) {
     cf_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
     cf_attribute_code_init(&main_code, &arena);
 
-    cf_code_array_push_u8(&main_code.code, CFO_GET_STATIC);
-    cf_code_array_push_u16(&main_code.code, constant_out_fieldref_i);
-
-    cf_code_array_push_u8(&main_code.code, CFO_LDC);
-    cf_code_array_push_u8(&main_code.code, constant_jstring_hello_i);
-
-    cf_code_array_push_u8(&main_code.code, CFO_INVOKE_VIRTUAL);
-    cf_code_array_push_u16(&main_code.code, constant_println_method_ref_i);
-
-    cf_code_array_push_u8(&main_code.code, CFO_RETURN);
+    cf_asm_get_static(&main_code.code, constant_out_fieldref_i);
+    cf_asm_load_constant_string(&main_code.code, constant_jstring_hello_i);
+    cf_asm_invoke_virtual(&main_code.code, constant_println_method_ref_i);
+    cf_asm_return(&main_code.code);
 
     cf_method_t main = {
         .name = constant_string_main_i,

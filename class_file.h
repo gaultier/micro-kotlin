@@ -295,7 +295,17 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
   return index;
 }
 
-void cf_fill_type_descriptor_string(const cf_type_t *type, string_t *type_descriptor) {
+const cf_constant_t *
+cf_constant_array_at(const cf_constant_array_t *constant_pool, u16 i) {
+  pg_assert(constant_pool != NULL);
+  pg_assert(i > 0);
+  pg_assert(i <= constant_pool->len);
+
+  return &constant_pool->values[i];
+}
+
+void cf_fill_type_descriptor_string(const cf_type_t *type,
+                                    string_t *type_descriptor) {
   pg_assert(type != NULL);
   pg_assert(type_descriptor != NULL);
 
@@ -367,6 +377,33 @@ void cf_fill_type_descriptor_string(const cf_type_t *type, string_t *type_descri
   default:
     pg_assert(0 && "unreachable");
   }
+}
+
+void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i) {
+
+  cf_code_array_push_u8(code, CFO_LDC);
+  cf_code_array_push_u16(code, constant_i);
+}
+
+void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i) {
+  cf_code_array_push_u8(code, CFO_INVOKE_VIRTUAL);
+  cf_code_array_push_u8(code, method_ref_i);
+}
+
+void cf_asm_get_static(cf_code_array_t *code, u16 field_i) {
+  cf_code_array_push_u8(code, CFO_GET_STATIC);
+  cf_code_array_push_u8(code, field_i);
+}
+
+void cf_asm_return(cf_code_array_t *code) {
+  cf_code_array_push_u8(code, CFO_RETURN);
+}
+
+void cf_asm_call_superclass_constructor(cf_code_array_t *code,
+                                        u16 super_class_constructor_i) {
+  cf_code_array_push_u8(code, CFO_ALOAD_0);
+  cf_code_array_push_u8(code, CFO_INVOKE_SPECIAL);
+  cf_code_array_push_u16(code, super_class_constructor_i);
 }
 
 typedef struct {
