@@ -665,15 +665,25 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
                             cf_constant_array_t *constant_pool);
 
 void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                      cf_constant_array_t *constant_pool) {
+                                      cf_constant_array_t *constant_pool,
+                                      u32 attribute_len) {
+  const u8 *const current_start = *current;
+
   const u16 source_file_i = buf_read_be_u16(buf, buf_len, current);
   pg_assert(source_file_i > 0);
   pg_assert(source_file_i <= constant_pool->len);
   LOG("attribute_source_file source_file_i=%hu", source_file_i);
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
+  pg_assert(2 == attribute_len);
 }
 
 void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                cf_constant_array_t *constant_pool) {
+                                cf_constant_array_t *constant_pool,
+                                u32 attribute_len) {
+  const u8 *const current_start = *current;
+
   const u16 max_stack = buf_read_be_u16(buf, buf_len, current);
   const u16 max_locals = buf_read_be_u16(buf, buf_len, current);
   const u32 code_len = buf_read_be_u32(buf, buf_len, current);
@@ -687,17 +697,29 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
       max_stack, max_locals, code_len, exception_table_len);
 
   cf_buf_read_attributes(buf, buf_len, current, constant_pool);
+
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_stack_map_table_attribute(u8 *buf, u64 buf_len, u8 **current,
                                            cf_constant_array_t *constant_pool,
                                            u32 attribute_len) {
+  const u8 *const current_start = *current;
+
   buf_read_n_u8(buf, buf_len, NULL, attribute_len, current);
+
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
                                              cf_constant_array_t *constant_pool,
                                              u32 attribute_len) {
+
+  const u8 *const current_start = *current;
 
   const u16 line_number_len = buf_read_be_u16(buf, buf_len, current);
   pg_assert(sizeof(line_number_len) +
@@ -710,11 +732,17 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
     LOG("[%hu/%hu] Line number table entry: start_pc=%hu line_number=%hu", i,
         line_number_len, start_pc, line_number);
   }
+
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_local_variable_table_attribute(
     u8 *buf, u64 buf_len, u8 **current, cf_constant_array_t *constant_pool,
     u32 attribute_len) {
+  const u8 *const current_start = *current;
+
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
   const u16 entry_size = sizeof(u16) * 5;
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
@@ -731,14 +759,18 @@ void cf_buf_read_local_variable_table_attribute(
 
     LOG("[%hu/%hu] Local variable table entry: start_pc=%hu "
         "attribute_len=%hu name_i=%hu descriptor_i=%hu index=%hu",
-        i, table_len, start_pc, len, name_i,  descriptor_i,
-        idx);
+        i, table_len, start_pc, len, name_i, descriptor_i, idx);
   }
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_local_variable_type_table_attribute(
     u8 *buf, u64 buf_len, u8 **current, cf_constant_array_t *constant_pool,
     u32 attribute_len) {
+  const u8 *const current_start = *current;
+
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
   const u16 entry_size = sizeof(u16) * 5;
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
@@ -757,15 +789,24 @@ void cf_buf_read_local_variable_type_table_attribute(
         "attribute_len=%hu name_i=%hu signature_i=%hu index=%hu",
         i, table_len, start_pc, len, name_i, signature_i, idx);
   }
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
                                      cf_constant_array_t *constant_pool,
                                      u32 attribute_len) {
 
+  const u8 *const current_start = *current;
+
   pg_assert(attribute_len == 2);
   const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
   LOG("Signature #%hu", signature_i);
+
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
 }
 
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
@@ -788,9 +829,10 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   const string_t attribute_name = constant.v.s;
 
   if (string_eq_c(attribute_name, "SourceFile")) {
-    cf_buf_read_sourcefile_attribute(buf, buf_len, current, constant_pool);
+    cf_buf_read_sourcefile_attribute(buf, buf_len, current, constant_pool,
+                                     size);
   } else if (string_eq_c(attribute_name, "Code")) {
-    cf_buf_read_code_attribute(buf, buf_len, current, constant_pool);
+    cf_buf_read_code_attribute(buf, buf_len, current, constant_pool, size);
   } else if (string_eq_c(attribute_name, "StackMapTable")) {
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, constant_pool,
                                           size);
