@@ -28,12 +28,15 @@
       __builtin_trap();                                                        \
   } while (0)
 
+#define pg_max(a, b) ((a) > (b) ? (a) : (b))
+
 typedef enum {
   CFO_ALOAD_0 = 0x2a,
   CFO_INVOKE_SPECIAL = 0xb7,
   CFO_RETURN = 0xb1,
   CFO_GET_STATIC = 0xb2,
   CFO_LDC = 0x12,
+  CFO_LDC_W = 0x13,
   CFO_INVOKE_VIRTUAL = 0xb6,
 } cf_op_kind_t;
 
@@ -135,6 +138,13 @@ void string_append_string(string_t *a, const string_t *b) {
   for (u64 i = 0; i < b->len; i++)
     string_append_char(a, b->value[i]);
 }
+
+// ------------------------
+
+typedef struct {
+  u16 current;
+  u16 max;
+} cf_stack_t;
 
 struct cf_type_t;
 
@@ -379,24 +389,49 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   }
 }
 
-void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i) {
+void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
+                                 cf_stack_t *stack) {
+  pg_assert(code != NULL);
+  pg_assert(constant_i > 0);
+  pg_assert(stack != NULL);
 
-  cf_code_array_push_u8(code, CFO_LDC);
+  cf_code_array_push_u8(code, CFO_LDC_W);
   cf_code_array_push_u16(code, constant_i);
+
+  stack->current += 1;
+  pg_assert(stack->current < UINT16_MAX);
+  stack->max = pg_max(stack->max, stack->current);
 }
 
-void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i) {
+void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
+                           cf_stack_t *stack) {
+  pg_assert(code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(stack != NULL);
+
   cf_code_array_push_u8(code, CFO_INVOKE_VIRTUAL);
   cf_code_array_push_u8(code, method_ref_i);
+
+  // TODO
 }
 
-void cf_asm_get_static(cf_code_array_t *code, u16 field_i) {
+void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_stack_t *stack) {
+  pg_assert(code != NULL);
+  pg_assert(field_i > 0);
+  pg_assert(stack != NULL);
+
   cf_code_array_push_u8(code, CFO_GET_STATIC);
   cf_code_array_push_u8(code, field_i);
+
+  stack->current += 1;
+  pg_assert(stack->current < UINT16_MAX);
+  stack->max = pg_max(stack->max, stack->current);
 }
 
 void cf_asm_return(cf_code_array_t *code) {
   cf_code_array_push_u8(code, CFO_RETURN);
+
+  // TODO
 }
 
 void cf_asm_call_superclass_constructor(cf_code_array_t *code,
