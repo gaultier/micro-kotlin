@@ -685,6 +685,27 @@ void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(2 == attribute_len);
 }
 
+void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
+                            cf_constant_array_t *constant_pool, u16 indent) {
+  const u8 *const current_start = *current;
+
+  const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+  for (u16 i = 0; i < table_len; i++) {
+    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 end_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 handler_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 catch_type = buf_read_be_u16(buf, buf_len, current);
+    write_indent(stderr, indent);
+    LOG("[%hu/%hu] Exception start_pc=%hu end_pc=%hu handler_pc=%hu "
+        "catch_type=%hu",
+        i, table_len, start_pc, end_pc, handler_pc, catch_type);
+  }
+
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == sizeof(u16)+table_len * sizeof(u16) * 4);
+}
+
 void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
                                 cf_constant_array_t *constant_pool,
                                 u32 attribute_len, u16 indent) {
@@ -697,11 +718,11 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   buf_read_n_u8(buf, buf_len, NULL, code_len, current);
 
-  const u16 exception_table_len = buf_read_be_u16(buf, buf_len, current);
+  cf_buf_read_exceptions(buf, buf_len, current, constant_pool, indent + 4);
+
   write_indent(stderr, indent);
-  LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u "
-      "exception_table_len=%hu",
-      max_stack, max_locals, code_len, exception_table_len);
+  LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u ", max_stack,
+      max_locals, code_len);
 
   cf_buf_read_attributes(buf, buf_len, current, constant_pool, indent);
 
