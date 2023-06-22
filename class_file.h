@@ -653,6 +653,14 @@ u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
   return x;
 }
 
+string_t
+cf_constant_array_at_as_string(const cf_constant_array_t *constant_pool,
+                               u16 i) {
+  const cf_constant_t *const constant = cf_constant_array_at(constant_pool, i);
+  pg_assert(constant->kind == CIK_UTF8);
+  return constant->v.s;
+}
+
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
                             cf_constant_array_t *constant_pool);
 
@@ -711,7 +719,21 @@ void cf_buf_read_local_variable_table_attribute(
   const u16 entry_size = sizeof(u16) * 5;
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
 
-  buf_read_n_u8(buf, buf_len, NULL, table_len * entry_size, current);
+  for (u16 i = 0; i < table_len; i++) {
+    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 len = buf_read_be_u16(buf, buf_len, current);
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool->len);
+
+    const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 idx = buf_read_be_u16(buf, buf_len, current);
+
+    LOG("[%hu/%hu] Local variable table entry: start_pc=%hu "
+        "attribute_len=%hu name_i=%hu descriptor_i=%hu index=%hu",
+        i, table_len, start_pc, len, name_i,  descriptor_i,
+        idx);
+  }
 }
 
 void cf_buf_read_local_variable_type_table_attribute(
@@ -721,7 +743,29 @@ void cf_buf_read_local_variable_type_table_attribute(
   const u16 entry_size = sizeof(u16) * 5;
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
 
-  buf_read_n_u8(buf, buf_len, NULL, table_len * entry_size, current);
+  for (u16 i = 0; i < table_len; i++) {
+    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 len = buf_read_be_u16(buf, buf_len, current);
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool->len);
+
+    const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 idx = buf_read_be_u16(buf, buf_len, current);
+
+    LOG("[%hu/%hu] Local variable type table entry: start_pc=%hu "
+        "attribute_len=%hu name_i=%hu signature_i=%hu index=%hu",
+        i, table_len, start_pc, len, name_i, signature_i, idx);
+  }
+}
+
+void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                     cf_constant_array_t *constant_pool,
+                                     u32 attribute_len) {
+
+  pg_assert(attribute_len == 2);
+  const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
+  LOG("Signature #%hu", signature_i);
 }
 
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
@@ -759,7 +803,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   } else if (string_eq_c(attribute_name, "Synthetic")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Signature")) {
-    pg_assert(0 && "unreachable");
+    cf_buf_read_signature_attribute(buf, buf_len, current, constant_pool, size);
   } else if (string_eq_c(attribute_name, "SourceDebugExtension")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "LineNumberTable")) {
@@ -962,11 +1006,13 @@ void cf_read_method(u8 *buf, u64 buf_len, u8 **current,
   const u16 method_name_i = buf_read_be_u16(buf, buf_len, current);
   pg_assert(method_name_i > 0);
   pg_assert(method_name_i <= constant_pool->len);
+
   const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
   pg_assert(descriptor_i > 0);
   pg_assert(descriptor_i <= constant_pool->len);
-  LOG("[%hu/%u] method access_flags=%x method_name_i=%hu descriptor_i=%hu", i,
-      methods_count, access_flags, method_name_i, descriptor_i);
+  LOG("[%hu/%u] method access_flags=%x method_name_i=%hu "
+      "descriptor_i=%hu",
+      i, methods_count, access_flags, method_name_i, descriptor_i);
   cf_buf_read_attributes(buf, buf_len, current, constant_pool);
 }
 
