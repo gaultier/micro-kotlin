@@ -6,6 +6,23 @@ int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
   {
+    const char
+        *const lib_class_file_name = "/home/pg/scratch/java-module/java.base/"
+                                     "java/io/PrintStream.class"; // FIXME
+
+    int fd = open(lib_class_file_name, O_RDONLY);
+    pg_assert(fd > 0);
+
+    arena_t arena = {0};
+    arena_init(&arena, 1 << 23);
+    u8 *buf = arena_alloc(&arena, 1 << 14);
+    ssize_t read_bytes = read(fd, buf, 1 << 14);
+    u8 *current = buf;
+
+    cf_constant_array_t constant_pool = cf_constant_array_make(1024, &arena);
+    cf_read_class_file(buf, read_bytes, &current, &constant_pool);
+  }
+  {
     arena_t arena = {0};
     arena_init(&arena, 1 << 23);
 

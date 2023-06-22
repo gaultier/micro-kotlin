@@ -8,7 +8,7 @@
 [ ] Generate stack map tables
 [ ] Use latest jvm version
 [x] Makefile/build.sh
-[ ] Track max memory used in arena
+[x] Log memory used in arena
 [ ] Write non-trivial program with the API (opcode generation functions)
 [x] Compute class file name
 
