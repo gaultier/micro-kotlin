@@ -141,6 +141,8 @@ void string_append_string(string_t *a, const string_t *b) {
 
 // ------------------------
 
+static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
+
 typedef struct {
   u16 current;
   u16 max;

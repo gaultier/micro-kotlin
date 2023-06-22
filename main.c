@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
       cf_add_constant_cstring(&class_file.constant_pool, "()V");
 
   const u16 constant_class_object_name_and_type_name_i =
-      cf_add_constant_cstring(&class_file.constant_pool, "<init>");
+      cf_add_constant_cstring(&class_file.constant_pool, CF_INIT_CONSTRUCTOR_STRING);
 
   const cf_constant_t constant_class_object = {
       .kind = CIK_CLASS_INFO,
