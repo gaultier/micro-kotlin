@@ -704,6 +704,20 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
   }
 }
 
+void cf_buf_read_local_variable_table_attribute(
+    u8 *buf, u64 buf_len, u8 **current, cf_constant_array_t *constant_pool,
+    u32 attribute_len) {
+  const u16 local_variable_table_len = buf_read_be_u16(buf, buf_len, current);
+  const u16 local_variable_table_entry_size = sizeof(u16) * 5;
+  pg_assert(sizeof(local_variable_table_len) +
+                local_variable_table_len * local_variable_table_entry_size ==
+            attribute_len);
+
+  buf_read_n_u8(buf, buf_len, NULL,
+                local_variable_table_len * local_variable_table_entry_size,
+                current);
+}
+
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                            cf_constant_array_t *constant_pool) {
   pg_assert(buf != NULL);
@@ -746,7 +760,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_line_number_table_attribute(buf, buf_len, current,
                                             constant_pool, size);
   } else if (string_eq_c(attribute_name, "LocalVariableTable")) {
-    pg_assert(0 && "unreachable");
+    cf_buf_read_local_variable_table_attribute(buf, buf_len, current,
+                                               constant_pool, size);
   } else if (string_eq_c(attribute_name, "LocalVariableTypeTable")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Deprecated")) {
