@@ -636,7 +636,9 @@ void buf_read_n_u8(u8 *buf, u64 size, u8 *dst, u64 dst_len, u8 **current) {
   pg_assert(current != NULL);
   pg_assert(*current + dst_len <= buf + size);
 
-  memcpy(dst, *current, dst_len);
+  if (dst != NULL)
+    memcpy(dst, *current, dst_len);
+
   *current += dst_len;
 }
 
@@ -653,6 +655,54 @@ u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
 
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
                             cf_constant_array_t *constant_pool);
+
+void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                      cf_constant_array_t *constant_pool) {
+  const u16 source_file_i = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(source_file_i > 0);
+  pg_assert(source_file_i <= constant_pool->len);
+  LOG("attribute_source_file source_file_i=%hu", source_file_i);
+}
+
+void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                cf_constant_array_t *constant_pool) {
+  const u16 max_stack = buf_read_be_u16(buf, buf_len, current);
+  const u16 max_locals = buf_read_be_u16(buf, buf_len, current);
+  const u32 code_len = buf_read_be_u32(buf, buf_len, current);
+  pg_assert(*current + code_len <= buf + buf_len);
+
+  buf_read_n_u8(buf, buf_len, NULL, code_len, current);
+
+  const u16 exception_table_len = buf_read_be_u16(buf, buf_len, current);
+  LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u "
+      "exception_table_len=%hu",
+      max_stack, max_locals, code_len, exception_table_len);
+
+  cf_buf_read_attributes(buf, buf_len, current, constant_pool);
+}
+
+void cf_buf_read_stack_map_table_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                           cf_constant_array_t *constant_pool,
+                                           u32 attribute_len) {
+  buf_read_n_u8(buf, buf_len, NULL, attribute_len, current);
+}
+
+void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                             cf_constant_array_t *constant_pool,
+                                             u32 attribute_len) {
+
+  const u16 line_number_len = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(sizeof(line_number_len) +
+                line_number_len * (sizeof(u16) + sizeof(u16)) ==
+            attribute_len);
+
+  for (u16 i = 0; i < line_number_len; i++) {
+    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    const u16 line_number = buf_read_be_u16(buf, buf_len, current);
+    LOG("[%hu/%hu] Line number table entry: start_pc=%hu line_number=%hu", i,
+        line_number_len, start_pc, line_number);
+  }
+}
 
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                            cf_constant_array_t *constant_pool) {
@@ -674,24 +724,49 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   const string_t attribute_name = constant.v.s;
 
   if (string_eq_c(attribute_name, "SourceFile")) {
-    const u16 source_file_i = buf_read_be_u16(buf, buf_len, current);
-    LOG("attribute_source_file source_file_i=%hu", source_file_i);
+    cf_buf_read_sourcefile_attribute(buf, buf_len, current, constant_pool);
   } else if (string_eq_c(attribute_name, "Code")) {
-
-    const u16 max_stack = buf_read_be_u16(buf, buf_len, current);
-    const u16 max_locals = buf_read_be_u16(buf, buf_len, current);
-    const u32 code_len = buf_read_be_u32(buf, buf_len, current);
-    pg_assert(*current + code_len <= buf + buf_len);
-
-    u8 code[1024] = {0}; // FIXME
-    buf_read_n_u8(buf, buf_len, code, code_len, current);
-
-    const u16 exception_table_len = buf_read_be_u16(buf, buf_len, current);
-    LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u "
-        "exception_table_len=%hu",
-        max_stack, max_locals, code_len, exception_table_len);
-
-    cf_buf_read_attributes(buf, buf_len, current, constant_pool);
+    cf_buf_read_code_attribute(buf, buf_len, current, constant_pool);
+  } else if (string_eq_c(attribute_name, "StackMapTable")) {
+    cf_buf_read_stack_map_table_attribute(buf, buf_len, current, constant_pool,
+                                          size);
+  } else if (string_eq_c(attribute_name, "Exceptions")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "InnerClasses")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "EnclosingMethod")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "Synthetic")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "Signature")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "SourceDebugExtension")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "LineNumberTable")) {
+    cf_buf_read_line_number_table_attribute(buf, buf_len, current,
+                                            constant_pool, size);
+  } else if (string_eq_c(attribute_name, "LocalVariableTable")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "LocalVariableTypeTable")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "Deprecated")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "RuntimeVisibleAnnotations")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name,
+                         "RuntimeVisibleParameterAnnotations")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name,
+                         "RuntimeInvisibleParameterAnnotations")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "AnnotationsDefault")) {
+    pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "BootstrapMethods")) {
+    pg_assert(0 && "unreachable");
   } else {
     pg_assert(0 && "unreachable");
   }
@@ -733,8 +808,7 @@ void cf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(len > 0);
 
     u8 *const s = *current;
-    u8 dummy[UINT16_MAX] = {0};
-    buf_read_n_u8(buf, buf_len, dummy, len, current);
+    buf_read_n_u8(buf, buf_len, NULL, len, current);
 
     LOG("[%hu/%hu] CIK_UTF8 len=%u s=%.*s", i, constant_pool_len, len, len, s);
 
