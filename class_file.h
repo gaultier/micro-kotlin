@@ -698,6 +698,7 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   buf_read_n_u8(buf, buf_len, NULL, code_len, current);
 
   const u16 exception_table_len = buf_read_be_u16(buf, buf_len, current);
+  write_indent(stderr, indent);
   LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u "
       "exception_table_len=%hu",
       max_stack, max_locals, code_len, exception_table_len);
@@ -801,12 +802,13 @@ void cf_buf_read_local_variable_type_table_attribute(
 
 void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
                                      cf_constant_array_t *constant_pool,
-                                     u32 attribute_len) {
+                                     u32 attribute_len, u16 indent) {
 
   const u8 *const current_start = *current;
 
   pg_assert(attribute_len == 2);
   const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
+  write_indent(stderr, indent);
   LOG("Signature #%hu", signature_i);
 
   const u8 *const current_end = *current;
@@ -853,7 +855,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   } else if (string_eq_c(attribute_name, "Synthetic")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Signature")) {
-    cf_buf_read_signature_attribute(buf, buf_len, current, constant_pool, size);
+    cf_buf_read_signature_attribute(buf, buf_len, current, constant_pool, size,
+                                    indent + 4);
   } else if (string_eq_c(attribute_name, "SourceDebugExtension")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "LineNumberTable")) {
