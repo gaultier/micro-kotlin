@@ -139,6 +139,8 @@ void string_append_string(string_t *a, const string_t *b) {
     string_append_char(a, b->value[i]);
 }
 
+#define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
+
 // ------------------------
 
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
@@ -604,7 +606,320 @@ void file_write_be_32(FILE *file, u32 x) {
   fwrite(&x_be, sizeof(x_be), 1, file);
 }
 
-#define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
+u16 buf_read_be_16(u8 *buf, u64 size, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + 2 <= buf + size);
+
+  const u16 *const ptr = (u16 *)*current;
+  const u16 x_be = ptr[0];
+  *current += 2;
+  return ntohs(x_be);
+}
+
+u32 buf_read_be_32(u8 *buf, u64 size, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + 4 <= buf + size);
+
+  const u32 *const ptr = (u32 *)*current;
+  const u32 x_be = ptr[0];
+  *current += 4;
+  return ntohl(x_be);
+}
+
+void buf_read_n(u8 *buf, u64 size, u8 *dst, u64 dst_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + dst_len <= buf + size);
+
+  memcpy(dst, *current, dst_len);
+  *current += dst_len;
+}
+
+u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + 1 <= buf + size);
+
+  const u8 x = (*current)[0];
+  *current += 1;
+  return x;
+}
+
+void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
+                           cf_constant_array_t *constant_pool) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(constant_pool != NULL);
+
+  const u16 name_i = buf_read_be_16(buf, buf_len, current);
+  pg_assert(name_i > 0);
+  const u32 size = buf_read_be_32(buf, buf_len, current);
+
+  LOG("attribute name_i=%hu size=%u", name_i, size);
+  pg_assert(*current + size <= buf + buf_len);
+
+  pg_assert(name_i < constant_pool->len);
+  const cf_constant_t constant = constant_pool->values[name_i - 1];
+  pg_assert(constant.kind == CIK_UTF8);
+  const string_t attribute_name = constant.v.s;
+
+  if (string_eq_c(attribute_name, "SourceFile")) {
+    const u16 source_file_i = buf_read_be_16(buf, buf_len, current);
+    LOG("attribute_source_file source_file_i=%hu", source_file_i);
+  } else if (string_eq_c(attribute_name, "Code")) {
+
+    const u16 max_stack = buf_read_be_16(buf, buf_len, current);
+    const u16 max_locals = buf_read_be_16(buf, buf_len, current);
+    const u32 code_len = buf_read_be_32(buf, buf_len, current);
+    pg_assert(*current + code_len <= buf + buf_len);
+
+    u8 code[1024] = {0}; // FIXME
+    buf_read_n(buf, buf_len, code, code_len, current);
+
+    const u16 exception_table_len = buf_read_be_16(buf, buf_len, current);
+    const u16 attribute_count = buf_read_be_16(buf, buf_len, current);
+    LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u "
+        "exception_table_len=%hu attribute_count=%hu",
+        max_stack, max_locals, code_len, exception_table_len, attribute_count);
+
+    pg_assert(attribute_count == 0); // TODO
+  } else {
+    pg_assert(0 && "unreachable");
+  }
+}
+
+void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
+                            cf_constant_array_t *constant_pool) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(constant_pool != NULL);
+
+  const u16 attribute_count = buf_read_be_16(buf, buf_len, current);
+
+  for (u64 i = 0; i < attribute_count; i++) {
+    LOG("[%lu/%hu] attribute", i, attribute_count);
+    cf_buf_read_attribute(buf, buf_len, current, constant_pool);
+  }
+}
+
+void cf_read_constant(u8 *buf, u64 buf_len, u8 **current,
+                      cf_constant_array_t *constant_pool, u16 i,
+                      u16 constant_pool_len) {
+  u8 kind = buf_read_u8(buf, buf_len, current);
+
+  if (!(kind == CIK_UTF8 || kind == CIK_INT || kind == CIK_FLOAT ||
+        kind == CIK_LONG || kind == CIK_DOUBLE || kind == CIK_CLASS_INFO ||
+        kind == CIK_STRING || kind == CIK_FIELD_REF || kind == CIK_METHOD_REF ||
+        kind == CIK_INSTANCE_METHOD_REF || kind == CIK_NAME_AND_TYPE ||
+        kind == CIK_INVOKE_DYNAMIC)) {
+    fprintf(stderr, "Unknown constant kind found: offset=%lu kind=%u\n",
+            *current - buf - 1, kind);
+    pg_assert(0);
+  }
+
+  switch (kind) {
+  case CIK_UTF8: {
+    u16 len = buf_read_be_16(buf, buf_len, current);
+    pg_assert(len > 0);
+
+    u8 *const s = *current;
+    u8 dummy[UINT16_MAX] = {0};
+    buf_read_n(buf, buf_len, dummy, len, current);
+
+    LOG("[%hu/%hu] CIK_UTF8 len=%u s=%.*s", i, constant_pool_len, len, len, s);
+
+    cf_constant_t constant = {.kind = CIK_UTF8,
+                              .v = {.s = {.len = len, .value = s}}};
+    cf_constant_array_push(constant_pool, &constant);
+
+    break;
+  }
+  case CIK_INT:
+    pg_assert(0 && "unimplemented");
+    break;
+  case CIK_FLOAT:
+    pg_assert(0 && "unimplemented");
+    break;
+  case CIK_LONG:
+    pg_assert(0 && "unimplemented");
+    break;
+  case CIK_DOUBLE:
+    pg_assert(0 && "unimplemented");
+    break;
+  case CIK_CLASS_INFO: {
+    u16 class_name_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(class_name_i > 0);
+    pg_assert(class_name_i <= constant_pool_len);
+
+    LOG("[%hu/%hu] CIK_CLASS_INFO class_name_i=%u", i, constant_pool_len,
+        class_name_i);
+
+    cf_constant_t constant = {0}; // TODO
+    cf_constant_array_push(constant_pool, &constant);
+    break;
+  }
+  case CIK_STRING: {
+    u16 utf8_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(utf8_i > 0);
+    pg_assert(utf8_i <= constant_pool_len);
+    LOG("[%hu/%hu] CIK_STRING utf8_i=%u", i, constant_pool_len, utf8_i);
+
+    cf_constant_t constant = {0}; // TODO
+    cf_constant_array_push(constant_pool, &constant);
+    break;
+  }
+  case CIK_FIELD_REF: {
+    u16 name_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool_len);
+
+    u16 descriptor_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(descriptor_i > 0);
+    pg_assert(descriptor_i <= constant_pool_len);
+
+    LOG("[%hu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u", i,
+        constant_pool_len, name_i, descriptor_i);
+
+    cf_constant_t constant = {0}; // TODO
+    cf_constant_array_push(constant_pool, &constant);
+    break;
+  }
+  case CIK_METHOD_REF: {
+    u16 class_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(class_i > 0);
+    pg_assert(class_i <= constant_pool_len);
+
+    u16 name_and_type_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(name_and_type_i > 0);
+    pg_assert(name_and_type_i <= constant_pool_len);
+
+    LOG("[%hu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u", i,
+        constant_pool_len, class_i, name_and_type_i);
+
+    cf_constant_t constant = {0}; // TODO
+    cf_constant_array_push(constant_pool, &constant);
+    break;
+  }
+  case CIK_INSTANCE_METHOD_REF:
+    pg_assert(0 && "unimplemented");
+    break;
+  case CIK_NAME_AND_TYPE: {
+    u16 class_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(class_i > 0);
+    pg_assert(class_i <= constant_pool_len);
+
+    u16 name_and_type_i = buf_read_be_16(buf, buf_len, current);
+    pg_assert(name_and_type_i > 0);
+    pg_assert(name_and_type_i <= constant_pool_len);
+
+    LOG("[%hu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u", i,
+        constant_pool_len, class_i, name_and_type_i);
+
+    cf_constant_t constant = {0}; // TODO
+    cf_constant_array_push(constant_pool, &constant);
+    break;
+  }
+  case CIK_INVOKE_DYNAMIC:
+    pg_assert(0 && "unimplemented");
+    break;
+  default:
+    pg_assert(0 && "unreachable");
+  }
+}
+
+void cf_read_constants(u8 *buf, u64 buf_len, u8 **current,
+                       cf_constant_array_t *constant_pool,
+                       u16 constant_pool_len) {
+  for (u64 i = 1; i <= constant_pool_len; i++) {
+    cf_read_constant(buf, buf_len, current, constant_pool, i,
+                     constant_pool_len);
+  }
+}
+
+void cf_read_method(u8 *buf, u64 buf_len, u8 **current,
+                    cf_constant_array_t *constant_pool, u16 i,
+                    u16 methods_count) {
+  const u16 access_flags = buf_read_be_16(buf, buf_len, current);
+  const u16 method_name_i = buf_read_be_16(buf, buf_len, current);
+  pg_assert(method_name_i > 0);
+  pg_assert(method_name_i <= constant_pool->len);
+  const u16 descriptor_i = buf_read_be_16(buf, buf_len, current);
+  pg_assert(descriptor_i > 0);
+  pg_assert(descriptor_i <= constant_pool->len);
+  LOG("[%hu/%u] method access_flags=%x method_name_i=%hu descriptor_i=%hu", i,
+      methods_count, access_flags, method_name_i, descriptor_i);
+  cf_buf_read_attributes(buf, buf_len, current, constant_pool);
+}
+
+void cf_read_methods(u8 *buf, u64 buf_len, u8 **current,
+
+                     cf_constant_array_t *constant_pool, u16 methods_count) {
+  for (u64 i = 0; i < methods_count; i++) {
+    cf_read_method(buf, buf_len, current, constant_pool, i, methods_count);
+  }
+}
+
+void cf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
+
+                        cf_constant_array_t *constant_pool) {
+
+  pg_assert(buf_len > 0);
+
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0xca);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0xfe);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0xba);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0xbe);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0x00);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0x00);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0x00);
+  pg_assert(buf_read_u8(buf, buf_len, current) == 0x32);
+
+  const u16 constant_pool_size = buf_read_be_16(buf, buf_len, current) - 1;
+  pg_assert(constant_pool_size > 0);
+
+  cf_read_constants(buf, buf_len, current, constant_pool, constant_pool_size);
+
+  const u16 access_flags = buf_read_be_16(buf, buf_len, current);
+  LOG("access flags=%x", access_flags);
+
+  const u16 this_class_i = buf_read_be_16(buf, buf_len, current);
+  LOG("this class=%x", this_class_i);
+  pg_assert(this_class_i > 0);
+  pg_assert(this_class_i <= constant_pool_size);
+
+  const u16 super_class_i = buf_read_be_16(buf, buf_len, current);
+  LOG("super class=%x", super_class_i);
+  pg_assert(super_class_i > 0);
+  pg_assert(super_class_i <= constant_pool_size);
+
+  const u16 interfaces_count = buf_read_be_16(buf, buf_len, current);
+  LOG("interfaces count=%x", interfaces_count);
+  pg_assert(interfaces_count == 0);
+
+  const u16 fields_count = buf_read_be_16(buf, buf_len, current);
+  LOG("fields count=%x", fields_count);
+  pg_assert(fields_count == 0);
+
+  const u16 methods_count = buf_read_be_16(buf, buf_len, current);
+  LOG("methods count=%x", methods_count);
+  pg_assert(methods_count > 0);
+
+  cf_read_methods(buf, buf_len, current, constant_pool, methods_count);
+
+  cf_buf_read_attributes(buf, buf_len, current, constant_pool);
+
+  const u64 remaining = buf + buf_len - *current;
+  LOG("read=%ld rem=%ld", *current - buf, remaining);
+  pg_assert(remaining == 0);
+}
 
 void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
                        const cf_constant_t *constant) {
