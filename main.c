@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     u8 *current = buf;
 
     cf_constant_array_t constant_pool = cf_constant_array_make(1024, &arena);
-    cf_read_class_file(buf, read_bytes, &current, &constant_pool);
+    cf_buf_read_class_file(buf, read_bytes, &current, &constant_pool);
   }
   {
     arena_t arena = {0};
@@ -272,6 +272,6 @@ int main(int argc, char *argv[]) {
     ssize_t read_bytes = read(fd, buf, 1 << 14);
     u8 *current = buf;
 
-    cf_read_class_file(buf, read_bytes, &current, &constant_pool);
+    cf_buf_read_class_file(buf, read_bytes, &current, &constant_pool);
   }
 }

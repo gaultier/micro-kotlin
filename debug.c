@@ -23,5 +23,5 @@ int main(int argc, char *argv[]) {
   ssize_t read_bytes = read(fd, buf, sizeof(buf));
   u8 *current = buf;
 
-  cf_read_class_file(buf, read_bytes, &current, &constant_pool);
+  cf_buf_read_class_file(buf, read_bytes, &current, &constant_pool);
 }
