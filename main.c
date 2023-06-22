@@ -197,9 +197,10 @@ int main(int argc, char *argv[]) {
     cf_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
     cf_attribute_code_init(&main_code, &arena);
 
-    cf_asm_get_static(&main_code.code, constant_out_fieldref_i);
-    cf_asm_load_constant_string(&main_code.code, constant_jstring_hello_i);
-    cf_asm_invoke_virtual(&main_code.code, constant_println_method_ref_i);
+    cf_stack_t stack = {0};
+    cf_asm_get_static(&main_code.code, constant_out_fieldref_i, &stack);
+    cf_asm_load_constant_string(&main_code.code, constant_jstring_hello_i, &stack);
+    cf_asm_invoke_virtual(&main_code.code, constant_println_method_ref_i, &stack);
     cf_asm_return(&main_code.code);
 
     cf_method_t main = {
