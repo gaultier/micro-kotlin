@@ -3,3 +3,7 @@ a.out
 *.class
 debug
 main
+debug_debug
+main_debug
+main_release
+debug_release
