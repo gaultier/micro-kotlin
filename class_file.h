@@ -668,10 +668,11 @@ cf_constant_array_at_as_string(const cf_constant_array_t *constant_pool,
 }
 
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
-                            cf_constant_array_t *constant_pool, u16 indent);
+                            const cf_constant_array_t *constant_pool,
+                            u16 indent);
 
 void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                      cf_constant_array_t *constant_pool,
+                                      const cf_constant_array_t *constant_pool,
                                       u32 attribute_len) {
   const u8 *const current_start = *current;
 
@@ -686,7 +687,8 @@ void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
-                            cf_constant_array_t *constant_pool, u16 indent) {
+                            const cf_constant_array_t *constant_pool,
+                            u16 indent) {
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -707,7 +709,7 @@ void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                cf_constant_array_t *constant_pool,
+                                const cf_constant_array_t *constant_pool,
                                 u32 attribute_len, u16 indent) {
   const u8 *const current_start = *current;
 
@@ -731,9 +733,9 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-void cf_buf_read_stack_map_table_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                           cf_constant_array_t *constant_pool,
-                                           u32 attribute_len) {
+void cf_buf_read_stack_map_table_attribute(
+    u8 *buf, u64 buf_len, u8 **current,
+    const cf_constant_array_t *constant_pool, u32 attribute_len) {
   const u8 *const current_start = *current;
 
   buf_read_n_u8(buf, buf_len, NULL, attribute_len, current);
@@ -743,9 +745,9 @@ void cf_buf_read_stack_map_table_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                             cf_constant_array_t *constant_pool,
-                                             u32 attribute_len) {
+void cf_buf_read_line_number_table_attribute(
+    u8 *buf, u64 buf_len, u8 **current,
+    const cf_constant_array_t *constant_pool, u32 attribute_len, u16 indent) {
 
   const u8 *const current_start = *current;
 
@@ -756,6 +758,8 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
   for (u16 i = 0; i < table_len; i++) {
     const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
     const u16 line_number = buf_read_be_u16(buf, buf_len, current);
+
+    write_indent(stderr, indent + 4);
     LOG("[%hu/%hu] Line number table entry: start_pc=%hu line_number=%hu", i,
         table_len, start_pc, line_number);
   }
@@ -766,8 +770,8 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_local_variable_table_attribute(
-    u8 *buf, u64 buf_len, u8 **current, cf_constant_array_t *constant_pool,
-    u32 attribute_len) {
+    u8 *buf, u64 buf_len, u8 **current,
+    const cf_constant_array_t *constant_pool, u32 attribute_len, u16 indent) {
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -784,6 +788,7 @@ void cf_buf_read_local_variable_table_attribute(
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
 
+    write_indent(stderr, indent + 4);
     LOG("[%hu/%hu] Local variable table entry: start_pc=%hu "
         "attribute_len=%hu name_i=%hu descriptor_i=%hu index=%hu",
         i, table_len, start_pc, len, name_i, descriptor_i, idx);
@@ -794,8 +799,8 @@ void cf_buf_read_local_variable_table_attribute(
 }
 
 void cf_buf_read_local_variable_type_table_attribute(
-    u8 *buf, u64 buf_len, u8 **current, cf_constant_array_t *constant_pool,
-    u32 attribute_len) {
+    u8 *buf, u64 buf_len, u8 **current,
+    const cf_constant_array_t *constant_pool, u32 attribute_len, u16 indent) {
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -812,6 +817,7 @@ void cf_buf_read_local_variable_type_table_attribute(
     const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
 
+    write_indent(stderr, indent + 4);
     LOG("[%hu/%hu] Local variable type table entry: start_pc=%hu "
         "attribute_len=%hu name_i=%hu signature_i=%hu index=%hu",
         i, table_len, start_pc, len, name_i, signature_i, idx);
@@ -822,7 +828,7 @@ void cf_buf_read_local_variable_type_table_attribute(
 }
 
 void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                     cf_constant_array_t *constant_pool,
+                                     const cf_constant_array_t *constant_pool,
                                      u32 attribute_len, u16 indent) {
 
   const u8 *const current_start = *current;
@@ -838,8 +844,8 @@ void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                      cf_constant_array_t *constant_pool,
-                                      u32 attribute_len) {
+                                      const cf_constant_array_t *constant_pool,
+                                      u32 attribute_len, u16 indent) {
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -851,6 +857,7 @@ void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(exception_i > 0);
     pg_assert(exception_i <= constant_pool->len);
 
+    write_indent(stderr, indent + 4);
     LOG("[%hu/%hu] Exceptions attribute: exception_i=%hu ", i, table_len,
         exception_i);
   }
@@ -859,9 +866,9 @@ void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
-                                         cf_constant_array_t *constant_pool,
-                                         u32 attribute_len) {
+void cf_buf_read_inner_classes_attribute(
+    u8 *buf, u64 buf_len, u8 **current,
+    const cf_constant_array_t *constant_pool, u32 attribute_len, u16 indent) {
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -883,6 +890,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
 
     const u16 inner_class_access_flags = buf_read_be_u16(buf, buf_len, current);
 
+    write_indent(stderr, indent + 4);
     LOG("[%hu/%hu] Inner classes attribute: inner_class_info_i=%hu "
         "outer_class_info_i=%hu inner_name_i=%hu inner_class_access_flags=%hu",
         i, table_len, inner_class_info_i, outer_class_info_i, inner_name_i,
@@ -894,7 +902,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
-                           cf_constant_array_t *constant_pool, u16 i,
+                           const cf_constant_array_t *constant_pool, u16 i,
                            u16 attribute_count, u16 indent) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -924,10 +932,11 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, constant_pool,
                                           size);
   } else if (string_eq_c(attribute_name, "Exceptions")) {
-    cf_buf_read_exceptions_attribute(buf, buf_len, current, constant_pool,
-                                     size);
+    cf_buf_read_exceptions_attribute(buf, buf_len, current, constant_pool, size,
+                                     indent);
   } else if (string_eq_c(attribute_name, "InnerClasses")) {
-    cf_buf_read_inner_classes_attribute(buf,buf_len,current, constant_pool,size);
+    cf_buf_read_inner_classes_attribute(buf, buf_len, current, constant_pool,
+                                        size, indent);
   } else if (string_eq_c(attribute_name, "EnclosingMethod")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Synthetic")) {
@@ -939,13 +948,13 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "LineNumberTable")) {
     cf_buf_read_line_number_table_attribute(buf, buf_len, current,
-                                            constant_pool, size);
+                                            constant_pool, size, indent);
   } else if (string_eq_c(attribute_name, "LocalVariableTable")) {
     cf_buf_read_local_variable_table_attribute(buf, buf_len, current,
-                                               constant_pool, size);
+                                               constant_pool, size, indent);
   } else if (string_eq_c(attribute_name, "LocalVariableTypeTable")) {
-    cf_buf_read_local_variable_type_table_attribute(buf, buf_len, current,
-                                                    constant_pool, size);
+    cf_buf_read_local_variable_type_table_attribute(
+        buf, buf_len, current, constant_pool, size, indent);
   } else if (string_eq_c(attribute_name, "Deprecated")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "RuntimeVisibleAnnotations")) {
@@ -970,7 +979,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
-                            cf_constant_array_t *constant_pool, u16 indent) {
+                            const cf_constant_array_t *constant_pool,
+                            u16 indent) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
