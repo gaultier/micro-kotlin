@@ -848,8 +848,45 @@ void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   for (u16 i = 0; i < table_len; i++) {
     const u16 exception_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(exception_i > 0);
+    pg_assert(exception_i <= constant_pool->len);
+
     LOG("[%hu/%hu] Exceptions attribute: exception_i=%hu ", i, table_len,
         exception_i);
+  }
+  const u8 *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
+}
+
+void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
+                                         cf_constant_array_t *constant_pool,
+                                         u32 attribute_len) {
+  const u8 *const current_start = *current;
+
+  const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+  const u16 entry_size = sizeof(u16) * 4;
+  pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
+
+  for (u16 i = 0; i < table_len; i++) {
+    const u16 inner_class_info_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(inner_class_info_i > 0);
+    pg_assert(inner_class_info_i <= constant_pool->len);
+
+    const u16 outer_class_info_i = buf_read_be_u16(buf, buf_len, current);
+    // Could be 0.
+    pg_assert(outer_class_info_i <= constant_pool->len);
+
+    const u16 inner_name_i = buf_read_be_u16(buf, buf_len, current);
+    // Could be 0.
+    pg_assert(inner_name_i <= constant_pool->len);
+
+    const u16 inner_class_access_flags = buf_read_be_u16(buf, buf_len, current);
+
+    LOG("[%hu/%hu] Inner classes attribute: inner_class_info_i=%hu "
+        "outer_class_info_i=%hu inner_name_i=%hu inner_class_access_flags=%hu",
+        i, table_len, inner_class_info_i, outer_class_info_i, inner_name_i,
+        inner_class_access_flags);
   }
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -890,7 +927,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_exceptions_attribute(buf, buf_len, current, constant_pool,
                                      size);
   } else if (string_eq_c(attribute_name, "InnerClasses")) {
-    pg_assert(0 && "unreachable");
+    cf_buf_read_inner_classes_attribute(buf,buf_len,current, constant_pool,size);
   } else if (string_eq_c(attribute_name, "EnclosingMethod")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Synthetic")) {
