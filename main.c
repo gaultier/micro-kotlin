@@ -90,10 +90,29 @@ int main(int argc, char *argv[]) {
 
     cf_type_t void_type = {.kind = CTY_VOID};
 
+    // TODO: deduplicate strings? Reuse from constant pool?
     cf_type_t string_type = {
         .kind = CTY_INSTANCE_REFERENCE,
         .v = {.class_name = string_make_from_c("java/lang/String", &arena)},
     };
+    cf_type_t object_type = {
+        .kind = CTY_INSTANCE_REFERENCE,
+        .v = {.class_name = string_make_from_c("java/lang/Object", &arena)},
+    };
+    cf_type_t object_constructor_argument_types[] = {};
+    cf_type_t object_constructor_type = {
+        .kind = CTY_CONSTRUCTOR,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 0,
+                        .return_type = &void_type,
+                        .argument_types = object_constructor_argument_types,
+                    },
+            },
+    };
+
     cf_type_t println_argument_types[] = {string_type};
     cf_type_t println_type = {
         .kind = CTY_METHOD,
@@ -219,8 +238,10 @@ int main(int argc, char *argv[]) {
     {
       cf_attribute_code_t constructor_code = {.max_stack = 1, .max_locals = 1};
       cf_attribute_code_init(&constructor_code, &arena);
+      cf_vm_t vm = {0};
       cf_asm_call_superclass_constructor(
-          &constructor_code.code, constant_object_method_ref_constructor_i);
+          &constructor_code.code, constant_object_method_ref_constructor_i, &vm,
+          &object_constructor_type);
       cf_asm_return(&constructor_code.code);
 
       cf_method_t constructor = {
@@ -240,7 +261,8 @@ int main(int argc, char *argv[]) {
     }
     // This's class main
     {
-      cf_attribute_code_t main_code = {.max_locals = 1};
+      cf_attribute_code_t main_code = {.max_locals =
+                                           main_type.v.method.argument_count};
       cf_attribute_code_init(&main_code, &arena);
 
       cf_vm_t vm = {0};

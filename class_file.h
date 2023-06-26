@@ -139,6 +139,17 @@ void string_append_string(string_t *a, const string_t *b) {
     string_append_char(a, b->value[i]);
 }
 
+void string_append_cstring(string_t *a, const char *b) {
+  pg_assert(a != NULL);
+  pg_assert(b != NULL);
+  pg_assert(a->cap != 0);
+  pg_assert(a->len <= a->cap);
+  pg_assert(a->arena != NULL);
+
+  for (u64 i = 0; i < strlen(b); i++)
+    string_append_char(a, b[i]);
+}
+
 #define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
 
 void write_indent(FILE *file, u16 indent) {
@@ -179,10 +190,11 @@ struct cf_type_t {
     CTY_BOOLEAN,
     CTY_ARRAY_REFERENCE,
     CTY_METHOD,
+    CTY_CONSTRUCTOR,
   } kind;
   union {
     string_t class_name;          // CTY_INSTANCE_REFERENCE
-    cf_type_method_t method;      // CTY_METHOD
+    cf_type_method_t method;      // CTY_METHOD, CTY_CONSTRUCTOR
     struct cf_type_t *array_type; // CTY_ARRAY_REFERENCE
   } v;
 };
@@ -381,11 +393,12 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
     string_append_char(type_descriptor, '[');
 
     const cf_type_t *const array_type = type->v.array_type;
-    pg_assert(array_type!=NULL);
+    pg_assert(array_type != NULL);
     cf_fill_type_descriptor_string(array_type, type_descriptor);
 
     break;
   };
+  case CTY_CONSTRUCTOR:
   case CTY_METHOD: {
     const cf_type_method_t *const method_type = &type->v.method;
     string_append_char(type_descriptor, '(');
@@ -421,7 +434,7 @@ void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
 }
 
 void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
-                           const cf_type_method_t *type) {
+                           const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(vm != NULL);
@@ -430,8 +443,8 @@ void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
   cf_code_array_push_u16(code, method_ref_i);
 
   // FIXME: long, double takes 2 spots on the stack!
-  pg_assert(vm->current_stack >= type->argument_count);
-  vm->current_stack -= type->argument_count;
+  pg_assert(vm->current_stack >= method_type->argument_count);
+  vm->current_stack -= method_type->argument_count;
 }
 
 void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_vm_t *vm) {
@@ -453,11 +466,36 @@ void cf_asm_return(cf_code_array_t *code) {
   // TODO
 }
 
-void cf_asm_call_superclass_constructor(cf_code_array_t *code,
-                                        u16 super_class_constructor_i) {
-  cf_code_array_push_u8(code, CFO_ALOAD_0);
+void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
+                           const cf_type_method_t *method_type) {
+  pg_assert(code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(vm != NULL);
+
   cf_code_array_push_u8(code, CFO_INVOKE_SPECIAL);
-  cf_code_array_push_u16(code, super_class_constructor_i);
+  cf_code_array_push_u16(code, method_ref_i);
+
+  // FIXME: long, double takes 2 spots on the stack!
+  pg_assert(vm->current_stack >= method_type->argument_count);
+  vm->current_stack -= method_type->argument_count;
+}
+
+void cf_asm_call_superclass_constructor(cf_code_array_t *code,
+                                        u16 super_class_constructor_i,
+                                        cf_vm_t *vm,
+                                        const cf_type_t *constructor_type) {
+  pg_assert(code != NULL);
+  pg_assert(super_class_constructor_i > 0);
+  pg_assert(vm != NULL);
+  pg_assert(constructor_type != NULL);
+  pg_assert(constructor_type->kind == CTY_CONSTRUCTOR);
+
+  cf_code_array_push_u8(
+      code, CFO_ALOAD_0); // TODO: move the responsability to the caller?
+
+  const cf_type_method_t *const method_type = &constructor_type->v.method;
+  pg_assert(method_type != NULL);
+  cf_asm_invoke_special(code, super_class_constructor_i, vm, method_type);
 }
 
 typedef struct {
