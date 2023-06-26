@@ -6,9 +6,9 @@ int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
   {
-    const char
-        *const lib_class_file_name = "/home/pg/scratch/java-module/java.base/"
-                                     "java/io/PrintStream.class"; // FIXME
+    const char *const lib_class_file_name =
+        "/home/pg/scratch/java-module/java.base/"
+        "java/io/PrintStream.class"; // FIXME
 
     int fd = open(lib_class_file_name, O_RDONLY);
     pg_assert(fd > 0);
@@ -87,31 +87,53 @@ int main(int argc, char *argv[]) {
 
     const u16 constant_string_main_i =
         cf_add_constant_cstring(&class_file.constant_pool, "main");
+
+    cf_type_t void_type = {.kind = CTY_VOID};
+
+    cf_type_t string_type = {
+        .kind = CTY_INSTANCE_REFERENCE,
+        .v = {.class_name = string_make_from_c("java/lang/String", &arena)},
+    };
+    cf_type_t println_argument_types[] = {string_type};
+    cf_type_t println_type = {
+        .kind = CTY_METHOD,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 1,
+                        .return_type = &void_type,
+                        .argument_types = println_argument_types,
+                    },
+            },
+    };
+
+    cf_type_t main_argument_types[] = {{
+        .kind = CTY_ARRAY_REFERENCE,
+        .v = {.array_type = &string_type},
+    }};
+    cf_type_t main_type = {
+        .kind = CTY_METHOD,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 1,
+                        .return_type = &void_type,
+                        .argument_types = main_argument_types,
+                    },
+            },
+    };
     {
-      cf_type_t argument_types[] = {{
-          .kind = CTY_INSTANCE_REFERENCE,
-          .v = {.class_name = string_make_from_c("java/lang/String", &arena)},
-      }};
-      cf_type_t void_type = {.kind = CTY_VOID};
-      cf_type_t println_type = {
-          .kind = CTY_METHOD,
-          .v =
-              {
-                  .method =
-                      {
-                          .argument_count = 1,
-                          .return_type = &void_type,
-                          .argument_types = argument_types,
-                      },
-              },
-      };
 
       string_t println_type_s = string_reserve(30, &arena);
       cf_fill_type_descriptor_string(&println_type, &println_type_s);
       fprintf(stderr, "%.*s\n", println_type_s.len, println_type_s.value);
     }
-    const u16 constant_string_main_type_descriptor_i = cf_add_constant_cstring(
-        &class_file.constant_pool, "(Ljava/lang/String;)V");
+    string_t main_type_s = string_reserve(50, &arena);
+    cf_fill_type_descriptor_string(&main_type, &main_type_s);
+    const u16 constant_string_main_type_descriptor_i =
+        cf_add_constant_string(&class_file.constant_pool, main_type_s);
 
     const u16 constant_string_source_file_i =
         cf_add_constant_cstring(&class_file.constant_pool, "SourceFile");
@@ -218,16 +240,18 @@ int main(int argc, char *argv[]) {
     }
     // This's class main
     {
-      cf_attribute_code_t main_code = {.max_stack = 2, .max_locals = 1};
+      cf_attribute_code_t main_code = {.max_locals = 1};
       cf_attribute_code_init(&main_code, &arena);
 
-      cf_stack_t stack = {0};
-      cf_asm_get_static(&main_code.code, constant_out_fieldref_i, &stack);
+      cf_vm_t vm = {0};
+      cf_asm_get_static(&main_code.code, constant_out_fieldref_i, &vm);
       cf_asm_load_constant_string(&main_code.code, constant_jstring_hello_i,
-                                  &stack);
-      cf_asm_invoke_virtual(&main_code.code, constant_println_method_ref_i,
-                            &stack);
+                                  &vm);
+      cf_asm_invoke_virtual(&main_code.code, constant_println_method_ref_i, &vm,
+                            &println_type.v.method);
       cf_asm_return(&main_code.code);
+
+      main_code.max_stack = vm.max_stack;
 
       cf_method_t main = {
           .name = constant_string_main_i,
@@ -238,6 +262,9 @@ int main(int argc, char *argv[]) {
       cf_attribute_t main_attribute_code = {.kind = CAK_CODE,
                                             .name = constant_string_code_i,
                                             .v = {.code = main_code}};
+
+      // main_code.max_locals = vm.max_locals;
+
       cf_attribute_array_push(&main.attributes, &main_attribute_code);
 
       cf_method_array_push(&class_file.methods, &main);

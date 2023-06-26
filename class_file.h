@@ -152,9 +152,10 @@ void write_indent(FILE *file, u16 indent) {
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
 
 typedef struct {
-  u16 current;
-  u16 max;
-} cf_stack_t;
+  u16 current_stack;
+  u16 max_stack;
+  u16 max_locals;
+} cf_vm_t;
 
 struct cf_type_t;
 
@@ -180,8 +181,9 @@ struct cf_type_t {
     CTY_METHOD,
   } kind;
   union {
-    string_t class_name;     // CTY_INSTANCE_REFERENCE
-    cf_type_method_t method; // CTY_METHOD
+    string_t class_name;          // CTY_INSTANCE_REFERENCE
+    cf_type_method_t method;      // CTY_METHOD
+    struct cf_type_t *array_type; // CTY_ARRAY_REFERENCE
   } v;
 };
 typedef struct cf_type_t cf_type_t;
@@ -377,6 +379,11 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   };
   case CTY_ARRAY_REFERENCE: {
     string_append_char(type_descriptor, '[');
+
+    const cf_type_t *const array_type = type->v.array_type;
+    pg_assert(array_type!=NULL);
+    cf_fill_type_descriptor_string(array_type, type_descriptor);
+
     break;
   };
   case CTY_METHOD: {
@@ -400,42 +407,44 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
 }
 
 void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
-                                 cf_stack_t *stack) {
+                                 cf_vm_t *vm) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
-  pg_assert(stack != NULL);
+  pg_assert(vm != NULL);
 
   cf_code_array_push_u8(code, CFO_LDC_W);
   cf_code_array_push_u16(code, constant_i);
 
-  stack->current += 1;
-  pg_assert(stack->current < UINT16_MAX);
-  stack->max = pg_max(stack->max, stack->current);
+  vm->current_stack += 1;
+  pg_assert(vm->current_stack < UINT16_MAX);
+  vm->max_stack = pg_max(vm->max_stack, vm->current_stack);
 }
 
-void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
-                           cf_stack_t *stack) {
+void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
+                           const cf_type_method_t *type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
-  pg_assert(stack != NULL);
+  pg_assert(vm != NULL);
 
   cf_code_array_push_u8(code, CFO_INVOKE_VIRTUAL);
-  cf_code_array_push_u8(code, method_ref_i);
+  cf_code_array_push_u16(code, method_ref_i);
 
-  // TODO
+  // FIXME: long, double takes 2 spots on the stack!
+  pg_assert(vm->current_stack >= type->argument_count);
+  vm->current_stack -= type->argument_count;
 }
 
-void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_stack_t *stack) {
+void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_vm_t *vm) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
-  pg_assert(stack != NULL);
+  pg_assert(vm != NULL);
 
   cf_code_array_push_u8(code, CFO_GET_STATIC);
-  cf_code_array_push_u8(code, field_i);
+  cf_code_array_push_u16(code, field_i);
 
-  stack->current += 1;
-  pg_assert(stack->current < UINT16_MAX);
-  stack->max = pg_max(stack->max, stack->current);
+  vm->current_stack += 1;
+  pg_assert(vm->current_stack < UINT16_MAX);
+  vm->max_stack = pg_max(vm->max_stack, vm->current_stack);
 }
 
 void cf_asm_return(cf_code_array_t *code) {
@@ -1544,6 +1553,14 @@ void cf_method_init(cf_method_t *method, arena_t *arena) {
   pg_assert(arena != NULL);
 
   method->attributes = cf_attribute_array_make(1024, arena);
+}
+
+u16 cf_add_constant_string(cf_constant_array_t *constant_pool, string_t s) {
+  pg_assert(constant_pool != NULL);
+  pg_assert(s.value != NULL);
+
+  const cf_constant_t constant = {.kind = CIK_UTF8, .v = {.s = s}};
+  return cf_constant_array_push(constant_pool, &constant);
 }
 
 u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s) {
