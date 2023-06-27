@@ -19,8 +19,9 @@ int main(int argc, char *argv[]) {
     ssize_t read_bytes = read(fd, buf, 1 << 14);
     u8 *current = buf;
 
-    cf_constant_array_t constant_pool = cf_constant_array_make(1024, &arena);
-    cf_buf_read_class_file(buf, read_bytes, &current, &constant_pool);
+    cf_class_file_t class_file = {0};
+    cf_init(&class_file, &arena);
+    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
   {
     arena_t arena = {0};
@@ -308,7 +309,6 @@ int main(int argc, char *argv[]) {
 
     arena_t arena = {0};
     arena_init(&arena, 1 << 26);
-    cf_constant_array_t constant_pool = cf_constant_array_make(1024, &arena);
 
     const char *const source_file_name = argv[1];
     const char *const class_file_name =
@@ -321,6 +321,8 @@ int main(int argc, char *argv[]) {
     ssize_t read_bytes = read(fd, buf, 1 << 14);
     u8 *current = buf;
 
-    cf_buf_read_class_file(buf, read_bytes, &current, &constant_pool);
+    cf_class_file_t class_file = {0};
+    cf_init(&class_file, &arena);
+    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
 }
