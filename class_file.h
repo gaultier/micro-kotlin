@@ -1212,7 +1212,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_inner_classes_attribute(buf, buf_len, current, class_file, size,
                                         arena);
   } else if (string_eq_c(attribute_name, "EnclosingMethod")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "Synthetic")) {
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "Signature")) {
@@ -1251,6 +1251,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "NestHost")) {
     *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "ConstantValue")) {
+    *current += size; // TODO
   } else {
     pg_assert(0 && "unreachable");
   }
@@ -1276,7 +1278,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
-                          cf_class_file_t *class_file, u16 *i,
+                          cf_class_file_t *class_file, u64 *i,
                           u16 constant_pool_len) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
@@ -1295,12 +1297,11 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   switch (kind) {
   case CIK_UTF8: {
     u16 len = buf_read_be_u16(buf, buf_len, current);
-    pg_assert(len > 0);
 
     u8 *const s = *current;
     buf_read_n_u8(buf, buf_len, NULL, len, current);
 
-    LOG("[%hu/%hu] CIK_UTF8 len=%u s=%.*s", i, constant_pool_len, len, len, s);
+    LOG("[%lu/%hu] CIK_UTF8 len=%u s=%.*s", *i, constant_pool_len, len, len, s);
 
     cf_constant_t constant = {.kind = CIK_UTF8,
                               .v = {.s = {.len = len, .value = s}}};
@@ -1309,11 +1310,20 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     break;
   }
   case CIK_INT:
-    pg_assert(0 && "unimplemented");
+{
+    const u32 value = buf_read_be_u32(buf, buf_len, current);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
-  case CIK_FLOAT:
-    pg_assert(0 && "unimplemented");
+  }
+  case CIK_FLOAT: {
+    const u32 value = buf_read_be_u32(buf, buf_len, current);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
+  }
   case CIK_LONG: {
     const u32 high = buf_read_be_u32(buf, buf_len, current);
     const u32 low = buf_read_be_u32(buf, buf_len, current);
@@ -1349,7 +1359,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     const u16 utf8_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(utf8_i > 0);
     pg_assert(utf8_i <= constant_pool_len);
-    LOG("[%hu/%hu] CIK_STRING utf8_i=%u", i, constant_pool_len, utf8_i);
+    LOG("[%lu/%hu] CIK_STRING utf8_i=%u", *i, constant_pool_len, utf8_i);
 
     const cf_constant_t constant = {.kind = CIK_STRING,
                                     .v = {.string_utf8_i = utf8_i}};
@@ -1365,7 +1375,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_len);
 
-    LOG("[%hu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u", i,
+    LOG("[%lu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u", *i,
         constant_pool_len, name_i, descriptor_i);
 
     const cf_constant_t constant = {
@@ -1383,7 +1393,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
 
-    LOG("[%hu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u", i,
+    LOG("[%lu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u", *i,
         constant_pool_len, class_i, name_and_type_i);
 
     const cf_constant_t constant = {
@@ -1402,7 +1412,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
 
-    LOG("[%hu/%hu] CIK_INSTANCE_REF class_i=%u name_and_type_i=%u", i,
+    LOG("[%lu/%hu] CIK_INSTANCE_REF class_i=%u name_and_type_i=%u", *i,
         constant_pool_len, class_i, name_and_type_i);
 
     const cf_constant_t constant = {.kind = CIK_INTERFACE_METHOD_REF,
@@ -1419,7 +1429,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_len);
 
-    LOG("[%hu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u", i,
+    LOG("[%lu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u", *i,
         constant_pool_len, name_i, descriptor_i);
 
     const cf_constant_t constant = {
@@ -1495,7 +1505,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_constants(u8 *buf, u64 buf_len, u8 **current,
                            cf_class_file_t *class_file, u16 constant_pool_len) {
-  for (u16 i = 1; i <= constant_pool_len; i++) {
+  for (u64 i = 1; i <= constant_pool_len; i++) {
     cf_buf_read_constant(buf, buf_len, current, class_file, &i,
                          constant_pool_len);
   }
