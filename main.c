@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
 
     cf_class_file_t class_file = {0};
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
+    __builtin_dump_struct(&class_file, &printf);
   }
   {
     arena_t arena = {0};

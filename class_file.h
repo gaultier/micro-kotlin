@@ -515,6 +515,42 @@ typedef struct {
   arena_t *arena;
 } cf_method_array_t;
 
+typedef struct {
+  u64 len;
+  u64 cap;
+  cf_field_t *values;
+  arena_t *arena;
+} cf_field_array_t;
+
+cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (cf_field_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(cf_field_t)),
+      .arena = arena,
+  };
+}
+
+void cf_field_array_push(cf_field_array_t *array, const cf_field_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    cf_field_t *const new_array = arena_alloc(array->arena, new_cap);
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(cf_field_t));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len++] = *x;
+}
+
 typedef struct cf_interfaces_t cf_interfaces_t;
 typedef struct {
   u64 len;
@@ -675,7 +711,7 @@ typedef struct {
   u16 interfaces_count;
   cf_interface_array_t interfaces;
   u16 fields_count;
-  cf_field_t *fields;
+  cf_field_array_t fields;
   cf_method_array_t methods;
   cf_attribute_array_t attributes;
 } cf_class_file_t;
@@ -1287,7 +1323,8 @@ void cf_buf_read_interfaces(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_field(u8 *buf, u64 buf_len, u8 **current,
-                       cf_class_file_t *class_file, arena_t *arena) {
+                       cf_class_file_t *class_file, 
+                       arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -1307,6 +1344,8 @@ void cf_buf_read_field(u8 *buf, u64 buf_len, u8 **current,
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &field.attributes,
                          arena);
+
+  cf_field_array_push(&class_file->fields, &field);
 }
 
 void cf_buf_read_fields(u8 *buf, u64 buf_len, u8 **current,
@@ -1316,7 +1355,7 @@ void cf_buf_read_fields(u8 *buf, u64 buf_len, u8 **current,
   LOG("fields count=%x", fields_count);
   for (u16 i = 0; i < fields_count; i++) {
     LOG("[%hu/%hu] Field", i, fields_count);
-    cf_buf_read_field(buf, buf_len, current, class_file, arena);
+    cf_buf_read_field(buf, buf_len, current, class_file,  arena);
   }
 }
 
@@ -1633,6 +1672,7 @@ void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   class_file->interfaces = cf_interface_array_make(1024, arena);
 
   class_file->methods = cf_method_array_make(1024, arena);
+  class_file->fields = cf_field_array_make(1024, arena);
 
   class_file->attributes = cf_attribute_array_make(1024, arena);
 }
