@@ -194,6 +194,50 @@ struct cf_type_t {
 typedef struct cf_type_t cf_type_t;
 
 typedef struct {
+  u16 start_pc;
+  u16 end_pc;
+  u16 handler_pc;
+  u16 catch_type;
+} cf_exception_t;
+
+typedef struct {
+  u64 len;
+  u64 cap;
+  cf_exception_t *values;
+  arena_t *arena;
+} cf_exception_array_t;
+
+cf_exception_array_t cf_exception_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (cf_exception_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(cf_exception_t)),
+      .arena = arena,
+  };
+}
+
+void cf_exception_array_push(cf_exception_array_t *array,
+                             const cf_exception_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len++] = *x;
+}
+
+typedef struct {
   u64 len;
   u64 cap;
   u8 *values;
@@ -606,8 +650,7 @@ struct cf_attribute_t {
       u16 max_stack;
       u16 max_locals;
       cf_code_array_t code;
-      u16 exception_table_count;
-      void *exception_table; // TODO
+      cf_exception_array_t exceptions;
       cf_attribute_array_t attributes;
     } code; // CAK_CODE
 
@@ -823,26 +866,30 @@ void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
   cf_attribute_array_push(attributes, &attribute);
 }
 
-void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
-                            cf_class_file_t *class_file,
-                            cf_attribute_array_t *attributes) {
+void cf_buf_read_code_attribute_exceptions(u8 *buf, u64 buf_len, u8 **current,
+                                           cf_class_file_t *class_file,
+                                           cf_exception_array_t *exceptions,
+                                           arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
-  pg_assert(attributes != NULL);
+  pg_assert(exceptions != NULL);
 
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+  *exceptions = cf_exception_array_make(table_len, arena);
+
   for (u16 i = 0; i < table_len; i++) {
-    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
-    const u16 end_pc = buf_read_be_u16(buf, buf_len, current);
-    const u16 handler_pc = buf_read_be_u16(buf, buf_len, current);
-    const u16 catch_type = buf_read_be_u16(buf, buf_len, current);
-    LOG("[%hu/%hu] Exception start_pc=%hu end_pc=%hu handler_pc=%hu "
-        "catch_type=%hu",
-        i, table_len, start_pc, end_pc, handler_pc, catch_type);
+    cf_exception_t exception = {0};
+
+    exception.start_pc = buf_read_be_u16(buf, buf_len, current);
+    exception.end_pc = buf_read_be_u16(buf, buf_len, current);
+    exception.handler_pc = buf_read_be_u16(buf, buf_len, current);
+    exception.catch_type = buf_read_be_u16(buf, buf_len, current);
+
+    cf_exception_array_push(exceptions, &exception);
   }
 
   const u8 *const current_end = *current;
@@ -873,7 +920,8 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
   code.code.len = code_len;
 
-  cf_buf_read_exceptions(buf, buf_len, current, class_file, NULL /* FIXME */);
+  cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
+                                        &code.exceptions, arena);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
                          arena);
@@ -1565,13 +1613,10 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   case CAK_CODE: {
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    pg_assert(code->exception_table_count == 0 && "unimplemented");
-
-    const u16 exception_table_item_sizeof = 4 * sizeof(u16);
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
                sizeof(u32) + code->code.len +
-               sizeof(code->exception_table_count) +
-               +code->exception_table_count * exception_table_item_sizeof +
+               sizeof(u16) /* exception count */ +
+               +code->exceptions.len * sizeof(cf_exception_t) +
                sizeof(u16) // attributes length
         ;
 
@@ -1625,9 +1670,7 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     file_write_be_32(file, code->code.len);
     fwrite(code->code.values, code->code.len, sizeof(u8), file);
 
-    file_write_be_16(file, code->exception_table_count);
-
-    pg_assert(code->exception_table == NULL && "unimplemented");
+    file_write_be_16(file, code->exceptions.len);
 
     cf_write_attributes(file, &code->attributes);
 
