@@ -829,7 +829,7 @@ u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
 }
 
 string_t
-cf_constant_array_at_as_string(const cf_constant_array_t *constant_pool,
+cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
                                u16 i) {
   const cf_constant_t *const constant = cf_constant_array_at(constant_pool, i);
   pg_assert(constant->kind == CIK_UTF8);
@@ -1128,7 +1128,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   pg_assert(name_i <= class_file->constant_pool.len);
   const string_t attribute_name =
-      cf_constant_array_at_as_string(&class_file->constant_pool, name_i);
+      cf_constant_array_get_as_string(&class_file->constant_pool, name_i);
 
   if (string_eq_c(attribute_name, "SourceFile")) {
     pg_assert(2 == size);
@@ -1141,8 +1141,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, class_file,
                                           size, arena);
   } else if (string_eq_c(attribute_name, "Exceptions")) {
-    cf_buf_read_exceptions_attribute(buf, buf_len, current,class_file, size, attributes,
-                                     arena);
+    cf_buf_read_exceptions_attribute(buf, buf_len, current, class_file, size,
+                                     attributes, arena);
   } else if (string_eq_c(attribute_name, "InnerClasses")) {
     cf_buf_read_inner_classes_attribute(buf, buf_len, current, class_file, size,
                                         arena);

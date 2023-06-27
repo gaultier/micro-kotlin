@@ -21,7 +21,17 @@ int main(int argc, char *argv[]) {
 
     cf_class_file_t class_file = {0};
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
-    __builtin_dump_struct(&class_file, &printf);
+
+    for (u64 i = 0; i < class_file.methods.len; i++) {
+      const cf_method_t *const method = &class_file.methods.values[i];
+      const string_t name = cf_constant_array_get_as_string(
+          &class_file.constant_pool, method->name);
+      const string_t descriptor = cf_constant_array_get_as_string(
+          &class_file.constant_pool, method->descriptor);
+
+      LOG("[%lu/%lu] fact=method name=%.*s descriptor=%.*s", i, class_file.methods.len, name.len,
+          name.value, descriptor.len, descriptor.value);
+    }
   }
   {
     arena_t arena = {0};
