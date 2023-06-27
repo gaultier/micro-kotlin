@@ -2089,4 +2089,6 @@ void cf_read_class_files(const char *path, u64 path_len,
 
     cf_read_class_files(pathbuf, pathbuf_len + d_name_len, class_files, arena);
   }
+  closedir(dirp);
+#undef PATH_MAX
 }
