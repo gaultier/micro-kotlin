@@ -1253,8 +1253,20 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "ConstantValue")) {
     *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "Module")) {
+    *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "ModulePackages")) {
+    *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "ModuleMainClass")) {
+    *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "Record")) {
+    *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "PermittedSubclasses")) {
+    *current += size; // TODO
   } else {
-    pg_assert(0 && "unreachable");
+    LOG("fact='encountered unknown attribute' name=%.*s size=%u",
+        attribute_name.len, attribute_name.value, size);
+    *current += size; // TODO
   }
 }
 
@@ -1309,8 +1321,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
 
     break;
   }
-  case CIK_INT:
-{
+  case CIK_INT: {
     const u32 value = buf_read_be_u32(buf, buf_len, current);
 
     const cf_constant_t constant = {0}; // FIXME
@@ -1535,7 +1546,6 @@ void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
 
   const u16 methods_count = buf_read_be_u16(buf, buf_len, current);
   LOG("methods count=%x", methods_count);
-  pg_assert(methods_count > 0);
 
   class_file->methods = cf_method_array_make(methods_count, arena);
 
@@ -1643,7 +1653,6 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(class_file->this_class <= constant_pool_size);
 
   class_file->super_class = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(class_file->super_class > 0);
   pg_assert(class_file->super_class <= constant_pool_size);
 
   cf_buf_read_interfaces(buf, buf_len, current, class_file, arena);
@@ -2031,6 +2040,7 @@ int on_directory_entry(const char *path, const struct stat *sb, int typeflag,
   u8 *buf = arena_alloc(&global_arena, sb->st_size);
   ssize_t read_bytes = read(fd, buf, sb->st_size);
   pg_assert(read_bytes == sb->st_size);
+  close(fd);
 
   u8 *current = buf;
   LOG("fact='reading class file' path=%s", path);
