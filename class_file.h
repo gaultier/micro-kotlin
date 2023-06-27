@@ -1323,8 +1323,7 @@ void cf_buf_read_interfaces(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_field(u8 *buf, u64 buf_len, u8 **current,
-                       cf_class_file_t *class_file, 
-                       arena_t *arena) {
+                       cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -1352,10 +1351,8 @@ void cf_buf_read_fields(u8 *buf, u64 buf_len, u8 **current,
                         cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, buf_len, current);
-  LOG("fields count=%x", fields_count);
   for (u16 i = 0; i < fields_count; i++) {
-    LOG("[%hu/%hu] Field", i, fields_count);
-    cf_buf_read_field(buf, buf_len, current, class_file,  arena);
+    cf_buf_read_field(buf, buf_len, current, class_file, arena);
   }
 }
 
