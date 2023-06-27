@@ -1,6 +1,5 @@
 #pragma once
 
-#include <arpa/inet.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -719,15 +718,23 @@ typedef struct {
 void file_write_be_16(FILE *file, u16 x) {
   pg_assert(file != NULL);
 
-  const u16 x_be = htons(x);
-  fwrite(&x_be, sizeof(x_be), 1, file);
+  const u8 x_be[2] = {
+      (x & 0xff00) >> 8,
+      (x & 0x00ff) >> 0,
+  };
+  fwrite(x_be, sizeof(x_be), 1, file);
 }
 
 void file_write_be_32(FILE *file, u32 x) {
   pg_assert(file != NULL);
 
-  const u32 x_be = htonl(x);
-  fwrite(&x_be, sizeof(x_be), 1, file);
+  const u8 x_be[4] = {
+      (x & 0xff000000) >> 24,
+      (x & 0x00ff0000) >> 16,
+      (x & 0x0000ff00) >> 8,
+      (x & 0x000000ff) >> 0,
+  };
+  fwrite(x_be, sizeof(x_be), 1, file);
 }
 
 u16 buf_read_be_u16(u8 *buf, u64 size, u8 **current) {
