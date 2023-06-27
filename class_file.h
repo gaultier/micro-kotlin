@@ -545,8 +545,8 @@ typedef struct {
 
 typedef struct {
   u16 access_flags;
-  u16 name_index;
-  u16 descriptor_index;
+  u16 name;
+  u16 descriptor;
   cf_attribute_array_t attributes;
 } cf_field_t;
 
@@ -743,7 +743,6 @@ const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MINOR_VERSION = 0;
 
 typedef struct {
-  u32 magic;
   u16 minor_version;
   u16 major_version;
   cf_constant_array_t constant_pool;
@@ -830,7 +829,7 @@ u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
 
 string_t
 cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
-                               u16 i) {
+                                u16 i) {
   const cf_constant_t *const constant = cf_constant_array_at(constant_pool, i);
   pg_assert(constant->kind == CIK_UTF8);
   return constant->v.s;
@@ -1434,13 +1433,13 @@ void cf_buf_read_field(u8 *buf, u64 buf_len, u8 **current,
 
   cf_field_t field = {0};
   field.access_flags = buf_read_be_u16(buf, buf_len, current);
-  field.name_index = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(field.name_index > 0);
-  pg_assert(field.name_index <= class_file->constant_pool.len);
+  field.name = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(field.name > 0);
+  pg_assert(field.name <= class_file->constant_pool.len);
 
-  field.descriptor_index = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(field.descriptor_index > 0);
-  pg_assert(field.descriptor_index <= class_file->constant_pool.len);
+  field.descriptor = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(field.descriptor > 0);
+  pg_assert(field.descriptor <= class_file->constant_pool.len);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &field.attributes,
                          arena);
@@ -1743,7 +1742,7 @@ void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
 }
 
 void cf_write(const cf_class_file_t *class_file, FILE *file) {
-  fwrite(&class_file->magic, sizeof(class_file->magic), 1, file);
+  fwrite(&cf_MAGIC_NUMBER, sizeof(cf_MAGIC_NUMBER), 1, file);
 
   file_write_be_16(file, class_file->minor_version);
   file_write_be_16(file, class_file->major_version);

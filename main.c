@@ -10,6 +10,8 @@ int main(int argc, char *argv[]) {
         "/home/pg/scratch/java-module/java.base/"
         "java/io/PrintStream.class"; // FIXME
 
+    LOG("\n----------- Reading %s", lib_class_file_name);
+
     int fd = open(lib_class_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
@@ -24,21 +26,39 @@ int main(int argc, char *argv[]) {
 
     for (u64 i = 0; i < class_file.methods.len; i++) {
       const cf_method_t *const method = &class_file.methods.values[i];
+      if ((method->access_flags & CAF_ACC_PUBLIC) == 0)
+        continue;
+
       const string_t name = cf_constant_array_get_as_string(
           &class_file.constant_pool, method->name);
       const string_t descriptor = cf_constant_array_get_as_string(
           &class_file.constant_pool, method->descriptor);
 
-      LOG("[%lu/%lu] fact=method name=%.*s descriptor=%.*s", i, class_file.methods.len, name.len,
-          name.value, descriptor.len, descriptor.value);
+      LOG("[%lu/%lu] fact=method name=%.*s descriptor=%.*s", i,
+          class_file.methods.len, name.len, name.value, descriptor.len,
+          descriptor.value);
+    }
+    for (u64 i = 0; i < class_file.fields.len; i++) {
+      const cf_field_t *const field = &class_file.fields.values[i];
+      if ((field->access_flags & CAF_ACC_PUBLIC) == 0)
+        continue;
+
+      const string_t name = cf_constant_array_get_as_string(
+          &class_file.constant_pool, field->name);
+      const string_t descriptor = cf_constant_array_get_as_string(
+          &class_file.constant_pool, field->descriptor);
+
+      LOG("[%lu/%lu] fact=field name=%.*s descriptor=%.*s", i,
+          class_file.fields.len, name.len, name.value, descriptor.len,
+          descriptor.value);
     }
   }
   {
+    LOG("\n----------- Generating class file");
     arena_t arena = {0};
     arena_init(&arena, 1 << 23);
 
     cf_class_file_t class_file = {
-        .magic = cf_MAGIC_NUMBER,
         .minor_version = cf_MINOR_VERSION,
         .major_version = cf_MAJOR_VERSION_6,
         .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
@@ -158,7 +178,6 @@ int main(int argc, char *argv[]) {
 
       string_t println_type_s = string_reserve(30, &arena);
       cf_fill_type_descriptor_string(&println_type, &println_type_s);
-      fprintf(stderr, "%.*s\n", println_type_s.len, println_type_s.value);
     }
     string_t main_type_s = string_reserve(50, &arena);
     cf_fill_type_descriptor_string(&main_type, &main_type_s);

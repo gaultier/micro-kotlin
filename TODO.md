@@ -1,6 +1,6 @@
 [x] Add JVM function types
 [x] Generate type descriptors as strings
-[.] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
+[x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
 [x] Semantic opcode generation functions
 [.] Keep track of the stack & locals
 [ ] Call functions
