@@ -1263,20 +1263,20 @@ void cf_buf_read_constants(u8 *buf, u64 buf_len, u8 **current,
 void cf_buf_read_method(u8 *buf, u64 buf_len, u8 **current,
                         cf_class_file_t *class_file, u16 i, u16 methods_count,
                         arena_t *arena) {
-  const u16 access_flags = buf_read_be_u16(buf, buf_len, current);
-  const u16 method_name_i = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(method_name_i > 0);
-  pg_assert(method_name_i <= class_file->constant_pool.len);
+  cf_method_t method = {0};
+  method.access_flags = buf_read_be_u16(buf, buf_len, current);
+  method.name = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(method.name > 0);
+  pg_assert(method.name <= class_file->constant_pool.len);
 
-  const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(descriptor_i > 0);
-  pg_assert(descriptor_i <= class_file->constant_pool.len);
-  ;
-  LOG("[%hu/%u] method access_flags=%x method_name_i=%hu "
-      "descriptor_i=%hu",
-      i, methods_count, access_flags, method_name_i, descriptor_i);
-  cf_buf_read_attributes(buf, buf_len, current, class_file, NULL /* FIXME */,
+  method.descriptor = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(method.descriptor > 0);
+  pg_assert(method.descriptor <= class_file->constant_pool.len);
+
+  cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
                          arena);
+
+  cf_method_array_push(&class_file->methods, &method);
 }
 
 void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
