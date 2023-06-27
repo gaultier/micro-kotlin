@@ -1249,6 +1249,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "NestMembers")) {
     *current += size; // TODO
+  } else if (string_eq_c(attribute_name, "NestHost")) {
+    *current += size; // TODO
   } else {
     pg_assert(0 && "unreachable");
   }
@@ -1312,12 +1314,22 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   case CIK_FLOAT:
     pg_assert(0 && "unimplemented");
     break;
-  case CIK_LONG:
-    pg_assert(0 && "unimplemented");
+  case CIK_LONG: {
+    const u32 high = buf_read_be_u32(buf, buf_len, current);
+    const u32 low = buf_read_be_u32(buf, buf_len, current);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
-  case CIK_DOUBLE:
-    pg_assert(0 && "unimplemented");
+  }
+  case CIK_DOUBLE: {
+    const u32 high = buf_read_be_u32(buf, buf_len, current);
+    const u32 low = buf_read_be_u32(buf, buf_len, current);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
+  }
   case CIK_CLASS_INFO: {
     const u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_name_i > 0);
@@ -1415,12 +1427,18 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   case CIK_METHOD_HANDLE: {
     const u8 reference_kind = buf_read_u8(buf, buf_len, current);
     const u16 reference_i = buf_read_be_u16(buf, buf_len, current);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_METHOD_TYPE: {
     const u16 descriptor = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor > 0);
     pg_assert(descriptor <= constant_pool_len);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_DYNAMIC: {
@@ -1431,8 +1449,8 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_len);
 
-    // TODO
-
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_INVOKE_DYNAMIC: {
@@ -1443,20 +1461,26 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_len);
 
-    // TODO
-
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_MODULE: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_len);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_PACKAGE: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_len);
+
+    const cf_constant_t constant = {0}; // FIXME
+    cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   default:
