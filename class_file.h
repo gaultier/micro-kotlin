@@ -661,7 +661,7 @@ struct cf_attribute_t {
     struct cf_attribute_line_number_table_t {
       u16 line_number_table_count;
       cf_line_number_table_t *line_number_tables;
-    } line_number_table;
+    } line_number_table; // CAK_LINE_NUMBER_TABLE
   } v;
 };
 
@@ -1044,9 +1044,19 @@ void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
+// TODO: store this data.
 void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
                                       cf_class_file_t *class_file,
-                                      u32 attribute_len, arena_t *arena) {
+                                      u32 attribute_len,
+                                      cf_attribute_array_t *attributes,
+                                      arena_t *arena) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+  pg_assert(arena != NULL);
+
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -1057,9 +1067,6 @@ void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
     const u16 exception_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(exception_i > 0);
     pg_assert(exception_i <= class_file->constant_pool.len);
-
-    LOG("[%hu/%hu] Exceptions attribute: exception_i=%hu ", i, table_len,
-        exception_i);
   }
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1110,6 +1117,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
+  pg_assert(attributes->cap > 0);
   pg_assert(arena != NULL);
 
   const u16 name_i = buf_read_be_u16(buf, buf_len, current);
@@ -1133,7 +1141,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, class_file,
                                           size, arena);
   } else if (string_eq_c(attribute_name, "Exceptions")) {
-    cf_buf_read_exceptions_attribute(buf, buf_len, current, class_file, size,
+    cf_buf_read_exceptions_attribute(buf, buf_len, current,class_file, size, attributes,
                                      arena);
   } else if (string_eq_c(attribute_name, "InnerClasses")) {
     cf_buf_read_inner_classes_attribute(buf, buf_len, current, class_file, size,
