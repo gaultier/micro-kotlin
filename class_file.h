@@ -1021,7 +1021,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                            cf_class_file_t *class_file, u16 i,
-                           u16 attribute_count, arena_t *arena) {
+                           cf_attribute_array_t *attributes, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -1031,8 +1031,6 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(name_i > 0);
   const u32 size = buf_read_be_u32(buf, buf_len, current);
 
-  LOG("[%hu/%hu] attribute name_i=%hu size=%u", i, attribute_count, name_i,
-      size);
   pg_assert(*current + size <= buf + buf_len);
 
   pg_assert(name_i <= class_file->constant_pool.len);
@@ -1044,7 +1042,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                                      arena);
   } else if (string_eq_c(attribute_name, "Code")) {
     cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, name_i,
-                               &class_file->attributes, arena);
+                               attributes, arena);
   } else if (string_eq_c(attribute_name, "StackMapTable")) {
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, class_file,
                                           size, arena);
@@ -1109,7 +1107,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
   *attributes = cf_attribute_array_make(attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
-    cf_buf_read_attribute(buf, buf_len, current, class_file, i, attribute_count,
+    cf_buf_read_attribute(buf, buf_len, current, class_file, i, attributes,
                           arena);
   }
 }
@@ -1293,6 +1291,8 @@ void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
   const u16 methods_count = buf_read_be_u16(buf, buf_len, current);
   LOG("methods count=%x", methods_count);
   pg_assert(methods_count > 0);
+
+  class_file->methods=cf_method_array_make(methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
     cf_buf_read_method(buf, buf_len, current, class_file, i, methods_count,
