@@ -1214,7 +1214,7 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   } else if (string_eq_c(attribute_name, "EnclosingMethod")) {
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "Synthetic")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "Signature")) {
     cf_buf_read_signature_attribute(buf, buf_len, current, class_file, size,
                                     arena);

@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
           descriptor.value);
     }
 
-    arena_init(&global_arena, 1 << 24);
+    arena_init(&global_arena, 1 << 29);
     cf_read_class_files("/home/pg/scratch/java-module/");
   }
   {
