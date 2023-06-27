@@ -736,10 +736,10 @@ u16 buf_read_be_u16(u8 *buf, u64 size, u8 **current) {
   pg_assert(current != NULL);
   pg_assert(*current + 2 <= buf + size);
 
-  const u16 *const ptr = (u16 *)*current;
-  const u16 x_be = ptr[0];
+  const u8 *const ptr = *current;
+  const u16 x = ((ptr[0] & 0xff) << 8) | ((ptr[1] & 0xff));
   *current += 2;
-  return ntohs(x_be);
+  return x;
 }
 
 u32 buf_read_be_u32(u8 *buf, u64 size, u8 **current) {
@@ -748,10 +748,11 @@ u32 buf_read_be_u32(u8 *buf, u64 size, u8 **current) {
   pg_assert(current != NULL);
   pg_assert(*current + 4 <= buf + size);
 
-  const u32 *const ptr = (u32 *)*current;
-  const u32 x_be = ptr[0];
+  const u8 *const ptr = *current;
+  const u32 x = ((ptr[0] & 0xff) << 24) | ((ptr[1] & 0xff) << 16) |
+                ((ptr[2] & 0xff) << 8) | ((ptr[3] & 0xff));
   *current += 4;
-  return ntohl(x_be);
+  return x;
 }
 
 void buf_read_n_u8(u8 *buf, u64 size, u8 *dst, u64 dst_len, u8 **current) {
@@ -791,8 +792,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
                                       cf_class_file_t *class_file,
-                                      cf_attribute_array_t *attributes,
-                                      u32 attribute_len) {
+                                      cf_attribute_array_t *attributes) {
 
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -809,8 +809,7 @@ void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
-  pg_assert(read_bytes == attribute_len);
-  pg_assert(2 == attribute_len);
+  pg_assert(read_bytes == 2);
 
   cf_attribute_t attribute = {.kind = CAK_SOURCE_FILE,
                               .v = {.source_file = source_file}};
@@ -1069,8 +1068,9 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
       cf_constant_array_at_as_string(&class_file->constant_pool, name_i);
 
   if (string_eq_c(attribute_name, "SourceFile")) {
+    pg_assert(2 == size);
     cf_buf_read_sourcefile_attribute(buf, buf_len, current, class_file,
-                                     attributes, size, arena);
+                                     attributes);
   } else if (string_eq_c(attribute_name, "Code")) {
     cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, name_i,
                                attributes, arena);
