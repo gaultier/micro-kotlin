@@ -1276,7 +1276,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
-                          cf_class_file_t *class_file, u16 i,
+                          cf_class_file_t *class_file, u16 *i,
                           u16 constant_pool_len) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
@@ -1320,6 +1320,8 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant);
+    *i += 1;
     break;
   }
   case CIK_DOUBLE: {
@@ -1328,6 +1330,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant);
+    *i += 1;
+
     break;
   }
   case CIK_CLASS_INFO: {
@@ -1490,8 +1495,8 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_constants(u8 *buf, u64 buf_len, u8 **current,
                            cf_class_file_t *class_file, u16 constant_pool_len) {
-  for (u64 i = 1; i <= constant_pool_len; i++) {
-    cf_buf_read_constant(buf, buf_len, current, class_file, i,
+  for (u16 i = 1; i <= constant_pool_len; i++) {
+    cf_buf_read_constant(buf, buf_len, current, class_file, &i,
                          constant_pool_len);
   }
 }
