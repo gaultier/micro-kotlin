@@ -842,7 +842,6 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   cf_buf_read_exceptions(buf, buf_len, current, class_file, arena);
 
-  code.attributes = cf_attribute_array_make(30, arena);
   cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
                          arena);
 
@@ -1019,7 +1018,8 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-// FIXME: each function call here should take the `attributes` argument and push to it!
+// FIXME: each function call here should take the `attributes` argument and push
+// to it!
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                            cf_class_file_t *class_file, u16 i,
                            cf_attribute_array_t *attributes, arena_t *arena) {
@@ -1279,7 +1279,6 @@ void cf_buf_read_method(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(method.descriptor > 0);
   pg_assert(method.descriptor <= class_file->constant_pool.len);
 
-  method.attributes = cf_attribute_array_make(30, arena);
   cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
                          arena);
 
