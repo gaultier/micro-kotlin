@@ -358,11 +358,12 @@ typedef struct {
     CIK_METHOD_REF = 10,
     CIK_INTERFACE_METHOD_REF = 11,
     CIK_NAME_AND_TYPE = 12,
+    CIK_METHOD_HANDLE = 15,
+    CIK_METHOD_TYPE = 16,
+    CIK_DYNAMIC = 17,
     CIK_INVOKE_DYNAMIC = 18,
-    // CIK_LONG_HIGH,
-    // CIK_LONG_LOW,
-    // CIK_DOUBLE_HIGH,
-    // CIK_DOUBLE_LOW,
+    CIK_MODULE = 19,
+    CIK_PACKAGE = 20,
   } kind;
   union {
     string_t s;        // CIK_UTF8
@@ -1229,25 +1230,25 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_local_variable_type_table_attribute(buf, buf_len, current,
                                                     class_file, size, arena);
   } else if (string_eq_c(attribute_name, "Deprecated")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "RuntimeVisibleAnnotations")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name,
                          "RuntimeVisibleParameterAnnotations")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name,
                          "RuntimeInvisibleParameterAnnotations")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "AnnotationsDefault")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "BootstrapMethods")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "NestMembers")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else {
     pg_assert(0 && "unreachable");
   }
@@ -1281,7 +1282,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
         kind == CIK_LONG || kind == CIK_DOUBLE || kind == CIK_CLASS_INFO ||
         kind == CIK_STRING || kind == CIK_FIELD_REF || kind == CIK_METHOD_REF ||
         kind == CIK_INTERFACE_METHOD_REF || kind == CIK_NAME_AND_TYPE ||
-        kind == CIK_INVOKE_DYNAMIC)) {
+        kind == CIK_METHOD_HANDLE || kind == CIK_METHOD_TYPE ||
+        kind == CIK_DYNAMIC || kind == CIK_INVOKE_DYNAMIC ||
+        kind == CIK_MODULE || kind == CIK_PACKAGE)) {
     fprintf(stderr, "Unknown constant kind found: offset=%lu kind=%u\n",
             *current - buf - 1, kind);
     pg_assert(0);
@@ -1409,9 +1412,53 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
-  case CIK_INVOKE_DYNAMIC:
-    pg_assert(0 && "unimplemented");
+  case CIK_METHOD_HANDLE: {
+    const u8 reference_kind = buf_read_u8(buf, buf_len, current);
+    const u16 reference_i = buf_read_be_u16(buf, buf_len, current);
     break;
+  }
+  case CIK_METHOD_TYPE: {
+    const u16 descriptor = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(descriptor > 0);
+    pg_assert(descriptor <= constant_pool_len);
+    break;
+  }
+  case CIK_DYNAMIC: {
+    const u16 bootstrap_method_attr_index =
+        buf_read_be_u16(buf, buf_len, current);
+
+    const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_and_type_index > 0);
+    pg_assert(name_and_type_index <= constant_pool_len);
+
+    // TODO
+
+    break;
+  }
+  case CIK_INVOKE_DYNAMIC: {
+    const u16 bootstrap_method_attr_index =
+        buf_read_be_u16(buf, buf_len, current);
+
+    const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_and_type_index > 0);
+    pg_assert(name_and_type_index <= constant_pool_len);
+
+    // TODO
+
+    break;
+  }
+  case CIK_MODULE: {
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool_len);
+    break;
+  }
+  case CIK_PACKAGE: {
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool_len);
+    break;
+  }
   default:
     pg_assert(0 && "unreachable");
   }
