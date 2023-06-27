@@ -1304,7 +1304,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
 
   switch (kind) {
-  case CIK_UTF8: {
+  case CIK_UTF8: { // FIXME: It's actually modified utf8!
     u16 len = buf_read_be_u16(buf, buf_len, current);
 
     u8 *const s = *current;
