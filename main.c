@@ -20,7 +20,6 @@ int main(int argc, char *argv[]) {
     u8 *current = buf;
 
     cf_class_file_t class_file = {0};
-    cf_init(&class_file, &arena);
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
   {
@@ -322,7 +321,6 @@ int main(int argc, char *argv[]) {
     u8 *current = buf;
 
     cf_class_file_t class_file = {0};
-    cf_init(&class_file, &arena);
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
 }
