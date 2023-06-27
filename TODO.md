@@ -38,3 +38,9 @@ Open questions:
 
 - Do we want to record attributes of each field/method? It could allow e.g. inlining of the code.
 
+
+## Points where I'm not sure  about in the code
+
+- Should the different arrays be macros
+- Should the array len/cap be u16 when that's the class file format
+- Tagged unions vs a big struct with flags?
