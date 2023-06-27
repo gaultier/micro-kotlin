@@ -1,13 +1,16 @@
 #pragma once
-
 #define _XOPEN_SOURCE 700
+
 #include <errno.h>
+#include <fcntl.h>
 #include <ftw.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef __linux
 
@@ -195,6 +198,19 @@ void string_append_cstring(string_t *a, const char *b) {
 
   for (u64 i = 0; i < strlen(b); i++)
     string_append_char(a, b[i]);
+}
+
+bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
+                       u64 suffix_len) {
+  pg_assert(s != NULL);
+  pg_assert(s_len > 0);
+  pg_assert(suffix != NULL);
+  pg_assert(suffix_len > 0);
+
+  if (s_len < suffix_len)
+    return false;
+
+  return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
 }
 
 #define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
@@ -1230,6 +1246,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(0 && "unreachable");
   } else if (string_eq_c(attribute_name, "BootstrapMethods")) {
     pg_assert(0 && "unreachable");
+  } else if (string_eq_c(attribute_name, "NestMembers")) {
+    pg_assert(0 && "unreachable");
   } else {
     pg_assert(0 && "unreachable");
   }
@@ -1904,14 +1922,42 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
 
 PG_GROWABLE_ARRAY(cf_class_file);
 
-int on_directory_entry(const char *path, const struct stat *sb, int typeflag, struct FTW* ftwbuf) {
+cf_class_file_array_t class_files = {0};
+arena_t global_arena = {0};
+
+int on_directory_entry(const char *path, const struct stat *sb, int typeflag,
+                       struct FTW *ftwbuf) {
+  pg_assert(path != NULL);
+  pg_assert(sb != NULL);
+  pg_assert(ftwbuf != NULL);
+
+  if (!S_ISREG(sb->st_mode))
+    return 0;
+
+  if (!cstring_ends_with(path, strlen(path), ".class", sizeof(".class") - 1))
+    return 0;
+
+  int fd = open(path, O_RDONLY);
+  pg_assert(fd > 0);
+
+  cf_class_file_t class_file = {0};
+
+  u8 *buf = arena_alloc(&global_arena, sb->st_size);
+  ssize_t read_bytes = read(fd, buf, sb->st_size);
+  pg_assert(read_bytes == sb->st_size);
+
+  u8 *current = buf;
+  LOG("fact='reading class file' path=%s", path);
+  cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &global_arena);
+
   return 0;
 }
 
-void cf_read_class_files(const char *directory,
-                         cf_class_file_array_t *class_files) {
+cf_class_file_array_t *cf_read_class_files(const char *directory) {
   if (nftw(directory, on_directory_entry, 800, FTW_F) == -1) {
     LOG("fact='failed to recursively read class files' errno=%d error=%s",
         errno, strerror(errno));
+    return NULL;
   }
+  return &class_files;
 }

@@ -1,6 +1,4 @@
 #include "class_file.h"
-#include <fcntl.h>
-#include <unistd.h>
 
 int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
@@ -52,6 +50,9 @@ int main(int argc, char *argv[]) {
           class_file.fields.len, name.len, name.value, descriptor.len,
           descriptor.value);
     }
+
+    arena_init(&global_arena, 1<<24);
+    cf_read_class_files("/home/pg/scratch/java-module/");
   }
   {
     LOG("\n----------- Generating class file");
