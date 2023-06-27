@@ -826,23 +826,28 @@ void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
                                 cf_class_file_t *class_file, u32 attribute_len,
+                                u16 name, cf_attribute_array_t *attributes,
                                 arena_t *arena) {
   const u8 *const current_start = *current;
 
-  const u16 max_stack = buf_read_be_u16(buf, buf_len, current);
-  const u16 max_locals = buf_read_be_u16(buf, buf_len, current);
+  cf_attribute_code_t code = {0};
+  code.max_stack = buf_read_be_u16(buf, buf_len, current);
+  code.max_locals = buf_read_be_u16(buf, buf_len, current);
   const u32 code_len = buf_read_be_u32(buf, buf_len, current);
   pg_assert(*current + code_len <= buf + buf_len);
 
-  buf_read_n_u8(buf, buf_len, NULL, code_len, current);
+  code.code = cf_code_array_make(code_len, arena);
+  buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
+  code.code.len = code_len;
 
   cf_buf_read_exceptions(buf, buf_len, current, class_file, arena);
 
-  LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u ", max_stack,
-      max_locals, code_len);
-
-  cf_buf_read_attributes(buf, buf_len, current, class_file, NULL /* FIXME */,
+  code.attributes = cf_attribute_array_make(30, arena);
+  cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
                          arena);
+
+  cf_attribute_t attribute = {.kind = CAK_CODE, .name = name, .v = {code}};
+  cf_attribute_array_push(attributes, &attribute);
 
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1038,7 +1043,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
     cf_buf_read_sourcefile_attribute(buf, buf_len, current, class_file, size,
                                      arena);
   } else if (string_eq_c(attribute_name, "Code")) {
-    cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, arena);
+    cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, name_i,
+                               &class_file->attributes, arena);
   } else if (string_eq_c(attribute_name, "StackMapTable")) {
     cf_buf_read_stack_map_table_attribute(buf, buf_len, current, class_file,
                                           size, arena);
@@ -1100,6 +1106,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(arena != NULL);
 
   const u16 attribute_count = buf_read_be_u16(buf, buf_len, current);
+  *attributes = cf_attribute_array_make(attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
     cf_buf_read_attribute(buf, buf_len, current, class_file, i, attribute_count,
@@ -1273,6 +1280,7 @@ void cf_buf_read_method(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(method.descriptor > 0);
   pg_assert(method.descriptor <= class_file->constant_pool.len);
 
+  method.attributes = cf_attribute_array_make(30, arena);
   cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
                          arena);
 
@@ -1351,6 +1359,8 @@ void cf_buf_read_fields(u8 *buf, u64 buf_len, u8 **current,
                         cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, buf_len, current);
+  class_file->fields = cf_field_array_make(fields_count, arena);
+
   for (u16 i = 0; i < fields_count; i++) {
     cf_buf_read_field(buf, buf_len, current, class_file, arena);
   }
