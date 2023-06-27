@@ -5,7 +5,7 @@ test: main_release debug_release
 
 
 main_debug: main.c class_file.h
-	$(CC) -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=undefined $< -o $@
+	$(CC) -DPG_WITH_LOG=1 -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=undefined $< -o $@ 
 
 debug_debug: debug.c class_file.h
 	$(CC) -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=address $< -o $@

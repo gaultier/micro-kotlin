@@ -212,7 +212,13 @@ bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
   return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
 }
 
+#ifdef PG_WITH_LOG
 #define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
+#else
+#define LOG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 // ------------------------
 
@@ -865,7 +871,7 @@ u32 buf_read_be_u32(u8 *buf, u64 size, u8 **current) {
   pg_assert(*current + 4 <= buf + size);
 
   const u8 *const ptr = *current;
-  const u32 x = ((ptr[0] & 0xff) << 24) | ((ptr[1] & 0xff) << 16) |
+  const u32 x = ((u32)(ptr[0] & 0xff) << 24) | ((ptr[1] & 0xff) << 16) |
                 ((ptr[2] & 0xff) << 8) | ((ptr[3] & 0xff));
   *current += 4;
   return x;
