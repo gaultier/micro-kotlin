@@ -507,7 +507,6 @@ typedef struct {
   cf_attribute_array_t attributes;
 } cf_field_t;
 
-
 typedef struct cf_method_t cf_method_t;
 typedef struct {
   u64 len;
@@ -751,7 +750,8 @@ cf_constant_array_at_as_string(const cf_constant_array_t *constant_pool,
 }
 
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
-                            cf_class_file_t *class_file, arena_t *arena);
+                            cf_class_file_t *class_file,
+                            cf_attribute_array_t *attributes, arena_t *arena);
 
 void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
                                       cf_class_file_t *class_file,
@@ -805,7 +805,8 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   LOG("attribute_code max_stack=%hu max_locals=%hu code_len=%u ", max_stack,
       max_locals, code_len);
 
-  cf_buf_read_attributes(buf, buf_len, current, class_file, arena);
+  cf_buf_read_attributes(buf, buf_len, current, class_file, NULL /* FIXME */,
+                         arena);
 
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1053,11 +1054,14 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
-                            cf_class_file_t *class_file, arena_t *arena) {
+                            cf_class_file_t *class_file,
+                            cf_attribute_array_t *attributes, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+  pg_assert(arena != NULL);
 
   const u16 attribute_count = buf_read_be_u16(buf, buf_len, current);
 
@@ -1235,7 +1239,8 @@ void cf_buf_read_method(u8 *buf, u64 buf_len, u8 **current,
   LOG("[%hu/%u] method access_flags=%x method_name_i=%hu "
       "descriptor_i=%hu",
       i, methods_count, access_flags, method_name_i, descriptor_i);
-  cf_buf_read_attributes(buf, buf_len, current, class_file, arena);
+  cf_buf_read_attributes(buf, buf_len, current, class_file, NULL /* FIXME */,
+                         arena);
 }
 
 void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
@@ -1290,19 +1295,18 @@ void cf_buf_read_field(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  const u16 access_flags = buf_read_be_u16(buf, buf_len, current);
-  const u16 name_i = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(name_i > 0);
-  pg_assert(name_i <= class_file->constant_pool.len);
+  cf_field_t field = {0};
+  field.access_flags = buf_read_be_u16(buf, buf_len, current);
+  field.name_index = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(field.name_index > 0);
+  pg_assert(field.name_index <= class_file->constant_pool.len);
 
-  const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(descriptor_i > 0);
-  pg_assert(descriptor_i <= class_file->constant_pool.len);
+  field.descriptor_index = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(field.descriptor_index > 0);
+  pg_assert(field.descriptor_index <= class_file->constant_pool.len);
 
-  cf_buf_read_attributes(buf, buf_len, current, class_file, arena);
-
-  LOG("Field access_flags=%hu name_i=%hu descriptor_i=%hu", access_flags,
-      name_i, descriptor_i);
+  cf_buf_read_attributes(buf, buf_len, current, class_file, &field.attributes,
+                         arena);
 }
 
 void cf_buf_read_fields(u8 *buf, u64 buf_len, u8 **current,
@@ -1357,7 +1361,8 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
 
   cf_buf_read_methods(buf, buf_len, current, class_file, arena);
 
-  cf_buf_read_attributes(buf, buf_len, current, class_file, arena);
+  cf_buf_read_attributes(buf, buf_len, current, class_file,
+                         &class_file->attributes, arena);
 
   const u64 remaining = buf + buf_len - *current;
   LOG("read=%ld rem=%ld", *current - buf, remaining);
