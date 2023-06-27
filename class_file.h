@@ -492,9 +492,6 @@ void cf_asm_call_superclass_constructor(cf_code_array_t *code,
   cf_asm_invoke_special(code, super_class_constructor_i, vm, method_type);
 }
 
-typedef struct {
-} cf_field_t;
-
 typedef struct cf_attribute_t cf_attribute_t;
 typedef struct {
   u64 len;
@@ -502,6 +499,14 @@ typedef struct {
   cf_attribute_t *values;
   arena_t *arena;
 } cf_attribute_array_t;
+
+typedef struct {
+  u16 access_flags;
+  u16 name_index;
+  u16 descriptor_index;
+  cf_attribute_array_t attributes;
+} cf_field_t;
+
 
 typedef struct cf_method_t cf_method_t;
 typedef struct {
