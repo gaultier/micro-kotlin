@@ -1028,8 +1028,7 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
     const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
     const u16 line_number = buf_read_be_u16(buf, buf_len, current);
 
-    LOG("[%hu/%hu] Line number table entry: start_pc=%hu line_number=%hu", i,
-        table_len, start_pc, line_number);
+    // TODO store.
   }
 
   const u8 *const current_end = *current;
@@ -1058,9 +1057,7 @@ void cf_buf_read_local_variable_table_attribute(u8 *buf, u64 buf_len,
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
 
-    LOG("[%hu/%hu] Local variable table entry: start_pc=%hu "
-        "attribute_len=%hu name_i=%hu descriptor_i=%hu index=%hu",
-        i, table_len, start_pc, len, name_i, descriptor_i, idx);
+    // TODO store.
   }
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1086,9 +1083,7 @@ void cf_buf_read_local_variable_type_table_attribute(
     const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
 
-    LOG("[%hu/%hu] Local variable type table entry: start_pc=%hu "
-        "attribute_len=%hu name_i=%hu signature_i=%hu index=%hu",
-        i, table_len, start_pc, len, name_i, signature_i, idx);
+    // TODO store.
   }
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1103,7 +1098,7 @@ void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   pg_assert(attribute_len == 2);
   const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
-  LOG("Signature #%hu", signature_i);
+  // TODO store.
 
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1163,10 +1158,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
 
     const u16 inner_class_access_flags = buf_read_be_u16(buf, buf_len, current);
 
-    LOG("[%hu/%hu] Inner classes attribute: inner_class_info_i=%hu "
-        "outer_class_info_i=%hu inner_name_i=%hu inner_class_access_flags=%hu",
-        i, table_len, inner_class_info_i, outer_class_info_i, inner_name_i,
-        inner_class_access_flags);
+    // TODO store.
   }
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1265,8 +1257,6 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   } else if (string_eq_c(attribute_name, "PermittedSubclasses")) {
     *current += size; // TODO
   } else {
-    LOG("fact='encountered unknown attribute' name=%.*s size=%u",
-        attribute_name.len, attribute_name.value, size);
     *current += size; // TODO
   }
 }
@@ -1546,8 +1536,6 @@ void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
                          cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, buf_len, current);
-  LOG("methods count=%x", methods_count);
-
   class_file->methods = cf_method_array_make(methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
@@ -1568,13 +1556,11 @@ void cf_buf_read_interfaces(u8 *buf, u64 buf_len, u8 **current,
 
   const u8 *const current_start = *current;
 
-  class_file->interfaces = cf_interface_array_make(1024, arena);
-
   const u16 interfaces_count = buf_read_be_u16(buf, buf_len, current);
-  LOG("interfaces count=%x", interfaces_count);
+  class_file->interfaces = cf_interface_array_make(interfaces_count, arena);
+
   for (u16 i = 0; i < interfaces_count; i++) {
     const u16 interface_i = buf_read_be_u16(buf, buf_len, current);
-    LOG("[%hu/%hu] Interface #%hu", i, interfaces_count, interface_i);
     pg_assert(interface_i > 0);
     pg_assert(interface_i <= class_file->constant_pool.len);
 
@@ -2027,7 +2013,7 @@ void cf_read_class_files(const char *path, u64 path_len,
 
   struct stat st = {0};
   if (stat(path, &st) == -1) {
-    LOG("fact='failed to stat(2)' path=%s", path);
+    LOG("fact='failed to stat(2)' path=%s errno=%d", path, errno);
     return;
   }
 
@@ -2035,14 +2021,12 @@ void cf_read_class_files(const char *path, u64 path_len,
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
-    LOG("fact='class file' path=%s", path);
     u8 *buf = arena_alloc(arena, st.st_size);
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
     close(fd);
 
     u8 *current = buf;
-    LOG("fact='reading class file' path=%s", path);
     cf_class_file_t class_file = {0};
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
     cf_class_file_array_push(class_files, &class_file);
@@ -2080,8 +2064,6 @@ void cf_read_class_files(const char *path, u64 path_len,
     // Skip over `.` and `..`.
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
       continue;
-
-    LOG("path=%s pathbuf=%s", entry->d_name, pathbuf);
 
     pg_assert(pathbuf_len + d_name_len < PATH_MAX);
     memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
