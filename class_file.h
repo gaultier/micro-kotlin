@@ -1069,88 +1069,96 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(0 && "unimplemented");
     break;
   case CIK_CLASS_INFO: {
-    u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_name_i > 0);
     pg_assert(class_name_i <= constant_pool_len);
 
-    LOG("[%hu/%hu] CIK_CLASS_INFO class_name_i=%u", i, constant_pool_len,
-        class_name_i);
-
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {.kind = CIK_CLASS_INFO,
+                                    .v = {.class_name = class_name_i}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_STRING: {
-    u16 utf8_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 utf8_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(utf8_i > 0);
     pg_assert(utf8_i <= constant_pool_len);
     LOG("[%hu/%hu] CIK_STRING utf8_i=%u", i, constant_pool_len, utf8_i);
 
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {.kind = CIK_STRING,
+                                    .v = {.string_utf8_i = utf8_i}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_FIELD_REF: {
-    u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_len);
 
-    u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_len);
 
     LOG("[%hu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u", i,
         constant_pool_len, name_i, descriptor_i);
 
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {
+        .kind = CIK_FIELD_REF,
+        .v = {.field_ref = {.name = name_i, .type_descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_METHOD_REF: {
-    u16 class_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 class_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_i > 0);
     pg_assert(class_i <= constant_pool_len);
 
-    u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
 
     LOG("[%hu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u", i,
         constant_pool_len, class_i, name_and_type_i);
 
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {
+        .kind = CIK_METHOD_REF,
+        .v = {.method_ref = {.name_and_type = name_and_type_i,
+                             .class = class_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_INTERFACE_METHOD_REF: {
-    u16 class_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 class_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_i > 0);
     pg_assert(class_i <= constant_pool_len);
 
-    u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
+    const u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
 
     LOG("[%hu/%hu] CIK_INSTANCE_REF class_i=%u name_and_type_i=%u", i,
         constant_pool_len, class_i, name_and_type_i);
 
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {.kind = CIK_INTERFACE_METHOD_REF,
+                                    .v = {}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   case CIK_NAME_AND_TYPE: {
-    u16 class_i = buf_read_be_u16(buf, buf_len, current);
-    pg_assert(class_i > 0);
-    pg_assert(class_i <= constant_pool_len);
+    const u16 name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(name_i > 0);
+    pg_assert(name_i <= constant_pool_len);
 
-    u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
-    pg_assert(name_and_type_i > 0);
-    pg_assert(name_and_type_i <= constant_pool_len);
+    const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(descriptor_i > 0);
+    pg_assert(descriptor_i <= constant_pool_len);
 
     LOG("[%hu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u", i,
-        constant_pool_len, class_i, name_and_type_i);
+        constant_pool_len, name_i, descriptor_i);
 
-    cf_constant_t constant = {0}; // TODO
+    const cf_constant_t constant = {
+        .kind = CIK_NAME_AND_TYPE,
+        .v = {.name_and_type = {.name = name_i,
+                                .type_descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -1293,7 +1301,7 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(class_file->this_class > 0);
   pg_assert(class_file->this_class <= constant_pool_size);
 
-  class_file->super_class= buf_read_be_u16(buf, buf_len, current);
+  class_file->super_class = buf_read_be_u16(buf, buf_len, current);
   pg_assert(class_file->super_class > 0);
   pg_assert(class_file->super_class <= constant_pool_size);
 
