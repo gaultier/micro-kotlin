@@ -2085,7 +2085,8 @@ void cf_read_class_files(const char *path, u64 path_len,
 
     pg_assert(pathbuf_len + d_name_len < PATH_MAX);
     memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
-    pathbuf[pathbuf_len+d_name_len]=0;
+    pathbuf[pathbuf_len + d_name_len] = 0;
+
     cf_read_class_files(pathbuf, pathbuf_len + d_name_len, class_files, arena);
   }
 }
