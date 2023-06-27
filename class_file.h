@@ -2027,14 +2027,15 @@ void cf_read_class_files(const char *path, u64 path_len,
 
   struct stat st = {0};
   if (stat(path, &st) == -1) {
+    LOG("fact='failed to stat(2)' path=%s", path);
     return;
   }
 
-  if (S_ISREG(st.st_mode) &&
-      cstring_ends_with(path, strlen(path), ".class", 6)) {
+  if (S_ISREG(st.st_mode) && cstring_ends_with(path, path_len, ".class", 6)) {
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
+    LOG("fact='class file' path=%s", path);
     u8 *buf = arena_alloc(arena, st.st_size);
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
@@ -2065,23 +2066,26 @@ void cf_read_class_files(const char *path, u64 path_len,
   pg_assert(pathbuf_len < PATH_MAX);
 
   memcpy(pathbuf, path, path_len);
-  pathbuf[pathbuf_len++] = '/';
+  if (pathbuf[pathbuf_len - 1] != '/') {
+    pathbuf[pathbuf_len++] = '/';
+  }
+
   pg_assert(pathbuf_len < PATH_MAX);
 
   while ((entry = readdir(dirp)) != NULL) {
-    // Skip over `.` and `..`.
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-      continue;
-
     pg_assert(entry->d_name != NULL);
     const u64 d_name_len = strlen(entry->d_name);
     pg_assert(d_name_len > 0);
 
-    LOG("path=%s", entry->d_name);
+    // Skip over `.` and `..`.
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      continue;
 
-    pg_assert(pathbuf_len + d_name_len <= PATH_MAX);
+    LOG("path=%s pathbuf=%s", entry->d_name, pathbuf);
+
+    pg_assert(pathbuf_len + d_name_len < PATH_MAX);
     memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
-
-    cf_read_class_files(pathbuf, pathbuf_len, class_files, arena);
+    pathbuf[pathbuf_len+d_name_len]=0;
+    cf_read_class_files(pathbuf, pathbuf_len + d_name_len, class_files, arena);
   }
 }

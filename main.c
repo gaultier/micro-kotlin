@@ -8,8 +8,9 @@ int main(int argc, char *argv[]) {
     arena_init(&arena, 1 << 29);
     cf_class_file_array_t class_files = cf_class_file_array_make(1024, &arena);
 
-    const char* const class_path="/home/pg/scratch/java-module/";
-    cf_read_class_files(class_path, strlen(class_path),&class_files, &arena);
+    const char *const class_path = "/home/pg/scratch/java-module";
+    cf_read_class_files(class_path, strlen(class_path), &class_files, &arena);
+    LOG("class_files_len=%lu arena=%lu", class_files.len, arena.current_offset);
   }
   {
     LOG("\n----------- Generating class file");
