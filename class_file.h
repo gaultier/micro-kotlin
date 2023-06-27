@@ -1,5 +1,8 @@
 #pragma once
 
+#define _XOPEN_SOURCE 700
+#include <errno.h>
+#include <ftw.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7,9 +10,11 @@
 #include <sys/mman.h>
 
 #ifdef __linux
+
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS 0x20
 #endif
+
 #endif
 
 #define u64 uint64_t
@@ -28,6 +33,49 @@
   } while (0)
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
+
+#define PG_CONCAT2(a, b) PG_CONCAT(a, b)
+#define PG_CONCAT3(a, b, c) PG_CONCAT2(PG_CONCAT2(a, b), c)
+#define PG_CONCAT(a, b) a##b
+
+#define PG_GROWABLE_ARRAY(type)                                                \
+  struct PG_CONCAT2(type, _array_t) {                                          \
+    u64 cap;                                                                   \
+    u64 len;                                                                   \
+    struct PG_CONCAT2(type, _t) * values;                                      \
+    arena_t *arena;                                                            \
+  };                                                                           \
+  struct PG_CONCAT2(type, _array_t)                                            \
+      PG_CONCAT2(type, _array_make)(u64 cap, arena_t * arena) {                \
+    pg_assert(arena != NULL);                                                  \
+    return (struct PG_CONCAT2(type, _array_t)){                                \
+        .len = 0,                                                              \
+        .cap = cap,                                                            \
+        .values =                                                              \
+            arena_alloc(arena, cap * sizeof(struct PG_CONCAT2(type, _t))),     \
+        .arena = arena,                                                        \
+    };                                                                         \
+  }                                                                            \
+  void PG_CONCAT2(type,                                                        \
+                  _array_push)(struct PG_CONCAT2(type, _array_t) * array,      \
+                               const struct PG_CONCAT2(type, _t) * x) {        \
+    pg_assert(array != NULL);                                                  \
+    pg_assert(x != NULL);                                                      \
+    pg_assert(array->len < UINT16_MAX);                                        \
+    pg_assert(array->values != NULL);                                          \
+    pg_assert(array->cap != 0);                                                \
+    if (array->len == array->cap) {                                            \
+      const u64 new_cap = array->cap * 2;                                      \
+      struct type *const new_array = arena_alloc(array->arena, new_cap);       \
+      array->values =                                                          \
+          memcpy(new_array, array->values,                                     \
+                 array->len * sizeof(struct PG_CONCAT2(type, _t)));            \
+      array->cap = new_cap;                                                    \
+    }                                                                          \
+    array->values[array->len++] = *x;                                          \
+  }                                                                            \
+  typedef struct PG_CONCAT2(type, _array_t) PG_CONCAT2(type, _array_t)
+// -------------------
 
 typedef enum {
   CFO_ALOAD_0 = 0x2a,
@@ -742,7 +790,7 @@ const u32 cf_MAGIC_NUMBER = 0xbebafeca;
 const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MINOR_VERSION = 0;
 
-typedef struct {
+struct cf_class_file_t {
   u16 minor_version;
   u16 major_version;
   cf_constant_array_t constant_pool;
@@ -755,7 +803,8 @@ typedef struct {
   cf_field_array_t fields;
   cf_method_array_t methods;
   cf_attribute_array_t attributes;
-} cf_class_file_t;
+};
+typedef struct cf_class_file_t cf_class_file_t;
 
 void file_write_be_16(FILE *file, u16 x) {
   pg_assert(file != NULL);
@@ -1851,4 +1900,18 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
   class_file_name[class_file_name_len - 1] = 0;
 
   return class_file_name;
+}
+
+PG_GROWABLE_ARRAY(cf_class_file);
+
+int on_directory_entry(const char *path, const struct stat *sb, int typeflag, struct FTW* ftwbuf) {
+  return 0;
+}
+
+void cf_read_class_files(const char *directory,
+                         cf_class_file_array_t *class_files) {
+  if (nftw(directory, on_directory_entry, 800, FTW_F) == -1) {
+    LOG("fact='failed to recursively read class files' errno=%d error=%s",
+        errno, strerror(errno));
+  }
 }
