@@ -4,55 +4,12 @@ int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
   {
-    const char *const lib_class_file_name =
-        "/home/pg/scratch/java-module/java.base/"
-        "java/io/PrintStream.class"; // FIXME
-
-    LOG("\n----------- Reading %s", lib_class_file_name);
-
-    int fd = open(lib_class_file_name, O_RDONLY);
-    pg_assert(fd > 0);
-
     arena_t arena = {0};
-    arena_init(&arena, 1 << 23);
-    u8 *buf = arena_alloc(&arena, 1 << 14);
-    ssize_t read_bytes = read(fd, buf, 1 << 14);
-    u8 *current = buf;
+    arena_init(&arena, 1 << 29);
+    cf_class_file_array_t class_files = cf_class_file_array_make(1024, &arena);
 
-    cf_class_file_t class_file = {0};
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
-
-    for (u64 i = 0; i < class_file.methods.len; i++) {
-      const cf_method_t *const method = &class_file.methods.values[i];
-      if ((method->access_flags & CAF_ACC_PUBLIC) == 0)
-        continue;
-
-      const string_t name = cf_constant_array_get_as_string(
-          &class_file.constant_pool, method->name);
-      const string_t descriptor = cf_constant_array_get_as_string(
-          &class_file.constant_pool, method->descriptor);
-
-      LOG("[%lu/%lu] fact=method name=%.*s descriptor=%.*s", i,
-          class_file.methods.len, name.len, name.value, descriptor.len,
-          descriptor.value);
-    }
-    for (u64 i = 0; i < class_file.fields.len; i++) {
-      const cf_field_t *const field = &class_file.fields.values[i];
-      if ((field->access_flags & CAF_ACC_PUBLIC) == 0)
-        continue;
-
-      const string_t name = cf_constant_array_get_as_string(
-          &class_file.constant_pool, field->name);
-      const string_t descriptor = cf_constant_array_get_as_string(
-          &class_file.constant_pool, field->descriptor);
-
-      LOG("[%lu/%lu] fact=field name=%.*s descriptor=%.*s", i,
-          class_file.fields.len, name.len, name.value, descriptor.len,
-          descriptor.value);
-    }
-
-    arena_init(&global_arena, 1 << 29);
-    cf_read_class_files("/home/pg/scratch/java-module/");
+    const char* const class_path="/home/pg/scratch/java-module/";
+    cf_read_class_files(class_path, strlen(class_path),&class_files, &arena);
   }
   {
     LOG("\n----------- Generating class file");
@@ -269,7 +226,7 @@ int main(int argc, char *argv[]) {
     {
       cf_attribute_code_t constructor_code = {.max_stack = 1, .max_locals = 1};
       cf_attribute_code_init(&constructor_code, &arena);
-      cf_vm_t vm = {0};
+      cf_frame_t vm = {0};
       cf_asm_call_superclass_constructor(
           &constructor_code.code, constant_object_method_ref_constructor_i, &vm,
           &object_constructor_type);
@@ -296,7 +253,7 @@ int main(int argc, char *argv[]) {
                                            main_type.v.method.argument_count};
       cf_attribute_code_init(&main_code, &arena);
 
-      cf_vm_t vm = {0};
+      cf_frame_t vm = {0};
       cf_asm_get_static(&main_code.code, constant_out_fieldref_i, &vm);
       cf_asm_load_constant_string(&main_code.code, constant_jstring_hello_i,
                                   &vm);

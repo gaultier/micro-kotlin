@@ -1,9 +1,8 @@
 #pragma once
-#define _XOPEN_SOURCE 700
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <ftw.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -223,7 +222,7 @@ typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
-} cf_vm_t;
+} cf_frame_t;
 
 struct cf_type_t;
 
@@ -522,7 +521,7 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
 }
 
 void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
-                                 cf_vm_t *vm) {
+                                 cf_frame_t *vm) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(vm != NULL);
@@ -535,7 +534,8 @@ void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
   vm->max_stack = pg_max(vm->max_stack, vm->current_stack);
 }
 
-void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
+void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
+                           cf_frame_t *vm,
                            const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -549,7 +549,7 @@ void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
   vm->current_stack -= method_type->argument_count;
 }
 
-void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_vm_t *vm) {
+void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_frame_t *vm) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(vm != NULL);
@@ -568,7 +568,8 @@ void cf_asm_return(cf_code_array_t *code) {
   // TODO
 }
 
-void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
+void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
+                           cf_frame_t *vm,
                            const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -584,7 +585,7 @@ void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i, cf_vm_t *vm,
 
 void cf_asm_call_superclass_constructor(cf_code_array_t *code,
                                         u16 super_class_constructor_i,
-                                        cf_vm_t *vm,
+                                        cf_frame_t *vm,
                                         const cf_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
@@ -2017,43 +2018,70 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
 
 PG_GROWABLE_ARRAY(cf_class_file);
 
-cf_class_file_array_t class_files = {0};
-arena_t global_arena = {0};
-
-int on_directory_entry(const char *path, const struct stat *sb, int typeflag,
-                       struct FTW *ftwbuf) {
+void cf_read_class_files(const char *path, u64 path_len,
+                         cf_class_file_array_t *class_files, arena_t *arena) {
   pg_assert(path != NULL);
-  pg_assert(sb != NULL);
-  pg_assert(ftwbuf != NULL);
+  pg_assert(path_len > 0);
+  pg_assert(class_files != NULL);
+  pg_assert(arena != NULL);
 
-  if (!S_ISREG(sb->st_mode))
-    return 0;
-
-  if (!cstring_ends_with(path, strlen(path), ".class", sizeof(".class") - 1))
-    return 0;
-
-  int fd = open(path, O_RDONLY);
-  pg_assert(fd > 0);
-
-  cf_class_file_t class_file = {0};
-
-  u8 *buf = arena_alloc(&global_arena, sb->st_size);
-  ssize_t read_bytes = read(fd, buf, sb->st_size);
-  pg_assert(read_bytes == sb->st_size);
-  close(fd);
-
-  u8 *current = buf;
-  LOG("fact='reading class file' path=%s", path);
-  cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &global_arena);
-
-  return 0;
-}
-
-cf_class_file_array_t *cf_read_class_files(const char *directory) {
-  if (nftw(directory, on_directory_entry, 800, FTW_F) == -1) {
-    LOG("fact='failed to recursively read class files' errno=%d error=%s",
-        errno, strerror(errno));
-    return NULL;
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+    return;
   }
-  return &class_files;
+
+  if (S_ISREG(st.st_mode) &&
+      cstring_ends_with(path, strlen(path), ".class", 6)) {
+    const int fd = open(path, O_RDONLY);
+    pg_assert(fd > 0);
+
+    u8 *buf = arena_alloc(arena, st.st_size);
+    const ssize_t read_bytes = read(fd, buf, st.st_size);
+    pg_assert(read_bytes == st.st_size);
+    close(fd);
+
+    u8 *current = buf;
+    LOG("fact='reading class file' path=%s", path);
+    cf_class_file_t class_file = {0};
+    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
+    cf_class_file_array_push(class_files, &class_file);
+    return;
+  }
+  if (!S_ISDIR(st.st_mode))
+    return;
+
+  pg_assert(S_ISDIR(st.st_mode));
+
+  // Recurse
+  DIR *dirp = opendir(path);
+  if (dirp == NULL)
+    return;
+
+  struct dirent *entry = {0};
+
+#define PATH_MAX 4096
+  char pathbuf[PATH_MAX + 1] = {0};
+  u64 pathbuf_len = path_len;
+  pg_assert(pathbuf_len < PATH_MAX);
+
+  memcpy(pathbuf, path, path_len);
+  pathbuf[pathbuf_len++] = '/';
+  pg_assert(pathbuf_len < PATH_MAX);
+
+  while ((entry = readdir(dirp)) != NULL) {
+    // Skip over `.` and `..`.
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      continue;
+
+    pg_assert(entry->d_name != NULL);
+    const u64 d_name_len = strlen(entry->d_name);
+    pg_assert(d_name_len > 0);
+
+    LOG("path=%s", entry->d_name);
+
+    pg_assert(pathbuf_len + d_name_len <= PATH_MAX);
+    memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
+
+    cf_read_class_files(pathbuf, pathbuf_len, class_files, arena);
+  }
 }
