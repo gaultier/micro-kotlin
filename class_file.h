@@ -791,21 +791,41 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
 
 void cf_buf_read_sourcefile_attribute(u8 *buf, u64 buf_len, u8 **current,
                                       cf_class_file_t *class_file,
-                                      u32 attribute_len, arena_t *arena) {
+                                      cf_attribute_array_t *attributes,
+                                      u32 attribute_len) {
+
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+
   const u8 *const current_start = *current;
 
-  const u16 source_file_i = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(source_file_i > 0);
-  pg_assert(source_file_i <= class_file->constant_pool.len);
-  LOG("attribute_source_file source_file_i=%hu", source_file_i);
+  cf_attribute_source_file_t source_file = {0};
+  source_file.source_file = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(source_file.source_file > 0);
+  pg_assert(source_file.source_file <= class_file->constant_pool.len);
+
   const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
   pg_assert(2 == attribute_len);
+
+  cf_attribute_t attribute = {.kind = CAK_SOURCE_FILE,
+                              .v = {.source_file = source_file}};
+  cf_attribute_array_push(attributes, &attribute);
 }
 
 void cf_buf_read_exceptions(u8 *buf, u64 buf_len, u8 **current,
-                            cf_class_file_t *class_file, arena_t *arena) {
+                            cf_class_file_t *class_file,
+                            cf_attribute_array_t *attributes) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -828,6 +848,13 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
                                 cf_class_file_t *class_file, u32 attribute_len,
                                 u16 name, cf_attribute_array_t *attributes,
                                 arena_t *arena) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+  pg_assert(arena != NULL);
+
   const u8 *const current_start = *current;
 
   cf_attribute_code_t code = {0};
@@ -840,12 +867,13 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
   code.code.len = code_len;
 
-  cf_buf_read_exceptions(buf, buf_len, current, class_file, arena);
+  cf_buf_read_exceptions(buf, buf_len, current, class_file, NULL /* FIXME */);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
                          arena);
 
-  cf_attribute_t attribute = {.kind = CAK_CODE, .name = name, .v = {code}};
+  cf_attribute_t attribute = {
+      .kind = CAK_CODE, .name = name, .v = {.code = code}};
   cf_attribute_array_push(attributes, &attribute);
 
   const u8 *const current_end = *current;
@@ -1027,6 +1055,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
+  pg_assert(attributes != NULL);
+  pg_assert(arena != NULL);
 
   const u16 name_i = buf_read_be_u16(buf, buf_len, current);
   pg_assert(name_i > 0);
@@ -1039,8 +1069,8 @@ void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
       cf_constant_array_at_as_string(&class_file->constant_pool, name_i);
 
   if (string_eq_c(attribute_name, "SourceFile")) {
-    cf_buf_read_sourcefile_attribute(buf, buf_len, current, class_file, size,
-                                     arena);
+    cf_buf_read_sourcefile_attribute(buf, buf_len, current, class_file,
+                                     attributes, size, arena);
   } else if (string_eq_c(attribute_name, "Code")) {
     cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, name_i,
                                attributes, arena);
