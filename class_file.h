@@ -1019,6 +1019,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
+// FIXME: each function call here should take the `attributes` argument and push to it!
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
                            cf_class_file_t *class_file, u16 i,
                            cf_attribute_array_t *attributes, arena_t *arena) {
@@ -1292,7 +1293,7 @@ void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
   LOG("methods count=%x", methods_count);
   pg_assert(methods_count > 0);
 
-  class_file->methods=cf_method_array_make(methods_count, arena);
+  class_file->methods = cf_method_array_make(methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
     cf_buf_read_method(buf, buf_len, current, class_file, i, methods_count,
