@@ -1278,27 +1278,24 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
   pg_assert(buf_read_u8(buf, buf_len, current) == 0xba);
   pg_assert(buf_read_u8(buf, buf_len, current) == 0xbe);
 
-  const u16 minor_version = buf_read_be_u16(buf, buf_len, current);
-  const u16 major_version = buf_read_be_u16(buf, buf_len, current);
-  LOG("Version %hu.%hu", major_version, minor_version);
+  class_file->minor_version = buf_read_be_u16(buf, buf_len, current);
+  class_file->major_version = buf_read_be_u16(buf, buf_len, current);
 
   const u16 constant_pool_size = buf_read_be_u16(buf, buf_len, current) - 1;
   pg_assert(constant_pool_size > 0);
+  class_file->constant_pool = cf_constant_array_make(constant_pool_size, arena);
 
   cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_size);
 
-  const u16 access_flags = buf_read_be_u16(buf, buf_len, current);
-  LOG("access flags=%x", access_flags);
+  class_file->access_flags = buf_read_be_u16(buf, buf_len, current);
 
-  const u16 this_class_i = buf_read_be_u16(buf, buf_len, current);
-  LOG("this class=%hu", this_class_i);
-  pg_assert(this_class_i > 0);
-  pg_assert(this_class_i <= constant_pool_size);
+  class_file->this_class = buf_read_be_u16(buf, buf_len, current);
+  pg_assert(class_file->this_class > 0);
+  pg_assert(class_file->this_class <= constant_pool_size);
 
-  const u16 super_class_i = buf_read_be_u16(buf, buf_len, current);
-  LOG("super class=%hu", super_class_i);
-  pg_assert(super_class_i > 0);
-  pg_assert(super_class_i <= constant_pool_size);
+  class_file->super_class= buf_read_be_u16(buf, buf_len, current);
+  pg_assert(class_file->super_class > 0);
+  pg_assert(class_file->super_class <= constant_pool_size);
 
   cf_buf_read_interfaces(buf, buf_len, current, class_file, arena);
 
