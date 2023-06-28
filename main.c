@@ -3,19 +3,16 @@
 int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
+  arena_t arena = {0};
+  arena_init(&arena, 1 << 29);
+  cf_class_file_array_t class_files = cf_class_file_array_make(1024, &arena);
   {
-    arena_t arena = {0};
-    arena_init(&arena, 1 << 29);
-    cf_class_file_array_t class_files = cf_class_file_array_make(1024, &arena);
-
     const char *const class_path = "/home/pg/scratch/java-module";
     cf_read_class_files(class_path, strlen(class_path), &class_files, &arena);
     LOG("class_files_len=%lu arena=%lu", class_files.len, arena.current_offset);
   }
   {
     LOG("\n----------- Generating class file");
-    arena_t arena = {0};
-    arena_init(&arena, 1 << 23);
 
     cf_class_file_t class_file = {
         .minor_version = cf_MINOR_VERSION,
@@ -81,9 +78,11 @@ int main(int argc, char *argv[]) {
     cf_type_t void_type = {.kind = CTY_VOID};
 
     // TODO: deduplicate strings? Reuse from constant pool?
+    const string_t string_class_name =
+        string_make_from_c("java/lang/String", &arena);
     cf_type_t string_type = {
         .kind = CTY_INSTANCE_REFERENCE,
-        .v = {.class_name = string_make_from_c("java/lang/String", &arena)},
+        .v = {.class_name = string_class_name},
     };
     cf_type_t object_type = {
         .kind = CTY_INSTANCE_REFERENCE,
@@ -133,11 +132,10 @@ int main(int argc, char *argv[]) {
                     },
             },
     };
-    {
 
-      string_t println_type_s = string_reserve(30, &arena);
-      cf_fill_type_descriptor_string(&println_type, &println_type_s);
-    }
+    string_t println_type_s = string_reserve(30, &arena);
+    cf_fill_type_descriptor_string(&println_type, &println_type_s);
+
     string_t main_type_s = string_reserve(50, &arena);
     cf_fill_type_descriptor_string(&main_type, &main_type_s);
     const u16 constant_string_main_type_descriptor_i =
@@ -221,6 +219,15 @@ int main(int argc, char *argv[]) {
                            .name_and_type = constant_println_name_and_type_i}}};
     const u16 constant_println_method_ref_i = cf_constant_array_push(
         &class_file.constant_pool, &constant_println_method_ref);
+
+    const bool println_method_found = cf_class_files_find_method_exactly(
+        &class_files,
+        cf_constant_array_get_as_string(&class_file.constant_pool,
+                                        constant_string_java_io_printstream_i),
+        cf_constant_array_get_as_string(&class_file.constant_pool,
+                                        constant_string_println_i),
+        println_type_s);
+pg_assert(println_method_found);
 
     // This's class Constructor
 

@@ -64,6 +64,7 @@ static void arena_init(arena_t *arena, u64 capacity) {
   arena->base = mmap(NULL, capacity, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   pg_assert(arena->base != NULL);
+  pg_assert(((u64)arena->base % 16) == 0);
   arena->capacity = capacity;
   arena->current_offset = 0;
 }
@@ -81,12 +82,15 @@ static void *arena_alloc(arena_t *arena, u64 len) {
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->capacity);
   pg_assert(arena->current_offset + len < arena->capacity);
+  pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
 
-  // TODO: align?
-  arena->current_offset = align_forward_16(arena->current_offset + len);
-  pg_assert((arena->current_offset % 16) == 0);
+  const u64 new_offset = align_forward_16(arena->current_offset + len);
+  pg_assert((new_offset % 16) == 0);
 
-  return arena->base + arena->current_offset - len;
+  void *res = arena->base + arena->current_offset;
+  pg_assert((((u64)res) % 16) == 0);
+  arena->current_offset = new_offset;
+  return res;
 }
 
 typedef struct {
@@ -104,7 +108,7 @@ string_t string_reserve(u16 cap, arena_t *arena) {
   };
 }
 
-string_t string_make_from_c(char *s, arena_t *arena) {
+string_t string_make_from_c(const char *s, arena_t *arena) {
   const u64 len = strlen(s);
   string_t res = string_reserve(len, arena);
   res.len = len;
@@ -263,6 +267,7 @@ void cf_exception_array_push(cf_exception_array_t *array,
     cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
+    pg_assert( ((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
   }
 
@@ -400,10 +405,11 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
 }
 
 const cf_constant_t *
-cf_constant_array_at(const cf_constant_array_t *constant_pool, u16 i) {
+cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   pg_assert(constant_pool != NULL);
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
+  pg_assert(constant_pool->values != NULL);
 
   return &constant_pool->values[i - 1];
 }
@@ -778,6 +784,7 @@ const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MINOR_VERSION = 0;
 
 struct cf_class_file_t {
+  string_t file_path;
   u16 minor_version;
   u16 major_version;
   cf_constant_array_t constant_pool;
@@ -866,7 +873,7 @@ u8 buf_read_u8(u8 *buf, u64 size, u8 **current) {
 string_t
 cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
                                 u16 i) {
-  const cf_constant_t *const constant = cf_constant_array_at(constant_pool, i);
+  const cf_constant_t *const constant = cf_constant_array_get(constant_pool, i);
   pg_assert(constant->kind == CIK_UTF8);
   return constant->v.s;
 }
@@ -950,7 +957,7 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   code.max_locals = buf_read_be_u16(buf, buf_len, current);
   const u32 code_len = buf_read_be_u32(buf, buf_len, current);
   pg_assert(*current + code_len <= buf + buf_len);
-  pg_assert(code_len<=UINT16_MAX); // Actual limit per spec.
+  pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
   code.code = cf_code_array_make(code_len, arena);
   buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
@@ -2014,6 +2021,8 @@ u16 cf_class_file_array_push(cf_class_file_array_t *array,
   return index;
 }
 
+// TODO: one thread that walks the directory recursively and one/many worker
+// threads to parse class files?
 void cf_read_class_files(const char *path, u64 path_len,
                          cf_class_file_array_t *class_files, arena_t *arena) {
   pg_assert(path != NULL);
@@ -2037,7 +2046,9 @@ void cf_read_class_files(const char *path, u64 path_len,
     close(fd);
 
     u8 *current = buf;
-    cf_class_file_t class_file = {0};
+    cf_class_file_t class_file = {
+        .file_path = string_make_from_c(path, arena),
+    };
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
     cf_class_file_array_push(class_files, &class_file);
     return;
@@ -2083,4 +2094,46 @@ void cf_read_class_files(const char *path, u64 path_len,
   }
   closedir(dirp);
 #undef PATH_MAX
+}
+
+bool cf_class_files_find_method_exactly(
+    const cf_class_file_array_t *class_files, string_t class_name,
+    string_t method_name, string_t descriptor) {
+  pg_assert(class_files != NULL);
+  pg_assert(descriptor.len > 0);
+  pg_assert(descriptor.value != NULL);
+
+  for (u64 i = 0; i < class_files->len; i++) {
+    const cf_class_file_t *const class_file = &class_files->values[i];
+
+    const cf_constant_t *const this_class = cf_constant_array_get(
+        &class_file->constant_pool, class_file->this_class);
+    pg_assert(this_class->kind == CIK_CLASS_INFO);
+    const u16 this_class_i = this_class->v.class_name;
+    const string_t this_class_name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, this_class_i);
+
+    if (!string_eq(this_class_name, class_name))
+      continue;
+
+    for (u64 j = 0; j < class_file->methods.len; j++) {
+      const cf_method_t *const this_method = &class_file->methods.values[j];
+      // TODO: check attributes?
+
+      const string_t this_method_name = cf_constant_array_get_as_string(
+          &class_file->constant_pool, this_method->name);
+
+      if (!string_eq(this_method_name, method_name))
+        continue;
+
+      const string_t this_method_descriptor = cf_constant_array_get_as_string(
+          &class_file->constant_pool, this_method->descriptor);
+
+      if (!string_eq(this_method_descriptor, descriptor))
+        continue;
+
+      return true; // TODO: return `method`?
+    }
+  }
+  return false;
 }
