@@ -44,7 +44,7 @@
   struct PG_CONCAT2(type, _array_t) {                                          \
     u64 cap;                                                                   \
     u64 len;                                                                   \
-    PG_CONCAT2(type, _t) * values;                                             \
+    struct PG_CONCAT2(type, _t) * values;                                      \
     arena_t *arena;                                                            \
   };                                                                           \
   struct PG_CONCAT2(type, _array_t)                                            \
@@ -53,13 +53,14 @@
     return (struct PG_CONCAT2(type, _array_t)){                                \
         .len = 0,                                                              \
         .cap = cap,                                                            \
-        .values = arena_alloc(arena, cap * sizeof(PG_CONCAT2(type, _t))),      \
+        .values =                                                              \
+            arena_alloc(arena, cap * sizeof(struct PG_CONCAT2(type, _t))),     \
         .arena = arena,                                                        \
     };                                                                         \
   }                                                                            \
   void PG_CONCAT2(type,                                                        \
                   _array_push)(struct PG_CONCAT2(type, _array_t) * array,      \
-                               const PG_CONCAT2(type, _t) * x) {               \
+                               const struct PG_CONCAT2(type, _t) * x) {        \
     pg_assert(array != NULL);                                                  \
     pg_assert(x != NULL);                                                      \
     pg_assert(array->len < UINT16_MAX);                                        \
@@ -67,9 +68,10 @@
     pg_assert(array->cap != 0);                                                \
     if (array->len == array->cap) {                                            \
       const u64 new_cap = array->cap * 2;                                      \
-  PG_CONCAT2(type, _t) *const new_array = arena_alloc(array->arena, new_cap);              \
-      array->values = memcpy(new_array, array->values,                         \
-                             array->len * sizeof(PG_CONCAT2(type, _t)));       \
+      struct type *const new_array = arena_alloc(array->arena, new_cap);       \
+      array->values =                                                          \
+          memcpy(new_array, array->values,                                     \
+                 array->len * sizeof(struct PG_CONCAT2(type, _t)));            \
       array->cap = new_cap;                                                    \
     }                                                                          \
     array->values[array->len++] = *x;                                          \
@@ -267,7 +269,42 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-PG_GROWABLE_ARRAY(cf_exception);
+typedef struct {
+  u64 len;
+  u64 cap;
+  cf_exception_t *values;
+  arena_t *arena;
+} cf_exception_array_t;
+
+cf_exception_array_t cf_exception_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (cf_exception_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(cf_exception_t)),
+      .arena = arena,
+  };
+}
+
+void cf_exception_array_push(cf_exception_array_t *array,
+                             const cf_exception_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len++] = *x;
+}
 
 typedef struct {
   u64 len;
