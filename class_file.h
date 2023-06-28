@@ -28,6 +28,8 @@
 #define u8 uint8_t
 #define i8 int8_t
 
+#define pg_unused(x) (void)(x)
+
 #define pg_assert(condition)                                                   \
   do {                                                                         \
     if (!(condition))                                                          \
@@ -90,6 +92,7 @@ static void *arena_alloc(arena_t *arena, u64 len) {
   void *res = arena->base + arena->current_offset;
   pg_assert((((u64)res) % 16) == 0);
   arena->current_offset = new_offset;
+  pg_assert((((u64)arena->current_offset) % 16) == 0);
   return res;
 }
 
@@ -180,7 +183,7 @@ bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
 }
 
 #ifdef PG_WITH_LOG
-#define LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
+#define LOG(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
 #else
 #define LOG(fmt, ...)                                                          \
   do {                                                                         \
@@ -267,6 +270,7 @@ void cf_exception_array_push(cf_exception_array_t *array,
     cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
+    pg_assert(array->values != NULL);
     pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
   }
@@ -392,8 +396,10 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
     cf_constant_t *const new_array = arena_alloc(array->arena, new_cap);
+    pg_assert(new_array != NULL);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
+    pg_assert(array->values != NULL);
     pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
   }
@@ -426,31 +432,31 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   case CTY_VOID: {
     string_append_char(type_descriptor, 'V');
     break;
-  };
+  }
   case CTY_BYTE: {
     string_append_char(type_descriptor, 'B');
     break;
-  };
+  }
   case CTY_CHAR: {
     string_append_char(type_descriptor, 'C');
     break;
-  };
+  }
   case CTY_DOUBLE: {
     string_append_char(type_descriptor, 'D');
     break;
-  };
+  }
   case CTY_FLOAT: {
     string_append_char(type_descriptor, 'F');
     break;
-  };
+  }
   case CTY_INT: {
     string_append_char(type_descriptor, 'I');
     break;
-  };
+  }
   case CTY_LONG: {
     string_append_char(type_descriptor, 'J');
     break;
-  };
+  }
   case CTY_INSTANCE_REFERENCE: {
     const string_t class_name = type->v.class_name;
 
@@ -459,15 +465,15 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
     string_append_char(type_descriptor, ';');
 
     break;
-  };
+  }
   case CTY_SHORT: {
     string_append_char(type_descriptor, 'S');
     break;
-  };
+  }
   case CTY_BOOLEAN: {
     string_append_char(type_descriptor, 'Z');
     break;
-  };
+  }
   case CTY_ARRAY_REFERENCE: {
     string_append_char(type_descriptor, '[');
 
@@ -476,13 +482,15 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
     cf_fill_type_descriptor_string(array_type, type_descriptor);
 
     break;
-  };
+  }
   case CTY_CONSTRUCTOR:
   case CTY_METHOD: {
     const cf_type_method_t *const method_type = &type->v.method;
     string_append_char(type_descriptor, '(');
 
     for (u64 i = 0; i < method_type->argument_count; i++) {
+      pg_assert(method_type->argument_types != NULL);
+
       const cf_type_t *const argument_type = &method_type->argument_types[i];
       cf_fill_type_descriptor_string(argument_type, type_descriptor);
     }
@@ -492,7 +500,7 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
     cf_fill_type_descriptor_string(method_type->return_type, type_descriptor);
 
     break;
-  };
+  }
   default:
     pg_assert(0 && "unreachable");
   }
@@ -832,7 +840,7 @@ u16 buf_read_be_u16(u8 *buf, u64 size, u8 **current) {
   pg_assert(*current + 2 <= buf + size);
 
   const u8 *const ptr = *current;
-  const u16 x = ((ptr[0] & 0xff) << 8) | ((ptr[1] & 0xff));
+  const u16 x = (((u16)(ptr[0] & 0xff)) << 8) | ((u16)((ptr[1] & 0xff)) << 0);
   *current += 2;
   return x;
 }
@@ -844,8 +852,8 @@ u32 buf_read_be_u32(u8 *buf, u64 size, u8 **current) {
   pg_assert(*current + 4 <= buf + size);
 
   const u8 *const ptr = *current;
-  const u32 x = ((u32)(ptr[0] & 0xff) << 24) | ((ptr[1] & 0xff) << 16) |
-                ((ptr[2] & 0xff) << 8) | ((ptr[3] & 0xff));
+  const u32 x = ((u32)(ptr[0] & 0xff) << 24) | (((u32)(ptr[1] & 0xff)) << 16) |
+                (((u32)(ptr[2] & 0xff)) << 8) | (((u32)(ptr[3] & 0xff)) << 0);
   *current += 4;
   return x;
 }
@@ -984,6 +992,8 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
 void cf_buf_read_stack_map_table_attribute(u8 *buf, u64 buf_len, u8 **current,
                                            cf_class_file_t *class_file,
                                            u32 attribute_len, arena_t *arena) {
+  pg_unused(arena);
+  pg_unused(class_file);
   const u8 *const current_start = *current;
 
   buf_read_n_u8(buf, buf_len, NULL, attribute_len, current);
@@ -997,6 +1007,8 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
                                              cf_class_file_t *class_file,
                                              u32 attribute_len,
                                              arena_t *arena) {
+  pg_unused(arena);
+  pg_unused(class_file);
 
   const u8 *const current_start = *current;
 
@@ -1006,7 +1018,9 @@ void cf_buf_read_line_number_table_attribute(u8 *buf, u64 buf_len, u8 **current,
 
   for (u16 i = 0; i < table_len; i++) {
     const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(start_pc);
     const u16 line_number = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(line_number);
 
     // TODO store.
   }
@@ -1021,6 +1035,7 @@ void cf_buf_read_local_variable_table_attribute(u8 *buf, u64 buf_len,
                                                 cf_class_file_t *class_file,
                                                 u32 attribute_len,
                                                 arena_t *arena) {
+  pg_unused(arena);
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -1029,13 +1044,17 @@ void cf_buf_read_local_variable_table_attribute(u8 *buf, u64 buf_len,
 
   for (u16 i = 0; i < table_len; i++) {
     const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(start_pc);
     const u16 len = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(len);
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
     pg_assert(name_i <= class_file->constant_pool.len);
 
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(descriptor_i);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(idx);
 
     // TODO store.
   }
@@ -1047,6 +1066,7 @@ void cf_buf_read_local_variable_table_attribute(u8 *buf, u64 buf_len,
 void cf_buf_read_local_variable_type_table_attribute(
     u8 *buf, u64 buf_len, u8 **current, cf_class_file_t *class_file,
     u32 attribute_len, arena_t *arena) {
+  pg_unused(arena);
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -1055,13 +1075,17 @@ void cf_buf_read_local_variable_type_table_attribute(
 
   for (u16 i = 0; i < table_len; i++) {
     const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(start_pc);
     const u16 len = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(len);
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
     pg_assert(name_i <= class_file->constant_pool.len);
 
     const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(signature_i);
     const u16 idx = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(idx);
 
     // TODO store.
   }
@@ -1073,11 +1097,14 @@ void cf_buf_read_local_variable_type_table_attribute(
 void cf_buf_read_signature_attribute(u8 *buf, u64 buf_len, u8 **current,
                                      cf_class_file_t *class_file,
                                      u32 attribute_len, arena_t *arena) {
+  pg_unused(arena);
+  pg_unused(class_file);
 
   const u8 *const current_start = *current;
 
   pg_assert(attribute_len == 2);
   const u16 signature_i = buf_read_be_u16(buf, buf_len, current);
+  pg_unused(signature_i);
   // TODO store.
 
   const u8 *const current_end = *current;
@@ -1117,6 +1144,7 @@ void cf_buf_read_exceptions_attribute(u8 *buf, u64 buf_len, u8 **current,
 void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
                                          cf_class_file_t *class_file,
                                          u32 attribute_len, arena_t *arena) {
+  pg_unused(arena);
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
@@ -1137,6 +1165,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(inner_name_i <= class_file->constant_pool.len);
 
     const u16 inner_class_access_flags = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(inner_class_access_flags);
 
     // TODO store.
   }
@@ -1148,7 +1177,7 @@ void cf_buf_read_inner_classes_attribute(u8 *buf, u64 buf_len, u8 **current,
 // FIXME: each function call here should take the `attributes` argument and push
 // to it!
 void cf_buf_read_attribute(u8 *buf, u64 buf_len, u8 **current,
-                           cf_class_file_t *class_file, u16 i,
+                           cf_class_file_t *class_file,
                            cf_attribute_array_t *attributes, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -1255,8 +1284,7 @@ void cf_buf_read_attributes(u8 *buf, u64 buf_len, u8 **current,
   *attributes = cf_attribute_array_make(attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
-    cf_buf_read_attribute(buf, buf_len, current, class_file, i, attributes,
-                          arena);
+    cf_buf_read_attribute(buf, buf_len, current, class_file, attributes, arena);
   }
 }
 
@@ -1294,6 +1322,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
   case CIK_INT: {
     const u32 value = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(value);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1301,6 +1330,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
   case CIK_FLOAT: {
     const u32 value = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(value);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1308,7 +1338,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
   case CIK_LONG: {
     const u32 high = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(high);
     const u32 low = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(low);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1318,7 +1350,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
   case CIK_DOUBLE: {
     const u32 high = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(high);
     const u32 low = buf_read_be_u32(buf, buf_len, current);
+    pg_unused(low);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1397,8 +1431,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     LOG("[%lu/%hu] CIK_INSTANCE_REF class_i=%u name_and_type_i=%u", *i,
         constant_pool_len, class_i, name_and_type_i);
 
-    const cf_constant_t constant = {.kind = CIK_INTERFACE_METHOD_REF,
-                                    .v = {}}; // FIXME
+    const cf_constant_t constant = {
+        .kind = CIK_INTERFACE_METHOD_REF,
+    }; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -1423,7 +1458,9 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   }
   case CIK_METHOD_HANDLE: {
     const u8 reference_kind = buf_read_u8(buf, buf_len, current);
+    pg_unused(reference_kind);
     const u16 reference_i = buf_read_be_u16(buf, buf_len, current);
+    pg_unused(reference_i);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1441,6 +1478,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   case CIK_DYNAMIC: {
     const u16 bootstrap_method_attr_index =
         buf_read_be_u16(buf, buf_len, current);
+    pg_unused(bootstrap_method_attr_index);
 
     const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_index > 0);
@@ -1453,6 +1491,7 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
   case CIK_INVOKE_DYNAMIC: {
     const u16 bootstrap_method_attr_index =
         buf_read_be_u16(buf, buf_len, current);
+    pg_unused(bootstrap_method_attr_index);
 
     const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_index > 0);
@@ -1494,8 +1533,7 @@ void cf_buf_read_constants(u8 *buf, u64 buf_len, u8 **current,
 }
 
 void cf_buf_read_method(u8 *buf, u64 buf_len, u8 **current,
-                        cf_class_file_t *class_file, u16 i, u16 methods_count,
-                        arena_t *arena) {
+                        cf_class_file_t *class_file, arena_t *arena) {
   cf_method_t method = {0};
   method.access_flags = buf_read_be_u16(buf, buf_len, current);
   method.name = buf_read_be_u16(buf, buf_len, current);
@@ -1519,8 +1557,7 @@ void cf_buf_read_methods(u8 *buf, u64 buf_len, u8 **current,
   class_file->methods = cf_method_array_make(methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
-    cf_buf_read_method(buf, buf_len, current, class_file, i, methods_count,
-                       arena);
+    cf_buf_read_method(buf, buf_len, current, class_file, arena);
   }
 }
 
@@ -1610,6 +1647,7 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
   const u16 constant_pool_size = buf_read_be_u16(buf, buf_len, current) - 1;
   pg_assert(constant_pool_size > 0);
   class_file->constant_pool = cf_constant_array_make(constant_pool_size, arena);
+  pg_assert(class_file->constant_pool.values != NULL);
   pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
   cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_size);
@@ -1706,7 +1744,7 @@ void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     pg_assert(0 && "unimplemented");
     break;
   default:
-    pg_assert(0 && "unreachable");
+    pg_assert(0 && "unreachable/unimplemented");
   }
 }
 
@@ -1718,6 +1756,9 @@ void cf_write_constant_pool(const cf_class_file_t *class_file, FILE *file) {
   file_write_be_16(file, len);
 
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
+    pg_assert(class_file->constant_pool.values != NULL);
+    pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
+
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
     LOG("action=writing constant i=%lu/%lu", i, class_file->constant_pool.len);
     cf_write_constant(class_file, file, constant);
@@ -1758,8 +1799,8 @@ u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
         ;
 
     for (uint64_t i = 0; i < code->attributes.len; i++) {
-      const cf_attribute_t *const attribute = &code->attributes.values[i];
-      size += cf_compute_attribute_size(attribute);
+      const cf_attribute_t *const child_attribute = &code->attributes.values[i];
+      size += cf_compute_attribute_size(child_attribute);
     }
     return size;
   }
@@ -2007,13 +2048,19 @@ u16 cf_class_file_array_push(cf_class_file_array_t *array,
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
   pg_assert(array->values != NULL);
+  pg_assert(((u64)array->values) % 16 == 0);
   pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
     cf_class_file_t *const new_array = arena_alloc(array->arena, new_cap);
+    pg_assert(new_array != NULL);
+    pg_assert(((u64)new_array) % 16 == 0);
+
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_class_file_t));
+    pg_assert(array->values != NULL);
+    pg_assert(((u64)array->values) % 16 == 0);
     array->cap = new_cap;
   }
 

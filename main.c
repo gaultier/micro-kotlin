@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     LOG("class_files_len=%lu arena=%lu", class_files.len, arena.current_offset);
   }
   {
-    LOG("\n----------- Generating class file");
+    LOG("\n----------- Generating class file%s", "");
 
     cf_class_file_t class_file = {
         .minor_version = cf_MINOR_VERSION,
@@ -88,7 +88,8 @@ int main(int argc, char *argv[]) {
         .kind = CTY_INSTANCE_REFERENCE,
         .v = {.class_name = string_make_from_c("java/lang/Object", &arena)},
     };
-    cf_type_t object_constructor_argument_types[] = {};
+    pg_unused(object_type);
+
     cf_type_t object_constructor_type = {
         .kind = CTY_CONSTRUCTOR,
         .v =
@@ -97,7 +98,7 @@ int main(int argc, char *argv[]) {
                     {
                         .argument_count = 0,
                         .return_type = &void_type,
-                        .argument_types = object_constructor_argument_types,
+                        .argument_types = NULL,
                     },
             },
     };
@@ -300,10 +301,7 @@ int main(int argc, char *argv[]) {
     LOG("arena=%lu", arena.current_offset);
   }
   {
-    LOG("\n----------- Verifiying");
-
-    arena_t arena = {0};
-    arena_init(&arena, 1 << 26);
+    LOG("\n----------- Verifiying%s", "");
 
     const char *const source_file_name = argv[1];
     const char *const class_file_name =

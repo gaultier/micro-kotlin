@@ -1,3 +1,4 @@
 -Wall
 -Wextra
+-Wunused
 -std=c99
