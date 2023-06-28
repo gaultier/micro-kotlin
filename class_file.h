@@ -40,43 +40,6 @@
 #define PG_CONCAT3(a, b, c) PG_CONCAT2(PG_CONCAT2(a, b), c)
 #define PG_CONCAT(a, b) a##b
 
-#define PG_GROWABLE_ARRAY(type)                                                \
-  struct PG_CONCAT2(type, _array_t) {                                          \
-    u64 cap;                                                                   \
-    u64 len;                                                                   \
-    struct PG_CONCAT2(type, _t) * values;                                      \
-    arena_t *arena;                                                            \
-  };                                                                           \
-  struct PG_CONCAT2(type, _array_t)                                            \
-      PG_CONCAT2(type, _array_make)(u64 cap, arena_t * arena) {                \
-    pg_assert(arena != NULL);                                                  \
-    return (struct PG_CONCAT2(type, _array_t)){                                \
-        .len = 0,                                                              \
-        .cap = cap,                                                            \
-        .values =                                                              \
-            arena_alloc(arena, cap * sizeof(struct PG_CONCAT2(type, _t))),     \
-        .arena = arena,                                                        \
-    };                                                                         \
-  }                                                                            \
-  void PG_CONCAT2(type,                                                        \
-                  _array_push)(struct PG_CONCAT2(type, _array_t) * array,      \
-                               const struct PG_CONCAT2(type, _t) * x) {        \
-    pg_assert(array != NULL);                                                  \
-    pg_assert(x != NULL);                                                      \
-    pg_assert(array->len < UINT16_MAX);                                        \
-    pg_assert(array->values != NULL);                                          \
-    pg_assert(array->cap != 0);                                                \
-    if (array->len == array->cap) {                                            \
-      const u64 new_cap = array->cap * 2;                                      \
-      struct type *const new_array = arena_alloc(array->arena, new_cap);       \
-      array->values =                                                          \
-          memcpy(new_array, array->values,                                     \
-                 array->len * sizeof(struct PG_CONCAT2(type, _t)));            \
-      array->cap = new_cap;                                                    \
-    }                                                                          \
-    array->values[array->len++] = *x;                                          \
-  }                                                                            \
-  typedef struct PG_CONCAT2(type, _array_t) PG_CONCAT2(type, _array_t)
 // -------------------
 
 typedef enum {
@@ -987,6 +950,7 @@ void cf_buf_read_code_attribute(u8 *buf, u64 buf_len, u8 **current,
   code.max_locals = buf_read_be_u16(buf, buf_len, current);
   const u32 code_len = buf_read_be_u32(buf, buf_len, current);
   pg_assert(*current + code_len <= buf + buf_len);
+  pg_assert(code_len<=UINT16_MAX); // Actual limit per spec.
 
   code.code = cf_code_array_make(code_len, arena);
   buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
@@ -2008,7 +1972,47 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
   return class_file_name;
 }
 
-PG_GROWABLE_ARRAY(cf_class_file);
+typedef struct {
+  u64 len;
+  u64 cap;
+  cf_class_file_t *values;
+  arena_t *arena;
+} cf_class_file_array_t;
+
+cf_class_file_array_t cf_class_file_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (cf_class_file_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap * sizeof(cf_class_file_t)),
+      .arena = arena,
+  };
+}
+
+u16 cf_class_file_array_push(cf_class_file_array_t *array,
+                             const cf_class_file_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT16_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    cf_class_file_t *const new_array = arena_alloc(array->arena, new_cap);
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(cf_class_file_t));
+    array->cap = new_cap;
+  }
+
+  array->values[array->len] = *x;
+  const u16 index = array->len + 1;
+  pg_assert(index > 0);
+  pg_assert(index <= array->len + 1);
+  array->len += 1;
+  return index;
+}
 
 void cf_read_class_files(const char *path, u64 path_len,
                          cf_class_file_array_t *class_files, arena_t *arena) {
