@@ -80,13 +80,15 @@ static u64 align_forward_16(u64 n) {
   return n;
 }
 
-static void *arena_alloc(arena_t *arena, u64 len) {
+static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->capacity);
   pg_assert(arena->current_offset + len < arena->capacity);
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
+  pg_assert(element_size > 0);
+  const u64 actual_len = len * element_size; // TODO: check overflow.
 
-  const u64 new_offset = align_forward_16(arena->current_offset + len);
+  const u64 new_offset = align_forward_16(arena->current_offset + actual_len);
   pg_assert((new_offset % 16) == 0);
 
   void *res = arena->base + arena->current_offset;
@@ -108,7 +110,7 @@ string_t string_reserve(u16 cap, arena_t *arena) {
 
   return (string_t){
       .cap = cap,
-      .value = arena_alloc(arena, cap),
+      .value = arena_alloc(arena, cap, sizeof(u8)),
       .arena = arena,
   };
 }
@@ -148,7 +150,7 @@ void string_append_char(string_t *s, u8 c) {
 
   if (s->len == s->cap - 1) {
     s->cap *= 2;
-    u8 *const new_s = arena_alloc(s->arena, s->cap);
+    u8 *const new_s = arena_alloc(s->arena, s->cap, sizeof(u8));
     s->value = memcpy(new_s, s->value, s->len);
   }
 
@@ -276,7 +278,7 @@ cf_exception_array_t cf_exception_array_make(u64 cap, arena_t *arena) {
   return (cf_exception_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_exception_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_exception_t)),
       .arena = arena,
   };
 }
@@ -291,7 +293,8 @@ void cf_exception_array_push(cf_exception_array_t *array,
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_exception_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_exception_t));
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
     pg_assert(array->values != NULL);
@@ -315,7 +318,7 @@ cf_code_array_t cf_code_array_make(u64 cap, arena_t *arena) {
   return (cf_code_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(u8)),
+      .values = arena_alloc(arena, cap, sizeof(u8)),
       .arena = arena,
   };
 }
@@ -328,7 +331,7 @@ void cf_code_array_push_u8(cf_code_array_t *array, u8 x) {
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    u8 *const new_array = arena_alloc(array->arena, new_cap);
+    u8 *const new_array = arena_alloc(array->arena, new_cap, sizeof(u8));
     array->values = memcpy(new_array, array->values, array->len * sizeof(u8));
     array->cap = new_cap;
   }
@@ -404,7 +407,7 @@ cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
   return (cf_constant_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_constant_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_constant_t)),
       .arena = arena,
   };
 }
@@ -419,7 +422,8 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_constant_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_constant_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_constant_t));
     pg_assert(new_array != NULL);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
@@ -647,7 +651,7 @@ cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
   return (cf_field_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_field_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_field_t)),
       .arena = arena,
   };
 }
@@ -661,7 +665,8 @@ void cf_field_array_push(cf_field_array_t *array, const cf_field_t *x) {
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_field_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_field_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_field_t));
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_field_t));
     array->cap = new_cap;
@@ -684,7 +689,7 @@ cf_interface_array_t cf_interface_array_make(u64 cap, arena_t *arena) {
   return (cf_interface_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(u16)),
+      .values = arena_alloc(arena, cap, sizeof(u16)),
       .arena = arena,
   };
 }
@@ -698,7 +703,8 @@ void cf_interface_array_push(cf_interface_array_t *array, u16 x) {
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_interfaces_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_interfaces_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(u16));
     array->values = memcpy(new_array, array->values, array->len * sizeof(u16));
     array->cap = new_cap;
   }
@@ -754,7 +760,7 @@ cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
   return (cf_attribute_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_attribute_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_attribute_t)),
       .arena = arena,
   };
 }
@@ -769,7 +775,8 @@ void cf_attribute_array_push(cf_attribute_array_t *array,
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_attribute_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_attribute_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_attribute_t));
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_attribute_t));
     array->cap = new_cap;
@@ -791,7 +798,7 @@ cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
   return (cf_method_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_method_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_method_t)),
       .arena = arena,
   };
 }
@@ -805,7 +812,8 @@ void cf_method_array_push(cf_method_array_t *array, const cf_method_t *x) {
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_method_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_method_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_method_t));
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_method_t));
     array->cap = new_cap;
@@ -2039,7 +2047,7 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
   const u64 class_file_name_len = before_dot_incl_len + extension_len;
   pg_assert(class_file_name_len > extension_len);
 
-  char *class_file_name = arena_alloc(arena, class_file_name_len);
+  char *class_file_name = arena_alloc(arena, class_file_name_len, sizeof(u8));
   memcpy(class_file_name, source_file_name, before_dot_incl_len);
   memcpy(class_file_name + before_dot_incl_len, ".class", extension_len);
 
@@ -2061,7 +2069,7 @@ cf_class_file_array_t cf_class_file_array_make(u64 cap, arena_t *arena) {
   return (cf_class_file_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap * sizeof(cf_class_file_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_class_file_t)),
       .arena = arena,
   };
 }
@@ -2077,7 +2085,8 @@ u16 cf_class_file_array_push(cf_class_file_array_t *array,
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_class_file_t *const new_array = arena_alloc(array->arena, new_cap);
+    cf_class_file_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(cf_class_file_t));
     pg_assert(new_array != NULL);
     pg_assert(((u64)new_array) % 16 == 0);
 
@@ -2115,7 +2124,7 @@ void cf_read_class_files(const char *path, u64 path_len,
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
-    u8 *buf = arena_alloc(arena, st.st_size);
+    u8 *buf = arena_alloc(arena, st.st_size,sizeof(u8));
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
     close(fd);
@@ -2178,7 +2187,7 @@ bool cf_class_files_find_method_exactly(
   pg_assert(descriptor.len > 0);
   pg_assert(descriptor.value != NULL);
   pg_assert(class_files->values != NULL);
-  pg_assert(class_files->len <=class_files->cap);
+  pg_assert(class_files->len <= class_files->cap);
 
   for (u64 i = 0; i < class_files->len; i++) {
     const cf_class_file_t *const class_file = &class_files->values[i];

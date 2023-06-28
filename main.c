@@ -310,7 +310,7 @@ int main(int argc, char *argv[]) {
     int fd = open(class_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
-    u8 *buf = arena_alloc(&arena, 1 << 14);
+    u8 *buf = arena_alloc(&arena, 1 << 14, sizeof(u8));
     ssize_t read_bytes = read(fd, buf, 1 << 14);
     u8 *current = buf;
 
