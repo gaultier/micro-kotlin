@@ -2,7 +2,7 @@
 [x] Generate type descriptors as strings
 [x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
 [x] Semantic opcode generation functions
-[.] Keep track of the stack & locals
+[.] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
 [ ] Call functions
 [ ] Define functions
 [ ] Generate stack map tables
@@ -11,6 +11,7 @@
 [x] Log memory used in arena
 [ ] Write non-trivial program with the API (opcode generation functions)
 [x] Compute class file name
+[ ] Naive register (e.g. locals) allocation
 
 Sugar (nice to have):
 
@@ -37,6 +38,8 @@ Sugar (nice to have):
 Open questions:
 
 - Do we want to record attributes of each field/method? It could allow e.g. inlining of the code. => Currently yes.
+- How to implement generics
+- Method resolution (complex)
 
 
 ## Points where I'm not sure  about in the code
@@ -44,3 +47,8 @@ Open questions:
 - Should the different arrays be macros => Currently, no.
 - Should the array len/cap be u16 when that's the class file format
 - Tagged unions vs a big struct with flags? => Memory usage issue with big structs for 30k+ class files.
+
+## Non-goals
+
+- Class file size
+- Optimizing generated code
