@@ -446,7 +446,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
   pg_assert(constant_pool->values != NULL);
-  //  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
+  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
 
   return &constant_pool->values[i - 1];
 }
@@ -2124,7 +2124,7 @@ void cf_read_class_files(const char *path, u64 path_len,
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
-    u8 *buf = arena_alloc(arena, st.st_size,sizeof(u8));
+    u8 *buf = arena_alloc(arena, st.st_size, sizeof(u8));
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
     close(fd);
