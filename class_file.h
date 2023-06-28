@@ -267,7 +267,7 @@ void cf_exception_array_push(cf_exception_array_t *array,
     cf_exception_t *const new_array = arena_alloc(array->arena, new_cap);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
-    pg_assert( ((u64)(array->values)) % 16 == 0);
+    pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
   }
 
@@ -386,6 +386,7 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
   pg_assert(array->values != NULL);
+  pg_assert(((u64)(array->values)) % 16 == 0);
   pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
@@ -393,6 +394,7 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
     cf_constant_t *const new_array = arena_alloc(array->arena, new_cap);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
+    pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
   }
 
@@ -410,6 +412,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
   pg_assert(constant_pool->values != NULL);
+  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
 
   return &constant_pool->values[i - 1];
 }
@@ -1607,6 +1610,7 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
   const u16 constant_pool_size = buf_read_be_u16(buf, buf_len, current) - 1;
   pg_assert(constant_pool_size > 0);
   class_file->constant_pool = cf_constant_array_make(constant_pool_size, arena);
+  pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
   cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_size);
 

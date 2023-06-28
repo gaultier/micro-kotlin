@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
         cf_constant_array_get_as_string(&class_file.constant_pool,
                                         constant_string_println_i),
         println_type_s);
-pg_assert(println_method_found);
+    pg_assert(println_method_found);
 
     // This's class Constructor
 
