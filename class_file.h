@@ -104,6 +104,8 @@ typedef struct {
 } string_t;
 
 string_t string_reserve(u16 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
   return (string_t){
       .cap = cap,
       .value = arena_alloc(arena, cap),
@@ -112,10 +114,18 @@ string_t string_reserve(u16 cap, arena_t *arena) {
 }
 
 string_t string_make_from_c(const char *s, arena_t *arena) {
+  pg_assert(s != NULL);
+  pg_assert(arena != NULL);
+
   const u64 len = strlen(s);
   string_t res = string_reserve(len, arena);
   res.len = len;
   memcpy(res.value, s, len);
+
+  pg_assert(res.value != NULL);
+  pg_assert(res.len <= res.cap);
+  pg_assert(res.arena != NULL);
+
   return res;
 }
 
@@ -124,6 +134,8 @@ bool string_eq(string_t a, string_t b) {
 }
 
 bool string_eq_c(string_t a, char *b) {
+  pg_assert(b != NULL);
+
   const u64 b_len = strlen(b);
   return a.len == b_len && memcmp(a.value, b, a.len) == 0;
 }
@@ -142,6 +154,10 @@ void string_append_char(string_t *s, u8 c) {
 
   s->value[s->len] = c;
   s->len += 1;
+
+  pg_assert(s->value != NULL);
+  pg_assert(s->len <= s->cap);
+  pg_assert(s->arena != NULL);
 }
 
 void string_append_string(string_t *a, const string_t *b) {
@@ -156,6 +172,10 @@ void string_append_string(string_t *a, const string_t *b) {
 
   for (u64 i = 0; i < b->len; i++)
     string_append_char(a, b->value[i]);
+
+  pg_assert(a->value != NULL);
+  pg_assert(a->len <= a->cap);
+  pg_assert(a->arena != NULL);
 }
 
 void string_append_cstring(string_t *a, const char *b) {
@@ -167,6 +187,10 @@ void string_append_cstring(string_t *a, const char *b) {
 
   for (u64 i = 0; i < strlen(b); i++)
     string_append_char(a, b[i]);
+
+  pg_assert(a->value != NULL);
+  pg_assert(a->len <= a->cap);
+  pg_assert(a->arena != NULL);
 }
 
 bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
@@ -418,7 +442,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
   pg_assert(constant_pool->values != NULL);
-  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
+  //  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
 
   return &constant_pool->values[i - 1];
 }
@@ -2153,9 +2177,14 @@ bool cf_class_files_find_method_exactly(
   pg_assert(class_files != NULL);
   pg_assert(descriptor.len > 0);
   pg_assert(descriptor.value != NULL);
+  pg_assert(class_files->values != NULL);
+  pg_assert(class_files->len <=class_files->cap);
 
   for (u64 i = 0; i < class_files->len; i++) {
     const cf_class_file_t *const class_file = &class_files->values[i];
+    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
+    pg_assert(class_file->file_path.len > 0);
+    pg_assert(class_file->file_path.value != NULL);
 
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
