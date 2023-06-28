@@ -38,21 +38,8 @@
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
 
-#define PG_CONCAT2(a, b) PG_CONCAT(a, b)
-#define PG_CONCAT3(a, b, c) PG_CONCAT2(PG_CONCAT2(a, b), c)
-#define PG_CONCAT(a, b) a##b
 
-// -------------------
-
-typedef enum {
-  CFO_ALOAD_0 = 0x2a,
-  CFO_INVOKE_SPECIAL = 0xb7,
-  CFO_RETURN = 0xb1,
-  CFO_GET_STATIC = 0xb2,
-  CFO_LDC = 0x12,
-  CFO_LDC_W = 0x13,
-  CFO_INVOKE_VIRTUAL = 0xb6,
-} cf_op_kind_t;
+// ------------------- Utils
 
 typedef struct {
   u8 *base;
@@ -216,7 +203,18 @@ bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
   } while (0)
 #endif
 
-// ------------------------
+// ------------------------ Class file code
+
+typedef enum {
+  CFO_ALOAD_0 = 0x2a,
+  CFO_INVOKE_SPECIAL = 0xb7,
+  CFO_RETURN = 0xb1,
+  CFO_GET_STATIC = 0xb2,
+  CFO_LDC = 0x12,
+  CFO_LDC_W = 0x13,
+  CFO_INVOKE_VIRTUAL = 0xb6,
+} cf_op_kind_t;
+
 
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
 
