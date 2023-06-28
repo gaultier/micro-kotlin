@@ -1,10 +1,46 @@
 #include "class_file.h"
+#include <stdint.h>
+#include <sys/stat.h>
 
 int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
   arena_t arena = {0};
   arena_init(&arena, 1 << 29);
+
+  {
+    const char *const source_file_name = argv[1];
+    const int fd = open(source_file_name, O_RDONLY);
+    pg_assert(fd > 0);
+
+    struct stat st = {0};
+    pg_assert(stat(source_file_name, &st) == 0);
+    pg_assert(st.st_size > 0);
+    pg_assert(st.st_size <= UINT32_MAX);
+
+    const u32 buf_len = st.st_size;
+    u8 *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
+
+    pg_assert(read(fd, buf, buf_len) == buf_len);
+
+    lex_lexer_t lexer = {
+        .line_table = lex_line_table_array_make(1024, &arena),
+        .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
+    };
+
+    u8 *current = buf;
+    lex_lex(&lexer, buf, buf_len, &current);
+
+    for (u32 i = 0; i < lexer.tokens.len; i++) {
+      lex_token_t token = lexer.tokens.values[i];
+      __builtin_dump_struct(&token, &printf);
+    }
+
+    close(fd);
+    
+  }
+
+#if 0
   cf_class_file_array_t class_files = cf_class_file_array_make(1024, &arena);
   {
     const char *const class_path = "/home/pg/scratch/java-module";
@@ -317,4 +353,5 @@ int main(int argc, char *argv[]) {
     cf_class_file_t class_file = {0};
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
+#endif
 }

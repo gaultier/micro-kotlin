@@ -38,7 +38,6 @@
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
 
-
 // ------------------- Utils
 
 typedef struct {
@@ -214,7 +213,6 @@ typedef enum {
   CFO_LDC_W = 0x13,
   CFO_INVOKE_VIRTUAL = 0xb6,
 } cf_op_kind_t;
-
 
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
 
@@ -2223,4 +2221,327 @@ bool cf_class_files_find_method_exactly(
     }
   }
   return false;
+}
+
+// ---------------------------------- Lexer
+
+typedef enum {
+  LTK_NUMBER,
+  LTK_PLUS,
+  LTK_LEFT_PAREN,
+  LTK_RIGHT_PAREN,
+  LTK_LEFT_BRACE,
+  LTK_RIGHT_BRACE,
+  LTK_BUILTIN_PRINTLN,
+  LTK_KEYWORD_FUN,
+} lex_token_kind_t;
+
+typedef struct {
+  lex_token_kind_t kind;
+  u32 source_offset;
+} lex_token_t;
+
+typedef struct {
+  u64 len;
+  u64 cap;
+  lex_token_t *values;
+  arena_t *arena;
+} lex_token_array_t;
+
+lex_token_array_t lex_token_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (lex_token_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap, sizeof(lex_token_t)),
+      .arena = arena,
+  };
+}
+
+u16 lex_token_array_push(lex_token_array_t *array, const lex_token_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT32_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(((u64)array->values) % 16 == 0);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    lex_token_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(lex_token_t));
+    pg_assert(new_array != NULL);
+    pg_assert(((u64)new_array) % 16 == 0);
+
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(lex_token_t));
+    pg_assert(array->values != NULL);
+    pg_assert(((u64)array->values) % 16 == 0);
+    array->cap = new_cap;
+  }
+
+  array->values[array->len] = *x;
+  const u16 index = array->len + 1;
+  pg_assert(index > 0);
+  pg_assert(index <= array->len + 1);
+  array->len += 1;
+  return index;
+}
+
+typedef struct {
+  u32 line;
+  u32 start_offset;
+} lex_line_table_t;
+
+typedef struct {
+  u64 len;
+  u64 cap;
+  lex_line_table_t *values;
+  arena_t *arena;
+} lex_line_table_array_t;
+
+lex_line_table_array_t lex_line_table_array_make(u64 cap, arena_t *arena) {
+  pg_assert(arena != NULL);
+
+  return (lex_line_table_array_t){
+      .len = 0,
+      .cap = cap,
+      .values = arena_alloc(arena, cap, sizeof(lex_line_table_t)),
+      .arena = arena,
+  };
+}
+
+u16 lex_line_table_array_push(lex_line_table_array_t *array,
+                              const lex_line_table_t *x) {
+  pg_assert(array != NULL);
+  pg_assert(x != NULL);
+  pg_assert(array->len < UINT32_MAX);
+  pg_assert(array->values != NULL);
+  pg_assert(((u64)array->values) % 16 == 0);
+  pg_assert(array->cap != 0);
+
+  if (array->len == array->cap) {
+    const u64 new_cap = array->cap * 2;
+    lex_line_table_t *const new_array =
+        arena_alloc(array->arena, new_cap, sizeof(lex_line_table_t));
+    pg_assert(new_array != NULL);
+    pg_assert(((u64)new_array) % 16 == 0);
+
+    array->values =
+        memcpy(new_array, array->values, array->len * sizeof(lex_line_table_t));
+    pg_assert(array->values != NULL);
+    pg_assert(((u64)array->values) % 16 == 0);
+    array->cap = new_cap;
+  }
+
+  array->values[array->len] = *x;
+  const u16 index = array->len + 1;
+  pg_assert(index > 0);
+  pg_assert(index <= array->len + 1);
+  array->len += 1;
+  return index;
+}
+
+typedef struct {
+  lex_token_array_t tokens;
+  lex_line_table_array_t line_table;
+} lex_lexer_t;
+
+static u32 lex_get_current_offset(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+
+  return *current - buf;
+}
+
+static bool lex_is_at_end(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+
+  return lex_get_current_offset(buf, buf_len, current) == buf_len;
+}
+
+static u8 lex_peek(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  return lex_is_at_end(buf, buf_len, current) ? 0 : **current;
+}
+
+static u8 lex_advance(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  const u8 c = **current;
+
+  *current += 1;
+
+  return lex_is_at_end(buf, buf_len, current) ? 0 : c;
+}
+
+static bool lex_is_alphabetic(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+
+  return ('a' <= **current && **current <= 'z') ||
+         ('A' <= **current && **current <= 'Z');
+}
+
+static bool lex_is_digit(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+
+  return ('0' <= **current && **current <= '9');
+}
+
+static bool lex_is_identifier_char(u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+
+  return lex_is_alphabetic(buf, buf_len, current) ||
+         lex_is_digit(buf, buf_len, current) ||
+         lex_peek(buf, buf_len, current) == '_';
+}
+
+static void lex_identifier(lex_lexer_t *lexer, u8 *buf, u32 buf_len,
+                           u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+  pg_assert(lex_is_alphabetic(buf, buf_len, current));
+
+  const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
+
+  lex_advance(buf, buf_len, current);
+
+  while (!lex_is_at_end(buf, buf_len, current)) {
+    lex_peek(buf, buf_len, current);
+
+    if (!lex_is_identifier_char(buf, buf_len, current))
+      break;
+    lex_advance(buf, buf_len, current);
+  }
+
+  pg_assert(!lex_is_at_end(buf, buf_len, current));
+  pg_assert(!lex_is_identifier_char(buf, buf_len, current));
+
+  const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, current);
+
+  const string_t identifier = {.len = end_offset_excl - start_offset,
+                               .value = &buf[start_offset]};
+  if (string_eq_c(identifier, "fun")) {
+    const lex_token_t token = {
+        .kind = LTK_KEYWORD_FUN,
+        .source_offset = start_offset,
+    };
+    lex_token_array_push(&lexer->tokens, &token);
+  } else if (string_eq_c(identifier, "println")) {
+    const lex_token_t token = {
+        .kind = LTK_KEYWORD_FUN,
+        .source_offset = start_offset,
+    };
+    lex_token_array_push(&lexer->tokens, &token);
+  } else {
+    pg_assert(0 && "unimplemented");
+  }
+}
+
+static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(lexer != NULL);
+  pg_assert(lexer->line_table.values != NULL);
+  pg_assert(lexer->tokens.values != NULL);
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  while (!lex_is_at_end(buf, buf_len, current)) {
+    const u8 c = **current;
+
+    switch (c) {
+    case '(': {
+      const lex_token_t token = {
+          .kind = LTK_LEFT_PAREN,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case ')': {
+      const lex_token_t token = {
+          .kind = LTK_RIGHT_PAREN,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '{': {
+      const lex_token_t token = {
+          .kind = LTK_LEFT_BRACE,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '}': {
+      const lex_token_t token = {
+          .kind = LTK_RIGHT_BRACE,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '\n': {
+      const lex_line_table_t line = {
+          .line =
+              lexer->line_table.len == 0
+                  ? 1
+                  : lexer->line_table.values[lexer->line_table.len - 1].line +
+                        1,
+          .start_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_line_table_array_push(&lexer->line_table, &line);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case ' ': {
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    default: {
+      if (lex_is_alphabetic(buf, buf_len, current)) {
+        lex_identifier(lexer, buf, buf_len, current);
+        break;
+      } else {
+        pg_assert(0 && "unimplemented");
+      }
+    }
+    }
+  }
 }
