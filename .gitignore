@@ -7,3 +7,5 @@ debug_debug
 main_debug
 main_release
 debug_release
+*.kt
+META-INF/

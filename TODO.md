@@ -40,7 +40,8 @@ Open questions:
 - Do we want to record attributes of each field/method? It could allow e.g. inlining of the code. => Currently yes.
 - How to implement generics
 - Method resolution (complex)
-- Do we want to implement both code for values and for references, or just for references a la Kotlin (but will it work with Java interop?)
+- Do we want to implement both code for values and for references, or just for references a la Kotlin (but will it work with Java interop?) => Turns out Kotlin uses Java unboxed types for non-nullable cases.
+- Lazily scan classpath as needed?
 
 
 ## Points where I'm not sure  about in the code
