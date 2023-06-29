@@ -48,6 +48,7 @@ int main(int argc, char *argv[]) {
     pg_assert(result == PAR_OK);
 
     cf_class_file_t class_file = {
+        .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
         .minor_version = cf_MINOR_VERSION,
         .major_version = cf_MAJOR_VERSION_6,
         .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
@@ -56,10 +57,7 @@ int main(int argc, char *argv[]) {
 
     cg_generate(&parser, &class_file, &arena);
 
-    const char *const class_file_name =
-        cf_make_class_file_name(source_file_name, &arena);
-
-    FILE *file = fopen(class_file_name, "w");
+    FILE *file = fopen((char *)class_file.file_path.value, "w");
     pg_assert(file != NULL);
     cf_write(&class_file, file);
     fclose(file);
@@ -366,7 +364,7 @@ int main(int argc, char *argv[]) {
 
     const char *const source_file_name = argv[1];
     const char *const class_file_name =
-        cf_make_class_file_name(source_file_name, &arena);
+        cf_make_class_file_name_kt(source_file_name, &arena);
 
     int fd = open(class_file_name, O_RDONLY);
     pg_assert(fd > 0);

@@ -2034,7 +2034,9 @@ const char *cf_memrchr(const char *s, char c, u64 n) {
   return NULL;
 }
 
-char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
+// TODO: sanitize `source_file_name` in case of spaces, etc.
+string_t cf_make_class_file_name_kt(const char *source_file_name,
+                                    arena_t *arena) {
   pg_assert(source_file_name != NULL);
   pg_assert(arena != NULL);
 
@@ -2046,16 +2048,19 @@ char *cf_make_class_file_name(const char *source_file_name, arena_t *arena) {
   const u64 extension_len = sizeof(".class");
   const u64 before_dot_incl_len = dot - source_file_name;
   pg_assert(before_dot_incl_len > 0);
-  const u64 class_file_name_len = before_dot_incl_len + extension_len;
+  const u64 class_file_name_len =
+      before_dot_incl_len + extension_len + 2 /* `Kt` */;
   pg_assert(class_file_name_len > extension_len);
 
   char *class_file_name = arena_alloc(arena, class_file_name_len, sizeof(u8));
   memcpy(class_file_name, source_file_name, before_dot_incl_len);
-  memcpy(class_file_name + before_dot_incl_len, ".class", extension_len);
+  class_file_name[before_dot_incl_len] = 'K';
+  class_file_name[before_dot_incl_len + 1] = 't';
+  memcpy(class_file_name + before_dot_incl_len + 2, ".class", extension_len);
 
   class_file_name[class_file_name_len - 1] = 0;
 
-  return class_file_name;
+  return (string_t){.value = (u8 *)class_file_name, .len = class_file_name_len};
 }
 
 typedef struct {
@@ -3247,6 +3252,48 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
   }
 }
 
+static void cg_generate_synthetic_class(par_parser_t *parser,
+                                        cf_class_file_t *class_file,
+                                        arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->nodes.len > 0);
+  pg_assert(class_file != NULL);
+  pg_assert(arena != NULL);
+
+  {                              // This class
+    const u64 extension_len = 6; /* `class` */
+    const string_t class_name =
+        (string_t){.value = class_file->file_path.value,
+                   .len = class_file->file_path.len - extension_len};
+    const u16 this_class_name_i =
+        cf_add_constant_string(&class_file->constant_pool, class_name);
+
+    const cf_constant_t this_class_info = {.kind = CIK_CLASS_INFO,
+                                           .v = {
+                                               .class_name = this_class_name_i,
+                                           }};
+    class_file->this_class =
+        cf_constant_array_push(&class_file->constant_pool, &this_class_info);
+  }
+
+  { // Super class
+    const u16 constant_java_lang_object_string_i =
+        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/Object");
+
+    const cf_constant_t super_class_info = {
+        .kind = CIK_CLASS_INFO,
+        .v = {
+            .class_name = constant_java_lang_object_string_i,
+        }};
+
+    class_file->super_class =
+        cf_constant_array_push(&class_file->constant_pool, &super_class_info);
+  }
+}
+
 static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
                         arena_t *arena) {
   pg_assert(parser != NULL);
@@ -3255,7 +3302,10 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
+  pg_assert(arena != NULL);
 
   const par_ast_node_t *const root = &parser->nodes.values[0];
+
+  cg_generate_synthetic_class(parser, class_file, arena);
   cg_generate_node(parser, class_file, root, arena);
 }
