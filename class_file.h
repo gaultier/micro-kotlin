@@ -3261,14 +3261,25 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     // FIXME: hardcoded type.
     cf_type_t void_type = {.kind = CTY_VOID};
+    const string_t string_class_name =
+        string_make_from_c("java/lang/String", arena);
+    cf_type_t string_type = {
+        .kind = CTY_INSTANCE_REFERENCE,
+        .v = {.class_name = string_class_name},
+    };
+    cf_type_t main_argument_types[] = {{
+        .kind = CTY_ARRAY_REFERENCE,
+        .v = {.array_type = &string_type},
+    }};
     cf_type_t type = {
         .kind = CTY_METHOD,
         .v =
             {
                 .method =
                     {
-                        .argument_count = 0,
+                        .argument_count = 1,
                         .return_type = &void_type,
+                        .argument_types = main_argument_types,
                     },
             },
     };
@@ -3278,13 +3289,13 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         cf_add_constant_string(&class_file->constant_pool, type_descriptor);
 
     cf_method_t method = {
-        .access_flags = CAF_ACC_PUBLIC /* FIXME */,
+        .access_flags = CAF_ACC_STATIC | CAF_ACC_PUBLIC /* FIXME */,
         .name = method_name_i,
         .descriptor = descriptor_i,
         .attributes = cf_attribute_array_make(8, arena),
     };
 
-    cf_attribute_code_t code = {.max_locals = type.v.method.argument_count+1 /* this */};
+    cf_attribute_code_t code = {.max_locals = type.v.method.argument_count};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
     cf_frame_t frame = {0};
