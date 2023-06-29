@@ -2349,7 +2349,8 @@ typedef struct {
   lex_line_table_array_t line_table;
 } lex_lexer_t;
 
-static u32 lex_get_current_offset(u8 *buf, u32 buf_len, u8 **current) {
+static u32 lex_get_current_offset(const u8 *buf, u32 buf_len,
+                                  const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2359,7 +2360,8 @@ static u32 lex_get_current_offset(u8 *buf, u32 buf_len, u8 **current) {
   return *current - buf;
 }
 
-static bool lex_is_at_end(u8 *buf, u32 buf_len, u8 **current) {
+static bool lex_is_at_end(const u8 *buf, u32 buf_len,
+                          const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2369,7 +2371,7 @@ static bool lex_is_at_end(u8 *buf, u32 buf_len, u8 **current) {
   return lex_get_current_offset(buf, buf_len, current) == buf_len;
 }
 
-static u8 lex_peek(u8 *buf, u32 buf_len, u8 **current) {
+static u8 lex_peek(const u8 *buf, u32 buf_len, const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2378,7 +2380,7 @@ static u8 lex_peek(u8 *buf, u32 buf_len, u8 **current) {
   return lex_is_at_end(buf, buf_len, current) ? 0 : **current;
 }
 
-static u8 lex_advance(u8 *buf, u32 buf_len, u8 **current) {
+static u8 lex_advance(const u8 *buf, u32 buf_len, const u8 **current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2391,7 +2393,8 @@ static u8 lex_advance(u8 *buf, u32 buf_len, u8 **current) {
   return lex_is_at_end(buf, buf_len, current) ? 0 : c;
 }
 
-static bool lex_is_alphabetic(u8 *buf, u32 buf_len, u8 **current) {
+static bool lex_is_alphabetic(const u8 *buf, u32 buf_len,
+                              const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2402,7 +2405,7 @@ static bool lex_is_alphabetic(u8 *buf, u32 buf_len, u8 **current) {
          ('A' <= **current && **current <= 'Z');
 }
 
-static bool lex_is_digit(u8 *buf, u32 buf_len, u8 **current) {
+static bool lex_is_digit(const u8 *buf, u32 buf_len, const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2412,7 +2415,8 @@ static bool lex_is_digit(u8 *buf, u32 buf_len, u8 **current) {
   return ('0' <= **current && **current <= '9');
 }
 
-static bool lex_is_identifier_char(u8 *buf, u32 buf_len, u8 **current) {
+static bool lex_is_identifier_char(const u8 *buf, u32 buf_len,
+                                   const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2424,8 +2428,8 @@ static bool lex_is_identifier_char(u8 *buf, u32 buf_len, u8 **current) {
          lex_peek(buf, buf_len, current) == '_';
 }
 
-static void lex_identifier(lex_lexer_t *lexer, u8 *buf, u32 buf_len,
-                           u8 **current) {
+static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
+                           const u8 **current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2473,7 +2477,8 @@ static void lex_identifier(lex_lexer_t *lexer, u8 *buf, u32 buf_len,
   }
 }
 
-static void lex_number(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
+static void lex_number(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
+                       const u8 **current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2503,7 +2508,8 @@ static void lex_number(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
   lex_token_array_push(&lexer->tokens, &token);
 }
 
-static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
+static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
+                    const u8 **current) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table.values != NULL);
   pg_assert(lexer->tokens.values != NULL);
@@ -2594,6 +2600,7 @@ static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
 // ------------------------------ Parser
 
 typedef enum {
+  PAK_NUM,
   PAK_ADD,
   PAK_BUILTIN_PRINTLN,
   PAK_FUNCTION_DEFINITION,
@@ -2601,6 +2608,7 @@ typedef enum {
 
 typedef struct {
   par_ast_node_kind_t kind;
+  u32 main_token;
   u32 lhs;
   u32 rhs;
 } par_ast_node_t;
@@ -2655,6 +2663,8 @@ u16 par_ast_node_array_push(par_ast_node_array_t *array,
 }
 
 typedef struct {
+  u8 *buf;
+  u32 buf_len;
   lex_token_array_t tokens;
   u32 tokens_i;
   par_ast_node_array_t nodes;
@@ -2666,7 +2676,7 @@ typedef enum {
   PAR_ERR_UNEXPECTED_TOKEN,
 } par_result_t;
 
-static bool par_is_at_end(par_parser_t *parser) {
+static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
@@ -2675,7 +2685,7 @@ static bool par_is_at_end(par_parser_t *parser) {
   return parser->tokens_i == parser->tokens.len;
 }
 
-static lex_token_t par_peek(par_parser_t *parser) {
+static lex_token_t par_peek(const par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
@@ -2744,6 +2754,37 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser) {
   return PAR_OK;
 }
 
+static u64 par_number(const par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+
+  pg_assert(par_peek(parser).kind == LTK_NUMBER);
+
+  const lex_token_t token = parser->tokens.values[parser->tokens_i];
+  const u32 start = token.source_offset;
+  const u8 *current = &parser->buf[start];
+  while (lex_is_digit(parser->buf, parser->buf_len, &current)) {
+    lex_advance(parser->buf, parser->buf_len, &current);
+  }
+  const u32 end_excl =
+      lex_get_current_offset(parser->buf, parser->buf_len, &current);
+  const u32 length = end_excl - start;
+  pg_assert(length <= 20);
+
+  u64 number = 0;
+
+  for (i64 i = length - 1; i >= 0; i--) {
+    pg_assert(i < parser->buf_len);
+
+    const u8 c = parser->buf[i];
+    number += 10 * i * (c - '0');
+  }
+
+  return number;
+}
+
 static par_result_t par_parse_primary_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
@@ -2754,7 +2795,11 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser) {
     return par_parse_builtin_println(parser);
 
   if (par_peek(parser).kind == LTK_NUMBER) {
-    pg_assert(0 && "todo");
+    // const u64 number = par_number(parser);
+    const par_ast_node_t node = {.kind = PAK_NUM,
+                                 .main_token = parser->tokens_i};
+    par_ast_node_array_push(&parser->nodes, &node);
+    return PAR_OK;
   }
 
   pg_assert(0 && "unimplemented");

@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
         .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
     };
 
-    u8 *current = buf;
+    const u8 *current = buf;
     lex_lex(&lexer, buf, buf_len, &current);
 
     for (u32 i = 0; i < lexer.tokens.len; i++) {
