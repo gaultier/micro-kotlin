@@ -2722,6 +2722,7 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= parser->tokens.len);
 
   pg_assert(par_peek(parser).kind == LTK_BUILTIN_PRINTLN);
+  const u32 main_token = parser->tokens_i;
   par_advance(parser);
 
   if (par_peek(parser).kind != LTK_LEFT_PAREN)
@@ -2736,9 +2737,10 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser) {
     }
     if (result == PAR_OK) {
     } // Ok.
-
-    // Error.
-    return result;
+    else {
+      // Error.
+      return result;
+    }
   }
 
   if (par_peek(parser).kind != LTK_RIGHT_PAREN)
@@ -2748,6 +2750,7 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser) {
   par_ast_node_t node = {
       .kind = PAK_BUILTIN_PRINTLN,
       .lhs = par_last_node(parser),
+      .main_token = main_token,
   };
   par_ast_node_array_push(&parser->nodes, &node);
 
@@ -2796,13 +2799,15 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser) {
 
   if (par_peek(parser).kind == LTK_NUMBER) {
     // const u64 number = par_number(parser);
-    const par_ast_node_t node = {.kind = PAK_NUM,
-                                 .main_token = parser->tokens_i};
+    const par_ast_node_t node = {
+        .kind = PAK_NUM,
+        .main_token = parser->tokens_i,
+    };
     par_ast_node_array_push(&parser->nodes, &node);
+
+    par_advance(parser);
     return PAR_OK;
   }
-
-  pg_assert(0 && "unimplemented");
 
   return PAR_NONE;
 }
@@ -3013,7 +3018,10 @@ static par_result_t par_parse_function_definition(par_parser_t *parser) {
     return PAR_NONE;
   par_advance(parser);
 
-  par_ast_node_t node = {.kind = PAK_FUNCTION_DEFINITION};
+  par_ast_node_t node = {
+      .kind = PAK_FUNCTION_DEFINITION,
+      .main_token = parser->tokens_i,
+  };
   const u32 fn_i = parser->nodes.len;
   pg_unused(fn_i); // FIXME
   par_ast_node_array_push(&parser->nodes, &node);

@@ -38,8 +38,11 @@ int main(int argc, char *argv[]) {
     }
 
     par_parser_t parser = {
+        .buf = buf,
+        .buf_len = buf_len,
         .tokens = lexer.tokens,
-        .nodes = par_ast_node_array_make(lexer.tokens.len, &arena)};
+        .nodes = par_ast_node_array_make(lexer.tokens.len, &arena),
+    };
 
     par_result_t result = par_parse(&parser);
     pg_assert(result == PAR_OK);
