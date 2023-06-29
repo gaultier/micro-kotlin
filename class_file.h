@@ -2054,20 +2054,22 @@ string_t cf_make_class_file_name_kt(const char *source_file_name,
       cf_memrchr(source_file_name, '.', source_file_name_len);
   pg_assert(dot != NULL);
 
-  const u64 extension_len = sizeof(".class");
+  const u64 extension_len = sizeof(".class") - 1;
   const u64 before_dot_incl_len = dot - source_file_name;
   pg_assert(before_dot_incl_len > 0);
   const u64 class_file_name_len =
-      before_dot_incl_len + extension_len + 2 /* `Kt` */;
+      before_dot_incl_len + 2 /* `Kt` */ + extension_len;
   pg_assert(class_file_name_len > extension_len);
 
-  char *class_file_name = arena_alloc(arena, class_file_name_len, sizeof(u8));
+  char *class_file_name = arena_alloc(
+      arena, class_file_name_len + 1 /* null terminator */, sizeof(u8));
   memcpy(class_file_name, source_file_name, before_dot_incl_len);
   class_file_name[before_dot_incl_len] = 'K';
   class_file_name[before_dot_incl_len + 1] = 't';
-  memcpy(class_file_name + before_dot_incl_len + 2, ".class", extension_len);
+  memcpy(class_file_name + before_dot_incl_len + 2, ".class",
+         extension_len + 1 /* null terminator */);
 
-  class_file_name[class_file_name_len - 1] = 0;
+  pg_assert(class_file_name[class_file_name_len ] == 0);
 
   return (string_t){.value = (u8 *)class_file_name, .len = class_file_name_len};
 }
