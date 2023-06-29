@@ -1359,8 +1359,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     u8 *const s = *current;
     buf_read_n_u8(buf, buf_len, NULL, len, current);
 
-    LOG("[%lu/%hu] CIK_UTF8 len=%u s=%.*s", *i, constant_pool_len, len, len, s);
-
     cf_constant_t constant = {.kind = CIK_UTF8,
                               .v = {.s = {.len = len, .value = s}}};
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -1422,7 +1420,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     const u16 utf8_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(utf8_i > 0);
     pg_assert(utf8_i <= constant_pool_len);
-    LOG("[%lu/%hu] CIK_STRING utf8_i=%u", *i, constant_pool_len, utf8_i);
 
     const cf_constant_t constant = {.kind = CIK_STRING,
                                     .v = {.string_utf8_i = utf8_i}};
@@ -1438,9 +1435,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_len);
 
-    LOG("[%lu/%hu] CIK_FIELD_REF name_i=%u descriptor_i=%u", *i,
-        constant_pool_len, name_i, descriptor_i);
-
     const cf_constant_t constant = {
         .kind = CIK_FIELD_REF,
         .v = {.field_ref = {.name = name_i, .type_descriptor = descriptor_i}}};
@@ -1455,9 +1449,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     const u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
-
-    LOG("[%lu/%hu] CIK_METHOD_REF class_i=%u name_and_type_i=%u", *i,
-        constant_pool_len, class_i, name_and_type_i);
 
     const cf_constant_t constant = {
         .kind = CIK_METHOD_REF,
@@ -1475,9 +1466,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_len);
 
-    LOG("[%lu/%hu] CIK_INSTANCE_REF class_i=%u name_and_type_i=%u", *i,
-        constant_pool_len, class_i, name_and_type_i);
-
     const cf_constant_t constant = {
         .kind = CIK_INTERFACE_METHOD_REF,
     }; // FIXME
@@ -1492,9 +1480,6 @@ void cf_buf_read_constant(u8 *buf, u64 buf_len, u8 **current,
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_len);
-
-    LOG("[%lu/%hu] CIK_NAME_AND_TYPE class_i=%u name_and_type_i=%u", *i,
-        constant_pool_len, name_i, descriptor_i);
 
     const cf_constant_t constant = {
         .kind = CIK_NAME_AND_TYPE,
@@ -1718,7 +1703,6 @@ void cf_buf_read_class_file(u8 *buf, u64 buf_len, u8 **current,
                          &class_file->attributes, arena);
 
   const u64 remaining = buf + buf_len - *current;
-  LOG("read=%ld rem=%ld", *current - buf, remaining);
   pg_assert(remaining == 0);
 }
 
@@ -1807,7 +1791,6 @@ void cf_write_constant_pool(const cf_class_file_t *class_file, FILE *file) {
     pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
-    LOG("action=writing constant i=%lu/%lu", i, class_file->constant_pool.len);
     cf_write_constant(class_file, file, constant);
   }
 }
@@ -1928,12 +1911,10 @@ void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 }
 
 void cf_write_attributes(FILE *file, const cf_attribute_array_t *attributes) {
-  LOG("action=writing attributes %lu", attributes->len);
   file_write_be_16(file, attributes->len);
 
   for (uint64_t i = 0; i < attributes->len; i++) {
     const cf_attribute_t *const attribute = &attributes->values[i];
-    LOG("action=writing attribute i=%lu/%lu", i, attributes->len);
     cf_write_attribute(file, attribute);
   }
 }
@@ -1954,7 +1935,6 @@ void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
 
   for (uint64_t i = 0; i < class_file->methods.len; i++) {
     const cf_method_t *const method = &class_file->methods.values[i];
-    LOG("action=writing methods i=%lu/%lu", i, class_file->methods.len);
     cf_write_method(file, method);
   }
 }
@@ -2138,7 +2118,6 @@ void cf_read_class_files(const char *path, u64 path_len,
 
   struct stat st = {0};
   if (stat(path, &st) == -1) {
-    LOG("fact='failed to stat(2)' path=%s errno=%d", path, errno);
     return;
   }
 
@@ -2261,6 +2240,7 @@ typedef enum {
   LTK_BUILTIN_PRINTLN,
   LTK_KEYWORD_FUN,
   LTK_IDENTIFIER,
+  LTK_COMMA,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2588,6 +2568,15 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case ',': {
+      const lex_token_t token = {
+          .kind = LTK_COMMA,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '{': {
       const lex_token_t token = {
           .kind = LTK_LEFT_BRACE,
@@ -2652,7 +2641,7 @@ typedef enum {
   PAK_ADD,
   PAK_BUILTIN_PRINTLN,
   PAK_FUNCTION_DEFINITION,
-  PAK_BLOCK,
+  PAK_LIST,
 } par_ast_node_kind_t;
 
 typedef struct {
@@ -2873,6 +2862,88 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser,
   return PAR_NONE;
 }
 
+static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(new_node_i != NULL);
+
+  pg_assert(par_peek(parser).kind == LTK_LEFT_PAREN);
+  par_advance(parser);
+
+  if (par_peek(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
+    par_advance(parser);
+    return PAR_OK;
+  }
+
+  do {
+    u32 new_node_i = 0;
+    par_result_t result = par_parse_expression(parser, &new_node_i);
+    if (result == PAR_OK) {
+      const par_ast_node_t node = {
+          .kind = PAK_LIST,
+          .lhs = new_node_i,
+      };
+      par_ast_node_array_push(&parser->nodes, &node);
+      pg_assert(0&&"todo");
+    } else if (result == PAR_NONE) {
+      break;
+    } else {
+      return result;
+    }
+
+    if (par_peek(parser).kind == LTK_COMMA)
+      par_advance(parser);
+  } while (1);
+
+  if (par_peek(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
+    par_advance(parser);
+    return PAR_OK;
+  } else {
+    return PAR_ERR_UNEXPECTED_TOKEN;
+  }
+}
+
+static par_result_t par_parse_call_suffix(par_parser_t *parser,
+                                          u32 *new_node_i) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(new_node_i != NULL);
+
+  par_result_t result = par_parse_arguments(parser, new_node_i);
+
+  pg_assert(0 && "todo");
+}
+
+static par_result_t par_parse_navigation_suffix(par_parser_t *parser,
+                                                u32 *new_node_i) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(new_node_i != NULL);
+
+  pg_assert(0 && "todo");
+}
+
+static par_result_t par_parse_postfix_unary_suffix(par_parser_t *parser,
+                                                   u32 *new_node_i) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(new_node_i != NULL);
+
+  par_result_t result = par_parse_call_suffix(parser, new_node_i);
+  if (result != PAR_NONE)
+    return result;
+
+  return par_parse_navigation_suffix(parser, new_node_i);
+}
+
 static par_result_t par_parse_postfix_unary_expression(par_parser_t *parser,
                                                        u32 *new_node_i) {
   pg_assert(parser != NULL);
@@ -2881,7 +2952,18 @@ static par_result_t par_parse_postfix_unary_expression(par_parser_t *parser,
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  return par_parse_primary_expression(parser, new_node_i);
+  par_result_t result = par_parse_primary_expression(parser, new_node_i);
+  if (result != PAR_NONE)
+    return result;
+
+  while ((result = par_parse_postfix_unary_suffix(parser, new_node_i)) ==
+         PAR_OK) {
+  }
+
+  if (result == PAR_NONE)
+    return PAR_OK;
+
+  return result;
 }
 
 static par_result_t par_parse_prefix_unary_expression(par_parser_t *parser,
@@ -3064,7 +3146,7 @@ static par_result_t par_parse_statements(par_parser_t *parser,
   par_result_t result = PAR_NONE;
 
   const par_ast_node_t node = {
-      .kind = PAK_BLOCK,
+      .kind = PAK_LIST,
       .main_token = parser->tokens_i - 1,
   };
   par_ast_node_array_push(&parser->nodes, &node);
@@ -3075,7 +3157,7 @@ static par_result_t par_parse_statements(par_parser_t *parser,
     result = par_parse_statement(parser, &new_child_i);
     if (result == PAR_OK) {
       const par_ast_node_t node = {
-          .kind = PAK_BLOCK,
+          .kind = PAK_LIST,
           .main_token = parser->tokens_i - 1,
           .lhs = new_child_i,
       };
@@ -3319,7 +3401,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = NULL;
     break;
   }
-  case PAK_BLOCK: {
+  case PAK_LIST: {
     pg_assert(node->lhs < parser->nodes.len);
     pg_assert(node->rhs < parser->nodes.len);
 
