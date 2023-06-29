@@ -2428,6 +2428,37 @@ static bool lex_is_identifier_char(const u8 *buf, u32 buf_len,
          lex_peek(buf, buf_len, current) == '_';
 }
 
+static u32 lex_identifier_length(const u8 *buf, u32 buf_len,
+                                 u32 current_offset) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current_offset < buf_len);
+
+  const u32 start_offset = current_offset;
+  const u8 *current = &buf[current_offset];
+  pg_assert(lex_is_alphabetic(buf, buf_len, &current));
+
+  lex_advance(buf, buf_len, &current);
+
+  while (!lex_is_at_end(buf, buf_len, &current)) {
+    lex_peek(buf, buf_len, &current);
+
+    if (!lex_is_identifier_char(buf, buf_len, &current))
+      break;
+    lex_advance(buf, buf_len, &current);
+  }
+
+  pg_assert(!lex_is_at_end(buf, buf_len, &current));
+  pg_assert(!lex_is_identifier_char(buf, buf_len, &current));
+
+  const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, &current);
+  pg_assert(end_offset_excl > start_offset);
+
+  const u32 len = end_offset_excl - start_offset;
+  pg_assert(len >= 1);
+  return len;
+}
+
 static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
                            const u8 **current) {
   pg_assert(buf != NULL);
@@ -2438,24 +2469,10 @@ static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
   pg_assert(lex_is_alphabetic(buf, buf_len, current));
 
   const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
-
-  lex_advance(buf, buf_len, current);
-
-  while (!lex_is_at_end(buf, buf_len, current)) {
-    lex_peek(buf, buf_len, current);
-
-    if (!lex_is_identifier_char(buf, buf_len, current))
-      break;
-    lex_advance(buf, buf_len, current);
-  }
-
-  pg_assert(!lex_is_at_end(buf, buf_len, current));
-  pg_assert(!lex_is_identifier_char(buf, buf_len, current));
-
-  const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, current);
-
-  const string_t identifier = {.len = end_offset_excl - start_offset,
-                               .value = &buf[start_offset]};
+  const string_t identifier = {
+      .len = lex_identifier_length(buf, buf_len, start_offset),
+      .value = &buf[start_offset],
+  };
   if (string_eq_c(identifier, "fun")) {
     const lex_token_t token = {
         .kind = LTK_KEYWORD_FUN,
@@ -3146,4 +3163,70 @@ static par_result_t par_parse(par_parser_t *parser) {
   }
 
   return PAR_NONE;
+}
+
+// --------------------------------- Code generation
+
+static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
+                             const par_ast_node_t *node, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->nodes.len > 0);
+  pg_assert(class_file != NULL);
+  pg_assert(node != NULL);
+
+  switch (node->kind) {
+  case PAK_NUM: {
+    break;
+  }
+  case PAK_ADD: {
+    break;
+  }
+  case PAK_BUILTIN_PRINTLN: {
+    break;
+  }
+  case PAK_FUNCTION_DEFINITION: {
+    const u32 token_name_i = node->main_token + 1; // `fun foo(){}`
+                                                   //      ^
+    pg_assert(token_name_i < parser->tokens.len);
+    const lex_token_t token_name = parser->tokens.values[token_name_i];
+    pg_assert(token_name.kind == LTK_IDENTIFIER);
+
+    string_t method_name = {
+        .len = lex_identifier_length(parser->buf, parser->buf_len,
+                                     token_name.source_offset),
+        .value = &parser->buf[token_name.source_offset],
+    };
+    const u16 method_name_i =
+        cf_add_constant_string(&class_file->constant_pool, method_name);
+    cf_method_t method = {
+        .access_flags = CAF_ACC_PUBLIC /* FIXME */,
+        .name = method_name_i,
+        .descriptor = 0,
+        .attributes = cf_attribute_array_make(8, arena),
+    };
+    cf_method_array_push(&class_file->methods, &method);
+    break;
+  }
+  case PAK_BLOCK: {
+    break;
+  }
+  default:
+    pg_assert(0 && "unreachable");
+  }
+}
+
+static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
+                        arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->nodes.len > 0);
+  pg_assert(class_file != NULL);
+
+  const par_ast_node_t *const root = &parser->nodes.values[0];
+  cg_generate_node(parser, class_file, root, arena);
 }
