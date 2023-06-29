@@ -215,6 +215,7 @@ typedef enum {
   CFO_INVOKE_SPECIAL = 0xb7,
   CFO_RETURN = 0xb1,
   CFO_GET_STATIC = 0xb2,
+  CFO_BIPUSH = 0x10,
   CFO_LDC = 0x12,
   CFO_LDC_W = 0x13,
   CFO_INVOKE_VIRTUAL = 0xb6,
@@ -582,6 +583,14 @@ void cf_asm_return(cf_code_array_t *code) {
   cf_code_array_push_u8(code, CFO_RETURN);
 
   // TODO
+}
+
+void cf_asm_push_number(cf_code_array_t *code, u64 number) {
+  pg_assert(code != NULL);
+  pg_assert(number <= UINT8_MAX && "unimplemented");
+
+  cf_code_array_push_u8(code, CFO_BIPUSH);
+  cf_code_array_push_u8(code, number & 0xff);
 }
 
 void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
@@ -2795,15 +2804,14 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser,
   return PAR_OK;
 }
 
-static u64 par_number(const par_parser_t *parser) {
+static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->tokens.len);
 
-  pg_assert(par_peek(parser).kind == LTK_NUMBER);
+  pg_assert(token.kind == LTK_NUMBER);
 
-  const lex_token_t token = parser->tokens.values[parser->tokens_i];
   const u32 start = token.source_offset;
   const u8 *current = &parser->buf[start];
   while (lex_is_digit(parser->buf, parser->buf_len, &current)) {
@@ -2816,11 +2824,18 @@ static u64 par_number(const par_parser_t *parser) {
 
   u64 number = 0;
 
-  for (i64 i = length - 1; i >= 0; i--) {
+  u64 ten_unit = 1;
+  for (u32 i = 1; i <= length; i++) {
     pg_assert(i < parser->buf_len);
 
-    const u8 c = parser->buf[i];
-    number += 10 * i * (c - '0');
+    const u32 position = start + length - i;
+    pg_assert(start <= position);
+    pg_assert(position < end_excl);
+
+    const u8 c = parser->buf[position];
+    pg_assert('0' <= c && c <= '9');
+    number += ten_unit * (c - '0');
+    ten_unit *= 10;
   }
 
   return number;
@@ -2838,7 +2853,6 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser,
     return par_parse_builtin_println(parser, new_node_i);
 
   if (par_peek(parser).kind == LTK_NUMBER) {
-    // const u64 number = par_number(parser);
     const par_ast_node_t node = {
         .kind = PAK_NUM,
         .main_token = parser->tokens_i,
@@ -3183,8 +3197,14 @@ static par_result_t par_parse(par_parser_t *parser) {
 
 // --------------------------------- Code generation
 
-static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
+typedef struct {
+  cf_attribute_code_t *code;
+} cg_generator_t;
+
+static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
+                             cf_class_file_t *class_file,
                              const par_ast_node_t *node, arena_t *arena) {
+  pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
@@ -3195,12 +3215,26 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
 
   switch (node->kind) {
   case PAK_NUM: {
+    pg_assert(node->main_token < parser->tokens.len);
+
+    lex_token_t token = parser->tokens.values[node->main_token];
+    const u64 number = par_number(parser, token);
+
+    pg_assert(gen->code != NULL);
+    pg_assert(gen->code->code.values != NULL);
+
+    cf_asm_push_number(&gen->code->code, number);
     break;
   }
   case PAK_ADD: {
+    pg_assert(0 && "todo");
     break;
   }
   case PAK_BUILTIN_PRINTLN: {
+    if (node->lhs != 0) {
+      cg_generate_node(gen, parser, class_file,
+                       &parser->nodes.values[node->lhs], arena);
+    }
     break;
   }
   case PAK_FUNCTION_DEFINITION: {
@@ -3217,7 +3251,7 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name);
 
-    // FIXME: type.
+    // FIXME: hardcoded type.
     cf_type_t void_type = {.kind = CTY_VOID};
     cf_type_t type = {
         .kind = CTY_METHOD,
@@ -3235,16 +3269,47 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     const u16 descriptor_i =
         cf_add_constant_string(&class_file->constant_pool, type_descriptor);
 
-    const cf_method_t method = {
+    cf_method_t method = {
         .access_flags = CAF_ACC_PUBLIC /* FIXME */,
         .name = method_name_i,
         .descriptor = descriptor_i,
         .attributes = cf_attribute_array_make(8, arena),
     };
+
+    cf_attribute_code_t code = {.max_locals = type.v.method.argument_count};
+    cf_attribute_code_init(&code, arena);
+    gen->code = &code;
+    // cf_frame_t vm = {0};
+
+    pg_assert(node->lhs > 0);
+    pg_assert(node->lhs < parser->nodes.len);
+    cg_generate_node(gen, parser, class_file, &parser->nodes.values[node->lhs],
+                     arena);
+
+    cf_asm_return(&code.code);
+
+    cf_attribute_t attribute_code = {
+        .kind = CAK_CODE,
+        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
+        .v = {.code = code}};
+    cf_attribute_array_push(&method.attributes, &attribute_code);
     cf_method_array_push(&class_file->methods, &method);
+
+    gen->code = NULL;
     break;
   }
   case PAK_BLOCK: {
+    pg_assert(node->lhs < parser->nodes.len);
+    pg_assert(node->rhs < parser->nodes.len);
+
+    if (node->lhs != 0) {
+      cg_generate_node(gen, parser, class_file,
+                       &parser->nodes.values[node->lhs], arena);
+    }
+    if (node->rhs != 0) {
+      cg_generate_node(gen, parser, class_file,
+                       &parser->nodes.values[node->rhs], arena);
+    }
     break;
   }
   default:
@@ -3262,6 +3327,28 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
+
+  // FIXME: println(Int)
+  {
+    cf_type_t println_argument_types[] = {{.kind = CTY_INT}};
+    cf_type_t void_type = {.kind = CTY_VOID};
+    cf_type_t println_type = {
+        .kind = CTY_METHOD,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 1,
+                        .return_type = &void_type,
+                        .argument_types = println_argument_types,
+                    },
+            },
+    };
+    string_t println_type_s = string_reserve(30, arena);
+    cf_fill_type_descriptor_string(&println_type, &println_type_s);
+
+    cf_add_constant_string(&class_file->constant_pool, println_type_s);
+  }
 
   {                              // This class
     const u64 extension_len = 6; /* `class` */
@@ -3307,5 +3394,7 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   const par_ast_node_t *const root = &parser->nodes.values[0];
 
   cg_generate_synthetic_class(parser, class_file, arena);
-  cg_generate_node(parser, class_file, root, arena);
+
+  cg_generator_t gen = {0};
+  cg_generate_node(&gen, parser, class_file, root, arena);
 }
