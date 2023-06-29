@@ -56,7 +56,6 @@ int main(int argc, char *argv[]) {
 
     cg_generate(&parser, &class_file, &arena);
 
-
     const char *const class_file_name =
         cf_make_class_file_name(source_file_name, &arena);
 

@@ -121,11 +121,17 @@ bool string_eq(string_t a, string_t b) {
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
 
-bool string_eq_c(string_t a, char *b) {
+bool mem_eq_c(const u8 *a, u32 a_len, char *b) {
   pg_assert(b != NULL);
 
   const u64 b_len = strlen(b);
-  return a.len == b_len && memcmp(a.value, b, a.len) == 0;
+  return a_len == b_len && memcmp(a, b, a_len) == 0;
+}
+
+bool string_eq_c(string_t a, char *b) {
+  pg_assert(b != NULL);
+
+  return mem_eq_c(a.value, a.len, b);
 }
 
 void string_append_char(string_t *s, u8 c) {
@@ -2473,18 +2479,16 @@ static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
   pg_assert(lex_is_alphabetic(buf, buf_len, current));
 
   const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
-  const string_t identifier = {
-      .len = lex_identifier_length(buf, buf_len, start_offset),
-      .value = *current,
-  };
-  *current += identifier.len;
-  if (string_eq_c(identifier, "fun")) {
+  const u8 *const identifier = *current;
+  const u32 identifier_len = lex_identifier_length(buf, buf_len, start_offset);
+  *current += identifier_len;
+  if (mem_eq_c(identifier, identifier_len, "fun")) {
     const lex_token_t token = {
         .kind = LTK_KEYWORD_FUN,
         .source_offset = start_offset,
     };
     lex_token_array_push(&lexer->tokens, &token);
-  } else if (string_eq_c(identifier, "println")) {
+  } else if (mem_eq_c(identifier, identifier_len, "println")) {
     const lex_token_t token = {
         .kind = LTK_BUILTIN_PRINTLN,
         .source_offset = start_offset,
@@ -3226,7 +3230,7 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     const u16 descriptor_i =
         cf_add_constant_string(&class_file->constant_pool, type_descriptor);
 
-    cf_method_t method = {
+    const cf_method_t method = {
         .access_flags = CAF_ACC_PUBLIC /* FIXME */,
         .name = method_name_i,
         .descriptor = descriptor_i,
