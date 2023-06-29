@@ -538,45 +538,45 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
 }
 
 void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
-                                 cf_frame_t *vm) {
+                                 cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
-  pg_assert(vm != NULL);
+  pg_assert(frame != NULL);
 
   cf_code_array_push_u8(code, CFO_LDC_W);
   cf_code_array_push_u16(code, constant_i);
 
-  vm->current_stack += 1;
-  pg_assert(vm->current_stack < UINT16_MAX);
-  vm->max_stack = pg_max(vm->max_stack, vm->current_stack);
+  frame->current_stack += 1;
+  pg_assert(frame->current_stack < UINT16_MAX);
+  frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
 void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
-                           cf_frame_t *vm,
+                           cf_frame_t *frame,
                            const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
-  pg_assert(vm != NULL);
+  pg_assert(frame != NULL);
 
   cf_code_array_push_u8(code, CFO_INVOKE_VIRTUAL);
   cf_code_array_push_u16(code, method_ref_i);
 
   // FIXME: long, double takes 2 spots on the stack!
-  pg_assert(vm->current_stack >= method_type->argument_count);
-  vm->current_stack -= method_type->argument_count;
+  pg_assert(frame->current_stack >= method_type->argument_count);
+  frame->current_stack -= method_type->argument_count;
 }
 
-void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_frame_t *vm) {
+void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
-  pg_assert(vm != NULL);
+  pg_assert(frame != NULL);
 
   cf_code_array_push_u8(code, CFO_GET_STATIC);
   cf_code_array_push_u16(code, field_i);
 
-  vm->current_stack += 1;
-  pg_assert(vm->current_stack < UINT16_MAX);
-  vm->max_stack = pg_max(vm->max_stack, vm->current_stack);
+  frame->current_stack += 1;
+  pg_assert(frame->current_stack < UINT16_MAX);
+  frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
 void cf_asm_return(cf_code_array_t *code) {
@@ -585,36 +585,40 @@ void cf_asm_return(cf_code_array_t *code) {
   // TODO
 }
 
-void cf_asm_push_number(cf_code_array_t *code, u64 number) {
+void cf_asm_push_number(cf_code_array_t *code, u64 number, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(number <= UINT8_MAX && "unimplemented");
+  pg_assert(frame != NULL);
 
   cf_code_array_push_u8(code, CFO_BIPUSH);
   cf_code_array_push_u8(code, number & 0xff);
+
+  frame->current_stack += 1;
+  frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
 void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
-                           cf_frame_t *vm,
+                           cf_frame_t *frame,
                            const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
-  pg_assert(vm != NULL);
+  pg_assert(frame != NULL);
 
   cf_code_array_push_u8(code, CFO_INVOKE_SPECIAL);
   cf_code_array_push_u16(code, method_ref_i);
 
   // FIXME: long, double takes 2 spots on the stack!
-  pg_assert(vm->current_stack >= method_type->argument_count);
-  vm->current_stack -= method_type->argument_count;
+  pg_assert(frame->current_stack >= method_type->argument_count);
+  frame->current_stack -= method_type->argument_count;
 }
 
 void cf_asm_call_superclass_constructor(cf_code_array_t *code,
                                         u16 super_class_constructor_i,
-                                        cf_frame_t *vm,
+                                        cf_frame_t *frame,
                                         const cf_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
-  pg_assert(vm != NULL);
+  pg_assert(frame != NULL);
   pg_assert(constructor_type != NULL);
   pg_assert(constructor_type->kind == CTY_CONSTRUCTOR);
 
@@ -623,7 +627,7 @@ void cf_asm_call_superclass_constructor(cf_code_array_t *code,
 
   const cf_type_method_t *const method_type = &constructor_type->v.method;
   pg_assert(method_type != NULL);
-  cf_asm_invoke_special(code, super_class_constructor_i, vm, method_type);
+  cf_asm_invoke_special(code, super_class_constructor_i, frame, method_type);
 }
 
 typedef struct cf_attribute_t cf_attribute_t;
@@ -2069,7 +2073,7 @@ string_t cf_make_class_file_name_kt(const char *source_file_name,
   memcpy(class_file_name + before_dot_incl_len + 2, ".class",
          extension_len + 1 /* null terminator */);
 
-  pg_assert(class_file_name[class_file_name_len ] == 0);
+  pg_assert(class_file_name[class_file_name_len] == 0);
 
   return (string_t){.value = (u8 *)class_file_name, .len = class_file_name_len};
 }
@@ -3201,6 +3205,7 @@ static par_result_t par_parse(par_parser_t *parser) {
 
 typedef struct {
   cf_attribute_code_t *code;
+  cf_frame_t *frame;
 } cg_generator_t;
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
@@ -3224,8 +3229,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_assert(gen->code != NULL);
     pg_assert(gen->code->code.values != NULL);
+    pg_assert(gen->frame != NULL);
 
-    cf_asm_push_number(&gen->code->code, number);
+    cf_asm_push_number(&gen->code->code, number, gen->frame);
     break;
   }
   case PAK_ADD: {
@@ -3278,10 +3284,11 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .attributes = cf_attribute_array_make(8, arena),
     };
 
-    cf_attribute_code_t code = {.max_locals = type.v.method.argument_count};
+    cf_attribute_code_t code = {.max_locals = type.v.method.argument_count+1 /* this */};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
-    // cf_frame_t vm = {0};
+    cf_frame_t frame = {0};
+    gen->frame = &frame;
 
     pg_assert(node->lhs > 0);
     pg_assert(node->lhs < parser->nodes.len);
@@ -3290,6 +3297,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_return(&code.code);
 
+    gen->code->max_stack = gen->frame->max_stack;
     cf_attribute_t attribute_code = {
         .kind = CAK_CODE,
         .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
