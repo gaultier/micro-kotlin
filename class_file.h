@@ -2918,6 +2918,7 @@ static par_result_t par_parse_block(par_parser_t *parser) {
 
   if (par_peek(parser).kind != LTK_LEFT_BRACE)
     return PAR_NONE;
+  par_advance(parser);
 
   // TODO: scope.
 
