@@ -2234,6 +2234,7 @@ typedef enum {
   LTK_RIGHT_BRACE,
   LTK_BUILTIN_PRINTLN,
   LTK_KEYWORD_FUN,
+  LTK_KEYWORD_NUMBER,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2468,6 +2469,36 @@ static void lex_identifier(lex_lexer_t *lexer, u8 *buf, u32 buf_len,
   }
 }
 
+static void lex_number(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+  pg_assert(*current - buf <= buf_len);
+  pg_assert(lex_is_digit(buf, buf_len, current));
+
+  const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
+
+  lex_advance(buf, buf_len, current);
+
+  while (!lex_is_at_end(buf, buf_len, current)) {
+    lex_peek(buf, buf_len, current);
+
+    if (!lex_is_digit(buf, buf_len, current))
+      break;
+    lex_advance(buf, buf_len, current);
+  }
+
+  pg_assert(!lex_is_at_end(buf, buf_len, current));
+  pg_assert(!lex_is_digit(buf, buf_len, current));
+
+  const lex_token_t token = {
+      .kind = LTK_KEYWORD_NUMBER,
+      .source_offset = start_offset,
+  };
+  lex_token_array_push(&lexer->tokens, &token);
+}
+
 static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table.values != NULL);
@@ -2517,6 +2548,15 @@ static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
       lex_advance(buf, buf_len, current);
       break;
     }
+    case '+': {
+      const lex_token_t token = {
+          .kind = LTK_PLUS,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '\n': {
       const lex_line_table_t line = {
           .line =
@@ -2537,7 +2577,8 @@ static void lex_lex(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
     default: {
       if (lex_is_alphabetic(buf, buf_len, current)) {
         lex_identifier(lexer, buf, buf_len, current);
-        break;
+      } else if (lex_is_digit(buf, buf_len, current)) {
+        lex_number(lexer, buf, buf_len, current);
       } else {
         pg_assert(0 && "unimplemented");
       }
