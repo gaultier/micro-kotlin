@@ -2453,14 +2453,18 @@ static u32 lex_identifier_length(const u8 *buf, u32 buf_len,
 
   const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, &current);
   pg_assert(end_offset_excl > start_offset);
+  pg_assert(end_offset_excl <= buf_len);
 
   const u32 len = end_offset_excl - start_offset;
   pg_assert(len >= 1);
+  pg_assert(len <= buf_len);
   return len;
 }
 
 static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
                            const u8 **current) {
+  pg_assert(lexer != NULL);
+  pg_assert(lexer->tokens.values != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2471,8 +2475,9 @@ static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
   const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
   const string_t identifier = {
       .len = lex_identifier_length(buf, buf_len, start_offset),
-      .value = &buf[start_offset],
+      .value = *current,
   };
+  *current += identifier.len;
   if (string_eq_c(identifier, "fun")) {
     const lex_token_t token = {
         .kind = LTK_KEYWORD_FUN,
@@ -2496,6 +2501,8 @@ static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
 
 static void lex_number(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
                        const u8 **current) {
+  pg_assert(lexer != NULL);
+  pg_assert(lexer->tokens.values != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -3162,7 +3169,7 @@ static par_result_t par_parse(par_parser_t *parser) {
     return result;
   }
 
-  return PAR_NONE;
+  return PAR_OK;
 }
 
 // --------------------------------- Code generation
@@ -3188,8 +3195,7 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     break;
   }
   case PAK_FUNCTION_DEFINITION: {
-    const u32 token_name_i = node->main_token + 1; // `fun foo(){}`
-                                                   //      ^
+    const u32 token_name_i = node->main_token ; 
     pg_assert(token_name_i < parser->tokens.len);
     const lex_token_t token_name = parser->tokens.values[token_name_i];
     pg_assert(token_name.kind == LTK_IDENTIFIER);

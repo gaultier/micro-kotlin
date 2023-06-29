@@ -46,6 +46,24 @@ int main(int argc, char *argv[]) {
 
     par_result_t result = par_parse(&parser);
     pg_assert(result == PAR_OK);
+
+    cf_class_file_t class_file = {
+        .minor_version = cf_MINOR_VERSION,
+        .major_version = cf_MAJOR_VERSION_6,
+        .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
+    };
+    cf_init(&class_file, &arena);
+
+    cg_generate(&parser, &class_file, &arena);
+
+
+    const char *const class_file_name =
+        cf_make_class_file_name(source_file_name, &arena);
+
+    FILE *file = fopen(class_file_name, "w");
+    pg_assert(file != NULL);
+    cf_write(&class_file, file);
+    fclose(file);
   }
 
 #if 0
