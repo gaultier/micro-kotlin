@@ -22,6 +22,7 @@ int main(int argc, char *argv[]) {
     u8 *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
 
     pg_assert(read(fd, buf, buf_len) == buf_len);
+    close(fd);
 
     lex_lexer_t lexer = {
         .line_table = lex_line_table_array_make(1024, &arena),
@@ -36,8 +37,12 @@ int main(int argc, char *argv[]) {
       __builtin_dump_struct(&token, &printf);
     }
 
-    close(fd);
-    
+    par_parser_t parser = {
+        .tokens = lexer.tokens,
+        .nodes = par_ast_node_array_make(lexer.tokens.len, &arena)};
+
+    par_result_t result = par_parse(&parser);
+    pg_assert(result == PAR_OK);
   }
 
 #if 0
