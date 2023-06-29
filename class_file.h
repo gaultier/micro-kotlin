@@ -3195,7 +3195,7 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     break;
   }
   case PAK_FUNCTION_DEFINITION: {
-    const u32 token_name_i = node->main_token ; 
+    const u32 token_name_i = node->main_token;
     pg_assert(token_name_i < parser->tokens.len);
     const lex_token_t token_name = parser->tokens.values[token_name_i];
     pg_assert(token_name.kind == LTK_IDENTIFIER);
@@ -3207,10 +3207,29 @@ static void cg_generate_node(par_parser_t *parser, cf_class_file_t *class_file,
     };
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name);
+
+    // FIXME: type.
+    cf_type_t void_type = {.kind = CTY_VOID};
+    cf_type_t type = {
+        .kind = CTY_METHOD,
+        .v =
+            {
+                .method =
+                    {
+                        .argument_count = 0,
+                        .return_type = &void_type,
+                    },
+            },
+    };
+    string_t type_descriptor = string_reserve(64, arena);
+    cf_fill_type_descriptor_string(&type, &type_descriptor);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, type_descriptor);
+
     cf_method_t method = {
         .access_flags = CAF_ACC_PUBLIC /* FIXME */,
         .name = method_name_i,
-        .descriptor = 0,
+        .descriptor = descriptor_i,
         .attributes = cf_attribute_array_make(8, arena),
     };
     cf_method_array_push(&class_file->methods, &method);
