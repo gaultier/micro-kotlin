@@ -3,13 +3,14 @@
 [x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
 [x] Semantic opcode generation functions
 [.] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
-[ ] Call functions
-[ ] Define functions
+[ ] Call functions generically (no builtin) from the same class file
+[ ] Call functions generically (no builtin) from other class files
+[x] Define functions
 [ ] Generate stack map tables
 [ ] Use latest jvm version
 [x] Makefile/build.sh
 [x] Log memory used in arena
-[ ] Write non-trivial program with the API (opcode generation functions)
+[x] Write non-trivial program with the API (opcode generation functions)
 [x] Compute class file name
 [ ] Naive register (e.g. locals) allocation
 
