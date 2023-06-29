@@ -2751,7 +2751,7 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser,
     return PAR_ERR_UNEXPECTED_TOKEN;
   par_advance(parser);
 
-  par_ast_node_t node = {
+  const par_ast_node_t node = {
       .kind = PAK_BUILTIN_PRINTLN,
       .lhs = par_last_node(parser),
       .main_token = main_token,
@@ -3010,7 +3010,7 @@ static par_result_t par_parse_statements(par_parser_t *parser,
 
   par_result_t result = PAR_NONE;
 
-  par_ast_node_t node = {
+  const par_ast_node_t node = {
       .kind = PAK_BLOCK,
       .main_token = parser->tokens_i - 1,
   };
@@ -3021,7 +3021,7 @@ static par_result_t par_parse_statements(par_parser_t *parser,
     u32 new_child_i = 0;
     result = par_parse_statement(parser, &new_child_i);
     if (result == PAR_OK) {
-      par_ast_node_t node = {
+      const par_ast_node_t node = {
           .kind = PAK_BLOCK,
           .main_token = parser->tokens_i - 1,
           .lhs = new_child_i,
@@ -3080,7 +3080,7 @@ static par_result_t par_parse_function_definition(par_parser_t *parser,
     return PAR_NONE;
   par_advance(parser);
 
-  par_ast_node_t node = {
+  const par_ast_node_t node = {
       .kind = PAK_FUNCTION_DEFINITION,
       .main_token = parser->tokens_i,
   };
