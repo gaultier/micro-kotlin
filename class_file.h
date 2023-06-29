@@ -2234,7 +2234,6 @@ typedef enum {
   LTK_RIGHT_BRACE,
   LTK_BUILTIN_PRINTLN,
   LTK_KEYWORD_FUN,
-  LTK_KEYWORD_NUMBER,
   LTK_IDENTIFIER,
 } lex_token_kind_t;
 
@@ -2461,7 +2460,7 @@ static void lex_identifier(lex_lexer_t *lexer, u8 *buf, u32 buf_len,
     lex_token_array_push(&lexer->tokens, &token);
   } else if (string_eq_c(identifier, "println")) {
     const lex_token_t token = {
-        .kind = LTK_KEYWORD_FUN,
+        .kind = LTK_BUILTIN_PRINTLN,
         .source_offset = start_offset,
     };
     lex_token_array_push(&lexer->tokens, &token);
@@ -2498,7 +2497,7 @@ static void lex_number(lex_lexer_t *lexer, u8 *buf, u32 buf_len, u8 **current) {
   pg_assert(!lex_is_digit(buf, buf_len, current));
 
   const lex_token_t token = {
-      .kind = LTK_KEYWORD_NUMBER,
+      .kind = LTK_NUMBER,
       .source_offset = start_offset,
   };
   lex_token_array_push(&lexer->tokens, &token);
@@ -2695,6 +2694,16 @@ static lex_token_t par_advance(par_parser_t *parser) {
 }
 
 static par_result_t par_parse_declaration(par_parser_t *parser);
+static par_result_t par_parse_expression(par_parser_t *parser);
+
+static u32 par_last_node(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->tokens.len);
+
+  return parser->nodes.len - 1;
+}
 
 static par_result_t par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser != NULL);
@@ -2709,13 +2718,27 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser) {
     return PAR_ERR_UNEXPECTED_TOKEN;
   par_advance(parser);
 
-  // TODO
+  if (par_peek(parser).kind != LTK_RIGHT_PAREN) { // Parse parameters.
+
+    par_result_t result = par_parse_expression(parser);
+    if (result == PAR_NONE) {
+      pg_assert(0 && "todo error"); // No arguments.
+    }
+    if (result == PAR_OK) {
+    } // Ok.
+
+    // Error.
+    return result;
+  }
 
   if (par_peek(parser).kind != LTK_RIGHT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
   par_advance(parser);
 
-  par_ast_node_t node = {.kind = PAK_BUILTIN_PRINTLN}; // FIXME
+  par_ast_node_t node = {
+      .kind = PAK_BUILTIN_PRINTLN,
+      .lhs = par_last_node(parser),
+  };
   par_ast_node_array_push(&parser->nodes, &node);
 
   return PAR_OK;
@@ -2733,6 +2756,8 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser) {
   if (par_peek(parser).kind == LTK_NUMBER) {
     pg_assert(0 && "todo");
   }
+
+  pg_assert(0 && "unimplemented");
 
   return PAR_NONE;
 }
