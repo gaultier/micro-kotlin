@@ -32,19 +32,15 @@ int main(int argc, char *argv[]) {
     const u8 *current = buf;
     lex_lex(&lexer, buf, buf_len, &current);
 
-    for (u32 i = 0; i < lexer.tokens.len; i++) {
-      lex_token_t token = lexer.tokens.values[i];
-      __builtin_dump_struct(&token, &printf);
-    }
-
     par_parser_t parser = {
         .buf = buf,
         .buf_len = buf_len,
         .lexer = &lexer,
         .nodes = par_ast_node_array_make(lexer.tokens.len, &arena),
     };
-
     par_parse(&parser);
+    if (parser.state != PARSER_STATE_OK)
+      return 1;
 
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),

@@ -2541,11 +2541,19 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
                     const u8 **current) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table.values != NULL);
+  pg_assert(lexer->line_table.len == 0);
   pg_assert(lexer->tokens.values != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
+
+  // Push first line.
+  const lex_line_table_t line = {
+      .line = 1,
+      .start_offset = 0,
+  };
+  lex_line_table_array_push(&lexer->line_table, &line);
 
   while (!lex_is_at_end(buf, buf_len, current)) {
     const u8 c = **current;
@@ -2616,11 +2624,7 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
     }
     case '\n': {
       const lex_line_table_t line = {
-          .line =
-              lexer->line_table.len == 0
-                  ? 1
-                  : lexer->line_table.values[lexer->line_table.len - 1].line +
-                        1,
+          .line = lexer->line_table.values[lexer->line_table.len - 1].line + 1,
           .start_offset = lex_get_current_offset(buf, buf_len, current),
       };
       lex_line_table_array_push(&lexer->line_table, &line);
@@ -2710,12 +2714,20 @@ u16 par_ast_node_array_push(par_ast_node_array_t *array,
   return index;
 }
 
+typedef enum {
+  PARSER_STATE_OK,
+  PARSER_STATE_ERROR,
+  PARSER_STATE_PANIC,
+  PARSER_STATE_SYNCED,
+} par_parser_state_t;
+
 typedef struct {
   u8 *buf;
   u32 buf_len;
   u32 tokens_i;
   lex_lexer_t *lexer;
   par_ast_node_array_t nodes;
+  par_parser_state_t state;
 } par_parser_t;
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -2773,9 +2785,12 @@ static void par_find_token_position(par_parser_t *parser, lex_token_t token,
     const lex_line_table_t entry = parser->lexer->line_table.values[i];
     if (token.source_offset > entry.start_offset) {
       *line = entry.line;
-      *column = token.source_offset - entry.start_offset;
+      *column = 1 + token.source_offset - entry.start_offset;
     }
   }
+  pg_assert(*line > 0);
+  pg_assert(*line <= parser->lexer->line_table.len);
+  pg_assert(*column > 0);
 }
 
 static void par_error(par_parser_t *parser, lex_token_t token,
@@ -2786,13 +2801,24 @@ static void par_error(par_parser_t *parser, lex_token_t token,
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  u32 line = 0;
-  u32 column = 0;
-  par_find_token_position(parser, token, &line, &column);
+  switch (parser->state) {
+  case PARSER_STATE_OK: {
+    u32 line = 0;
+    u32 column = 0;
+    par_find_token_position(parser, token, &line, &column);
 
-  fprintf(stderr, "%u:%u:%s\n", line, column, error);
+    fprintf(stderr, "%u:%u:%s\n", line, column, error);
 
-  // TODO: parser state (panic mode) & skip to next line.
+    parser->state = PARSER_STATE_ERROR;
+    break;
+  }
+  case PARSER_STATE_ERROR:
+    parser->state = PARSER_STATE_PANIC;
+    break;
+  case PARSER_STATE_PANIC:
+  case PARSER_STATE_SYNCED:
+    break;
+  }
 }
 
 static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
