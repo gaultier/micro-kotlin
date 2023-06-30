@@ -2435,6 +2435,38 @@ static bool lex_is_identifier_char(const u8 *buf, u32 buf_len,
          lex_peek(buf, buf_len, current) == '_';
 }
 
+static u32 lex_number_length(const u8 *buf, u32 buf_len, u32 current_offset) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current_offset < buf_len);
+
+  const u32 start_offset = current_offset;
+  const u8 *current = &buf[current_offset];
+  pg_assert(lex_is_digit(buf, buf_len, &current));
+
+  lex_advance(buf, buf_len, &current);
+
+  while (!lex_is_at_end(buf, buf_len, &current)) {
+    lex_peek(buf, buf_len, &current);
+
+    if (!lex_is_digit(buf, buf_len, &current))
+      break;
+    lex_advance(buf, buf_len, &current);
+  }
+
+  pg_assert(!lex_is_at_end(buf, buf_len, &current));
+  pg_assert(!lex_is_digit(buf, buf_len, &current));
+
+  const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, &current);
+  pg_assert(end_offset_excl > start_offset);
+  pg_assert(end_offset_excl <= buf_len);
+
+  const u32 len = end_offset_excl - start_offset;
+  pg_assert(len >= 1);
+  pg_assert(len <= buf_len);
+  return len;
+}
+
 static u32 lex_identifier_length(const u8 *buf, u32 buf_len,
                                  u32 current_offset) {
   pg_assert(buf != NULL);
@@ -2648,6 +2680,48 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
   }
 }
 
+static u32 lex_find_token_length(const lex_lexer_t *lexer, const u8 *buf,
+                                 const u32 buf_len, lex_token_t token) {
+  pg_assert(lexer != NULL);
+  pg_assert(buf != NULL);
+
+  switch (token.kind) {
+  case LTK_NUMBER: {
+    return lex_number_length(buf, buf_len, token.source_offset);
+  }
+  case LTK_PLUS: {
+    return 1;
+  }
+  case LTK_LEFT_PAREN: {
+    return 1;
+  }
+  case LTK_RIGHT_PAREN: {
+    return 1;
+  }
+  case LTK_LEFT_BRACE: {
+    return 1;
+  }
+  case LTK_RIGHT_BRACE: {
+    return 1;
+  }
+  case LTK_BUILTIN_PRINTLN: {
+    return 7;
+  }
+  case LTK_KEYWORD_FUN: {
+    return 3;
+  }
+  case LTK_IDENTIFIER: {
+    return lex_identifier_length(buf, buf_len, token.source_offset);
+  }
+  case LTK_COMMA: {
+    return 1;
+  }
+  case LTK_DOT: {
+    return 1;
+  }
+  }
+}
+
 // ------------------------------ Parser
 
 typedef enum {
@@ -2772,7 +2846,8 @@ static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
 }
 
 static void par_find_token_position(par_parser_t *parser, lex_token_t token,
-                                    u32 *line, u32 *column) {
+                                    u32 *line, u32 *column,
+                                    string_t *token_string) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -2780,12 +2855,19 @@ static void par_find_token_position(par_parser_t *parser, lex_token_t token,
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(line != NULL);
   pg_assert(column != NULL);
+  pg_assert(token_string != NULL);
+
+  token_string->value = &parser->buf[token.source_offset];
+  token_string->len =
+      lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
 
   for (u32 i = 0; i < parser->lexer->line_table.len; i++) {
     const lex_line_table_t entry = parser->lexer->line_table.values[i];
     if (token.source_offset > entry.start_offset) {
       *line = entry.line;
       *column = 1 + token.source_offset - entry.start_offset;
+
+      return;
     }
   }
   pg_assert(*line > 0);
@@ -2805,9 +2887,11 @@ static void par_error(par_parser_t *parser, lex_token_t token,
   case PARSER_STATE_OK: {
     u32 line = 0;
     u32 column = 0;
-    par_find_token_position(parser, token, &line, &column);
+    string_t token_string = {0};
+    par_find_token_position(parser, token, &line, &column, &token_string);
 
-    fprintf(stderr, "%u:%u:%s\n", line, column, error);
+    fprintf(stderr, "%u:%u: got `%.*s`, %s\n", line, column, token_string.len,
+            token_string.value, error);
 
     parser->state = PARSER_STATE_ERROR;
     break;
@@ -2844,13 +2928,7 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   pg_assert(token.kind == LTK_NUMBER);
 
   const u32 start = token.source_offset;
-  const u8 *current = &parser->buf[start];
-  while (lex_is_digit(parser->buf, parser->buf_len, &current)) {
-    lex_advance(parser->buf, parser->buf_len, &current);
-  }
-  const u32 end_excl =
-      lex_get_current_offset(parser->buf, parser->buf_len, &current);
-  const u32 length = end_excl - start;
+  const u32 length = lex_number_length(parser->buf, parser->buf_len, start);
   pg_assert(length <= 20);
 
   u64 number = 0;
@@ -2861,7 +2939,6 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
 
     const u32 position = start + length - i;
     pg_assert(start <= position);
-    pg_assert(position < end_excl);
 
     const u8 c = parser->buf[position];
     pg_assert('0' <= c && c <= '9');
