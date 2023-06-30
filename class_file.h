@@ -2714,107 +2714,106 @@ typedef struct {
   u8 *buf;
   u32 buf_len;
   u32 tokens_i;
-  lex_token_array_t tokens;
+  lex_lexer_t *lexer;
   par_ast_node_array_t nodes;
 } par_parser_t;
 
-typedef enum {
-  PAR_NONE,
-  PAR_OK,
-  PAR_ERR_UNEXPECTED_TOKEN,
-} par_result_t;
-
 static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return parser->tokens_i == parser->tokens.len;
+  return parser->tokens_i == parser->lexer->tokens.len;
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return parser->tokens.values[parser->tokens_i];
+  return parser->lexer->tokens.values[parser->tokens_i];
 }
 
 static lex_token_t par_advance_token(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return parser->tokens.values[parser->tokens_i++];
+  return parser->lexer->tokens.values[parser->tokens_i++];
 }
 
-static par_result_t par_parse_declaration(par_parser_t *parser,
-                                          u32 *new_node_i);
-static par_result_t par_parse_expression(par_parser_t *parser, u32 *new_node_i);
-
-static u32 par_last_node(par_parser_t *parser) {
+static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return parser->nodes.len - 1;
+  if (par_peek_token(parser).kind == kind) {
+    par_advance_token(parser);
+    return true;
+  }
+  return false;
 }
 
-static par_result_t par_parse_builtin_println(par_parser_t *parser,
-                                              u32 *new_node_i) {
+static void par_find_token_position(par_parser_t *parser, lex_token_t token,
+                                    u32 *line, u32 *column) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(line != NULL);
+  pg_assert(column != NULL);
 
-  pg_assert(par_peek_token(parser).kind == LTK_BUILTIN_PRINTLN);
-  const u32 main_token = parser->tokens_i;
-  par_advance_token(parser);
-
-  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
-    return PAR_ERR_UNEXPECTED_TOKEN;
-
-  par_advance_token(parser);
-
-  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN) { // Parse parameters.
-
-    par_result_t result = par_parse_expression(parser, new_node_i);
-    if (result == PAR_NONE) {
-      pg_assert(0 && "todo error"); // No arguments.
-    }
-    if (result == PAR_OK) {
-    } // Ok.
-    else {
-      // Error.
-      return result;
+  for (u32 i = 0; i < parser->lexer->line_table.len; i++) {
+    const lex_line_table_t entry = parser->lexer->line_table.values[i];
+    if (token.source_offset > entry.start_offset) {
+      *line = entry.line;
+      *column = token.source_offset - entry.start_offset;
     }
   }
+}
 
-  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN)
-    return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance_token(parser);
+static void par_error(par_parser_t *parser, lex_token_t token,
+                      const char *error) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const par_ast_node_t node = {
-      .kind = PAK_BUILTIN_PRINTLN,
-      .lhs = par_last_node(parser),
-      .main_token = main_token,
-  };
-  par_ast_node_array_push(&parser->nodes, &node);
-  *new_node_i = par_last_node(parser);
+  u32 line = 0;
+  u32 column = 0;
+  par_find_token_position(parser, token, &line, &column);
 
-  return PAR_OK;
+  fprintf(stderr, "%u:%u:%s\n", line, column, error);
+
+  // TODO: parser state (panic mode) & skip to next line.
+}
+
+static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
+                             const char *error) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  if (!par_match_token(parser, kind)) {
+    par_error(parser, par_peek_token(parser), error);
+  }
 }
 
 static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
   pg_assert(token.kind == LTK_NUMBER);
 
@@ -2847,453 +2846,70 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   return number;
 }
 
-static par_result_t par_parse_primary_expression(par_parser_t *parser,
-                                                 u32 *new_node_i) {
+static void par_parse_expression(par_parser_t *parser);
+
+static void par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  if (par_peek_token(parser).kind == LTK_BUILTIN_PRINTLN)
-    return par_parse_builtin_println(parser, new_node_i);
+  par_expect_token(parser, LTK_LEFT_PAREN, "expected left parenthesis");
+  par_parse_expression(parser);
+  par_expect_token(parser, LTK_RIGHT_PAREN, "expected left parenthesis");
+}
 
-  if (par_peek_token(parser).kind == LTK_NUMBER) {
+static void par_parse_primary_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  if (par_match_token(parser, LTK_NUMBER)) {
     const par_ast_node_t node = {
         .kind = PAK_NUM,
         .main_token = parser->tokens_i,
     };
     par_ast_node_array_push(&parser->nodes, &node);
-    *new_node_i = par_last_node(parser);
-
-    par_advance_token(parser);
-    return PAR_OK;
-  }
-
-  return PAR_NONE;
-}
-
-static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
-    return PAR_NONE;
-  par_advance_token(parser);
-
-  if (par_peek_token(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
-    par_advance_token(parser);
-    return PAR_OK;
-  }
-
-  do {
-    u32 new_node_i = 0;
-    par_result_t result = par_parse_expression(parser, &new_node_i);
-    if (result == PAR_OK) {
-      const par_ast_node_t node = {
-          .kind = PAK_LIST,
-          .lhs = new_node_i,
-      };
-      par_ast_node_array_push(&parser->nodes, &node);
-      pg_assert(0 && "todo");
-    } else if (result == PAR_NONE) {
-      break;
-    } else {
-      return result;
-    }
-
-    if (par_peek_token(parser).kind == LTK_COMMA)
-      par_advance_token(parser);
-  } while (1);
-
-  if (par_peek_token(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
-    par_advance_token(parser);
-    return PAR_OK;
-  } else {
-    return PAR_ERR_UNEXPECTED_TOKEN;
   }
 }
 
-static par_result_t par_parse_call_suffix(par_parser_t *parser,
-                                          u32 *new_node_i) {
+static void par_parse_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  par_result_t result = par_parse_arguments(parser, new_node_i);
-  return result;
+  par_parse_primary_expression(parser);
 }
 
-static par_result_t par_parse_navigation_suffix(par_parser_t *parser,
-                                                u32 *new_node_i) {
+static void par_parse_declaration(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  if (par_peek_token(parser).kind != LTK_DOT)
-    return PAR_NONE;
-
-  par_advance_token(parser);
-
-  pg_assert(0 && "todo");
+  if (par_match_token(parser, LTK_BUILTIN_PRINTLN))
+    par_parse_builtin_println(parser);
+  else
+    // par_parse_statement(parser);
+    par_parse_expression(parser);
 }
 
-static par_result_t par_parse_postfix_unary_suffix(par_parser_t *parser,
-                                                   u32 *new_node_i) {
+static void par_parse(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  par_result_t result = par_parse_call_suffix(parser, new_node_i);
-  if (result != PAR_NONE)
-    return result;
-
-  return par_parse_navigation_suffix(parser, new_node_i);
-}
-
-static par_result_t par_parse_postfix_unary_expression(par_parser_t *parser,
-                                                       u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  par_result_t result = par_parse_primary_expression(parser, new_node_i);
-  if (result != PAR_NONE)
-    return result;
-
-  while ((result = par_parse_postfix_unary_suffix(parser, new_node_i)) ==
-         PAR_OK) {
-  }
-
-  if (result == PAR_NONE)
-    return PAR_OK;
-
-  return result;
-}
-
-static par_result_t par_parse_prefix_unary_expression(par_parser_t *parser,
-                                                      u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_postfix_unary_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_as_expression(par_parser_t *parser,
-                                            u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_prefix_unary_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_multiplication_expression(par_parser_t *parser,
-                                                        u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  // FIXME: *
-  return par_parse_as_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_additive_expression(par_parser_t *parser,
-                                                  u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_multiplication_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_range_expression(par_parser_t *parser,
-                                               u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_additive_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_infix_function_call(par_parser_t *parser,
-                                                  u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_range_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_elvis_expression(par_parser_t *parser,
-                                               u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_infix_function_call(parser, new_node_i);
-}
-
-static par_result_t par_parse_infix(par_parser_t *parser, u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_elvis_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_generic_call_like_comparison(par_parser_t *parser,
-                                                           u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_infix(parser, new_node_i);
-}
-
-static par_result_t par_parse_comparison(par_parser_t *parser,
-                                         u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_generic_call_like_comparison(parser, new_node_i);
-}
-
-static par_result_t par_parse_equality(par_parser_t *parser, u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_comparison(parser, new_node_i);
-}
-
-static par_result_t par_parse_conjunction(par_parser_t *parser,
-                                          u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_equality(parser, new_node_i);
-}
-
-static par_result_t par_parse_disjunction(par_parser_t *parser,
-                                          u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  return par_parse_conjunction(parser, new_node_i);
-}
-
-static par_result_t par_parse_expression(par_parser_t *parser,
-                                         u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-
-  return par_parse_disjunction(parser, new_node_i);
-}
-
-static par_result_t par_parse_statement(par_parser_t *parser, u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  par_result_t result = PAR_NONE;
-
-  if ((result = par_parse_declaration(parser, new_node_i)) != PAR_NONE)
-    return result;
-
-  return par_parse_expression(parser, new_node_i);
-}
-
-static par_result_t par_parse_statements(par_parser_t *parser,
-                                         u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  par_result_t result = PAR_NONE;
-
-  const par_ast_node_t node = {
-      .kind = PAK_LIST,
-      .main_token = parser->tokens_i - 1,
-  };
-  par_ast_node_array_push(&parser->nodes, &node);
-  u32 last_block_i = *new_node_i = par_last_node(parser);
-
-  while (1) {
-    u32 new_child_i = 0;
-    result = par_parse_statement(parser, &new_child_i);
-    if (result == PAR_OK) {
-      const par_ast_node_t node = {
-          .kind = PAK_LIST,
-          .main_token = parser->tokens_i - 1,
-          .lhs = new_child_i,
-      };
-      par_ast_node_array_push(&parser->nodes, &node);
-
-      parser->nodes.values[last_block_i].rhs =
-          par_last_node(parser); // Linked-list of blocks.
-
-      last_block_i = par_last_node(parser);
-
-      continue;
-    }
-    if (result == PAR_NONE)
-      return PAR_OK;
-    // Error
-    return result;
-  }
-}
-
-static par_result_t par_parse_block(par_parser_t *parser, u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  if (par_peek_token(parser).kind != LTK_LEFT_BRACE)
-    return PAR_NONE;
-  par_advance_token(parser);
-
-  // TODO: scope.
-
-  par_result_t result = PAR_NONE;
-  if ((result = par_parse_statements(parser, new_node_i)) != PAR_OK)
-    return result;
-
-  if (par_peek_token(parser).kind != LTK_RIGHT_BRACE)
-    return PAR_NONE;
-  par_advance_token(parser);
-
-  return PAR_OK;
-}
-
-static par_result_t par_parse_function_definition(par_parser_t *parser,
-                                                  u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  if (par_peek_token(parser).kind != LTK_KEYWORD_FUN)
-    return PAR_NONE;
-  par_advance_token(parser);
-
-  const par_ast_node_t node = {
-      .kind = PAK_FUNCTION_DEFINITION,
-      .main_token = parser->tokens_i,
-  };
-  par_ast_node_array_push(&parser->nodes, &node);
-  *new_node_i = par_last_node(parser);
-
-  if (par_peek_token(parser).kind != LTK_IDENTIFIER)
-    return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance_token(parser);
-
-  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
-    return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance_token(parser);
-
-  // TODO: parse arguments
-  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN)
-    return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance_token(parser);
-
-  u32 fn_body_i = 0;
-  par_result_t result = par_parse_block(parser, &fn_body_i);
-  if (result == PAR_NONE || result == PAR_OK) {
-    pg_assert(fn_body_i > 0);
-    parser->nodes.values[*new_node_i].lhs = fn_body_i;
-  }
-  return result;
-}
-
-static par_result_t par_parse_declaration(par_parser_t *parser,
-                                          u32 *new_node_i) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
-  pg_assert(new_node_i != NULL);
-
-  par_result_t result = PAR_NONE;
-  if ((result = par_parse_function_definition(parser, new_node_i)) !=
-      PAR_NONE) {
-    return result;
-  }
-
-  return PAR_NONE;
-}
-
-static par_result_t par_parse(par_parser_t *parser) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
-  pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
   while (!par_is_at_end(parser)) {
-    u32 new_node_i = 0;
-    const par_result_t result = par_parse_declaration(parser, &new_node_i);
-    if (result == PAR_OK) {
-      // TODO: use new_node_i
-      continue;
-    }
-    if (result == PAR_NONE)
-      return PAR_OK; // The end.
-
-    // Error.
-    return result;
+    par_parse_declaration(parser);
   }
-
-  return PAR_OK;
 }
 
 // --------------------------------- Code generation
@@ -3308,18 +2924,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
                              const par_ast_node_t *node, arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(node != NULL);
 
   switch (node->kind) {
   case PAK_NUM: {
-    pg_assert(node->main_token < parser->tokens.len);
+    pg_assert(node->main_token < parser->lexer->tokens.len);
 
-    lex_token_t token = parser->tokens.values[node->main_token];
+    lex_token_t token = parser->lexer->tokens.values[node->main_token];
     const u64 number = par_number(parser, token);
 
     pg_assert(gen->code != NULL);
@@ -3342,8 +2959,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case PAK_FUNCTION_DEFINITION: {
     const u32 token_name_i = node->main_token;
-    pg_assert(token_name_i < parser->tokens.len);
-    const lex_token_t token_name = parser->tokens.values[token_name_i];
+    pg_assert(token_name_i < parser->lexer->tokens.len);
+    const lex_token_t token_name = parser->lexer->tokens.values[token_name_i];
     pg_assert(token_name.kind == LTK_IDENTIFIER);
 
     string_t method_name = {
@@ -3437,9 +3054,10 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
                                         cf_class_file_t *class_file,
                                         arena_t *arena) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
@@ -3500,9 +3118,10 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
 static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
                         arena_t *arena) {
   pg_assert(parser != NULL);
-  pg_assert(parser->tokens.values != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->tokens.len);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);

@@ -40,12 +40,11 @@ int main(int argc, char *argv[]) {
     par_parser_t parser = {
         .buf = buf,
         .buf_len = buf_len,
-        .tokens = lexer.tokens,
+        .lexer = &lexer,
         .nodes = par_ast_node_array_make(lexer.tokens.len, &arena),
     };
 
-    par_result_t result = par_parse(&parser);
-    pg_assert(result == PAR_OK);
+    par_parse(&parser);
 
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
