@@ -436,7 +436,7 @@ u16 cf_constant_array_push(cf_constant_array_t *array, const cf_constant_t *x) {
   }
 
   array->values[array->len] = *x;
-  const u16 index = array->len + 1;
+  const u64 index = array->len + 1;
   pg_assert(index > 0);
   pg_assert(index <= array->len + 1);
   array->len += 1;
@@ -2100,7 +2100,7 @@ u16 cf_class_file_array_push(cf_class_file_array_t *array,
   }
 
   array->values[array->len] = *x;
-  const u16 index = array->len + 1;
+  const u64 index = array->len + 1;
   pg_assert(index > 0);
   pg_assert(index <= array->len + 1);
   array->len += 1;
@@ -2290,7 +2290,7 @@ u16 lex_token_array_push(lex_token_array_t *array, const lex_token_t *x) {
   }
 
   array->values[array->len] = *x;
-  const u16 index = array->len + 1;
+  const u64 index = array->len + 1;
   pg_assert(index > 0);
   pg_assert(index <= array->len + 1);
   array->len += 1;
@@ -2344,7 +2344,7 @@ u16 lex_line_table_array_push(lex_line_table_array_t *array,
   }
 
   array->values[array->len] = *x;
-  const u16 index = array->len + 1;
+  const u64 index = array->len + 1;
   pg_assert(index > 0);
   pg_assert(index <= array->len + 1);
   array->len += 1;
@@ -2703,7 +2703,7 @@ u16 par_ast_node_array_push(par_ast_node_array_t *array,
   }
 
   array->values[array->len] = *x;
-  const u16 index = array->len + 1;
+  const u64 index = array->len + 1;
   pg_assert(index > 0);
   pg_assert(index <= array->len + 1);
   array->len += 1;
