@@ -2241,6 +2241,7 @@ typedef enum {
   LTK_KEYWORD_FUN,
   LTK_IDENTIFIER,
   LTK_COMMA,
+  LTK_DOT,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2604,6 +2605,15 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case '.': {
+      const lex_token_t token = {
+          .kind = LTK_DOT,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '\n': {
       const lex_line_table_t line = {
           .line =
@@ -2723,7 +2733,7 @@ static bool par_is_at_end(const par_parser_t *parser) {
   return parser->tokens_i == parser->tokens.len;
 }
 
-static lex_token_t par_peek(const par_parser_t *parser) {
+static lex_token_t par_peek_token(const par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
@@ -2732,7 +2742,7 @@ static lex_token_t par_peek(const par_parser_t *parser) {
   return parser->tokens.values[parser->tokens_i];
 }
 
-static lex_token_t par_advance(par_parser_t *parser) {
+static lex_token_t par_advance_token(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
@@ -2762,16 +2772,16 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser,
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  pg_assert(par_peek(parser).kind == LTK_BUILTIN_PRINTLN);
+  pg_assert(par_peek_token(parser).kind == LTK_BUILTIN_PRINTLN);
   const u32 main_token = parser->tokens_i;
-  par_advance(parser);
+  par_advance_token(parser);
 
-  if (par_peek(parser).kind != LTK_LEFT_PAREN)
+  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
 
-  par_advance(parser);
+  par_advance_token(parser);
 
-  if (par_peek(parser).kind != LTK_RIGHT_PAREN) { // Parse parameters.
+  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN) { // Parse parameters.
 
     par_result_t result = par_parse_expression(parser, new_node_i);
     if (result == PAR_NONE) {
@@ -2785,9 +2795,9 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser,
     }
   }
 
-  if (par_peek(parser).kind != LTK_RIGHT_PAREN)
+  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance(parser);
+  par_advance_token(parser);
 
   const par_ast_node_t node = {
       .kind = PAK_BUILTIN_PRINTLN,
@@ -2845,10 +2855,10 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser,
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  if (par_peek(parser).kind == LTK_BUILTIN_PRINTLN)
+  if (par_peek_token(parser).kind == LTK_BUILTIN_PRINTLN)
     return par_parse_builtin_println(parser, new_node_i);
 
-  if (par_peek(parser).kind == LTK_NUMBER) {
+  if (par_peek_token(parser).kind == LTK_NUMBER) {
     const par_ast_node_t node = {
         .kind = PAK_NUM,
         .main_token = parser->tokens_i,
@@ -2856,7 +2866,7 @@ static par_result_t par_parse_primary_expression(par_parser_t *parser,
     par_ast_node_array_push(&parser->nodes, &node);
     *new_node_i = par_last_node(parser);
 
-    par_advance(parser);
+    par_advance_token(parser);
     return PAR_OK;
   }
 
@@ -2870,12 +2880,12 @@ static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  if (par_peek(parser).kind != LTK_LEFT_PAREN)
+  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
     return PAR_NONE;
-  par_advance(parser);
+  par_advance_token(parser);
 
-  if (par_peek(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
-    par_advance(parser);
+  if (par_peek_token(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
+    par_advance_token(parser);
     return PAR_OK;
   }
 
@@ -2895,12 +2905,12 @@ static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
       return result;
     }
 
-    if (par_peek(parser).kind == LTK_COMMA)
-      par_advance(parser);
+    if (par_peek_token(parser).kind == LTK_COMMA)
+      par_advance_token(parser);
   } while (1);
 
-  if (par_peek(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
-    par_advance(parser);
+  if (par_peek_token(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
+    par_advance_token(parser);
     return PAR_OK;
   } else {
     return PAR_ERR_UNEXPECTED_TOKEN;
@@ -2926,6 +2936,11 @@ static par_result_t par_parse_navigation_suffix(par_parser_t *parser,
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
+
+  if (par_peek_token(parser).kind != LTK_DOT)
+    return PAR_NONE;
+
+  par_advance_token(parser);
 
   pg_assert(0 && "todo");
 }
@@ -3183,9 +3198,9 @@ static par_result_t par_parse_block(par_parser_t *parser, u32 *new_node_i) {
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  if (par_peek(parser).kind != LTK_LEFT_BRACE)
+  if (par_peek_token(parser).kind != LTK_LEFT_BRACE)
     return PAR_NONE;
-  par_advance(parser);
+  par_advance_token(parser);
 
   // TODO: scope.
 
@@ -3193,9 +3208,9 @@ static par_result_t par_parse_block(par_parser_t *parser, u32 *new_node_i) {
   if ((result = par_parse_statements(parser, new_node_i)) != PAR_OK)
     return result;
 
-  if (par_peek(parser).kind != LTK_RIGHT_BRACE)
+  if (par_peek_token(parser).kind != LTK_RIGHT_BRACE)
     return PAR_NONE;
-  par_advance(parser);
+  par_advance_token(parser);
 
   return PAR_OK;
 }
@@ -3208,9 +3223,9 @@ static par_result_t par_parse_function_definition(par_parser_t *parser,
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  if (par_peek(parser).kind != LTK_KEYWORD_FUN)
+  if (par_peek_token(parser).kind != LTK_KEYWORD_FUN)
     return PAR_NONE;
-  par_advance(parser);
+  par_advance_token(parser);
 
   const par_ast_node_t node = {
       .kind = PAK_FUNCTION_DEFINITION,
@@ -3219,18 +3234,18 @@ static par_result_t par_parse_function_definition(par_parser_t *parser,
   par_ast_node_array_push(&parser->nodes, &node);
   *new_node_i = par_last_node(parser);
 
-  if (par_peek(parser).kind != LTK_IDENTIFIER)
+  if (par_peek_token(parser).kind != LTK_IDENTIFIER)
     return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance(parser);
+  par_advance_token(parser);
 
-  if (par_peek(parser).kind != LTK_LEFT_PAREN)
+  if (par_peek_token(parser).kind != LTK_LEFT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance(parser);
+  par_advance_token(parser);
 
   // TODO: parse arguments
-  if (par_peek(parser).kind != LTK_RIGHT_PAREN)
+  if (par_peek_token(parser).kind != LTK_RIGHT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
-  par_advance(parser);
+  par_advance_token(parser);
 
   u32 fn_body_i = 0;
   par_result_t result = par_parse_block(parser, &fn_body_i);
