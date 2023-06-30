@@ -2768,6 +2768,7 @@ static par_result_t par_parse_builtin_println(par_parser_t *parser,
 
   if (par_peek(parser).kind != LTK_LEFT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
+
   par_advance(parser);
 
   if (par_peek(parser).kind != LTK_RIGHT_PAREN) { // Parse parameters.
@@ -2869,7 +2870,8 @@ static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
   pg_assert(parser->tokens_i <= parser->tokens.len);
   pg_assert(new_node_i != NULL);
 
-  pg_assert(par_peek(parser).kind == LTK_LEFT_PAREN);
+  if (par_peek(parser).kind != LTK_LEFT_PAREN)
+    return PAR_NONE;
   par_advance(parser);
 
   if (par_peek(parser).kind == LTK_RIGHT_PAREN) { // No arguments.
@@ -2886,7 +2888,7 @@ static par_result_t par_parse_arguments(par_parser_t *parser, u32 *new_node_i) {
           .lhs = new_node_i,
       };
       par_ast_node_array_push(&parser->nodes, &node);
-      pg_assert(0&&"todo");
+      pg_assert(0 && "todo");
     } else if (result == PAR_NONE) {
       break;
     } else {
@@ -2914,8 +2916,7 @@ static par_result_t par_parse_call_suffix(par_parser_t *parser,
   pg_assert(new_node_i != NULL);
 
   par_result_t result = par_parse_arguments(parser, new_node_i);
-
-  pg_assert(0 && "todo");
+  return result;
 }
 
 static par_result_t par_parse_navigation_suffix(par_parser_t *parser,
@@ -3131,8 +3132,6 @@ static par_result_t par_parse_statement(par_parser_t *parser, u32 *new_node_i) {
     return result;
 
   return par_parse_expression(parser, new_node_i);
-
-  return PAR_OK;
 }
 
 static par_result_t par_parse_statements(par_parser_t *parser,
@@ -3175,8 +3174,6 @@ static par_result_t par_parse_statements(par_parser_t *parser,
     // Error
     return result;
   }
-
-  return PAR_OK;
 }
 
 static par_result_t par_parse_block(par_parser_t *parser, u32 *new_node_i) {
@@ -3230,6 +3227,7 @@ static par_result_t par_parse_function_definition(par_parser_t *parser,
     return PAR_ERR_UNEXPECTED_TOKEN;
   par_advance(parser);
 
+  // TODO: parse arguments
   if (par_peek(parser).kind != LTK_RIGHT_PAREN)
     return PAR_ERR_UNEXPECTED_TOKEN;
   par_advance(parser);
