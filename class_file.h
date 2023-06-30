@@ -2782,7 +2782,7 @@ u16 par_ast_node_array_push(par_ast_node_array_t *array,
   }
 
   array->values[array->len++] = *x;
-  return array->len-1;
+  return array->len - 1;
 }
 
 typedef enum {
@@ -2948,7 +2948,7 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
 
 static u32 par_parse_expression(par_parser_t *parser);
 
-static void par_parse_builtin_println(par_parser_t *parser) {
+static u32 par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -2962,10 +2962,10 @@ static void par_parse_builtin_println(par_parser_t *parser) {
       .main_token = parser->tokens_i - 2,
       .lhs = par_parse_expression(parser),
   };
-
-  par_ast_node_array_push(&parser->nodes, &node);
+  const u32 node_i = par_ast_node_array_push(&parser->nodes, &node);
 
   par_expect_token(parser, LTK_RIGHT_PAREN, "expected left parenthesis");
+  return node_i;
 }
 
 static u32 par_parse_primary_expression(par_parser_t *parser) {
@@ -2986,7 +2986,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   return 0;
 }
 
-static void par_parse_statement(par_parser_t *parser) {
+static u32 par_parse_statement(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -2994,9 +2994,9 @@ static void par_parse_statement(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
   if (par_match_token(parser, LTK_BUILTIN_PRINTLN))
-    par_parse_builtin_println(parser);
+    return par_parse_builtin_println(parser);
   else
-    par_parse_expression(parser);
+    return par_parse_expression(parser);
 }
 
 static u32 par_parse_expression(par_parser_t *parser) {
@@ -3009,17 +3009,80 @@ static u32 par_parse_expression(par_parser_t *parser) {
   return par_parse_primary_expression(parser);
 }
 
-static void par_parse_declaration(par_parser_t *parser) {
+static u32 par_parse_block(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  par_parse_statement(parser);
+  const par_ast_node_t list = {
+      .kind = PAK_LIST,
+      .main_token = parser->tokens_i - 1,
+      .lhs = par_parse_statement(parser),
+  };
+  const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
+  // TODO: many.
+
+  par_expect_token(parser, LTK_RIGHT_PAREN,
+                   "expected left parenthesis after the arguments");
+  return list_i;
 }
 
-static void par_parse(par_parser_t *parser) {
+static u32 par_parse_arguments(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  const par_ast_node_t list = {
+      .kind = PAK_LIST,
+      .main_token = parser->tokens_i - 1,
+      .lhs = par_parse_expression(parser),
+  };
+  const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
+  // TODO: many.
+
+  par_expect_token(parser, LTK_RIGHT_PAREN,
+                   "expected left parenthesis after the arguments");
+  return list_i;
+}
+
+static u32 par_parse_function_declaration(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  par_expect_token(parser, LTK_IDENTIFIER,
+                   "expected function name (identifier)");
+  const u32 name = parser->tokens_i - 1;
+
+  par_expect_token(parser, LTK_LEFT_PAREN,
+                   "expected left parenthesis before the arguments");
+  const u32 arguments = par_parse_arguments(parser);
+
+  par_expect_token(parser, LTK_LEFT_BRACE,
+                   "expected left parenthesis before the arguments");
+  const u32 body = par_parse_block(parser);
+}
+
+static u32 par_parse_declaration(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  if (par_match_token(parser, LTK_KEYWORD_FUN))
+    return par_parse_function_declaration(parser);
+  else
+    return par_parse_statement(parser);
+}
+
+static u32 par_parse(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -3029,9 +3092,22 @@ static void par_parse(par_parser_t *parser) {
   const par_ast_node_t dummy = {0};
   par_ast_node_array_push(&parser->nodes, &dummy);
 
+  const par_ast_node_t root = {
+      .kind = PAK_LIST,
+  };
+  u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
+  const u32 root_i = last_list_i;
+
   while (!par_is_at_end(parser)) {
-    par_parse_declaration(parser);
+    const par_ast_node_t list = {
+        .kind = PAK_LIST,
+        .lhs = par_parse_declaration(parser),
+    };
+    const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
+    parser->nodes.values[last_list_i].rhs = list_i;
+    last_list_i = list_i;
   }
+  return root_i;
 }
 
 // --------------------------------- Code generation
