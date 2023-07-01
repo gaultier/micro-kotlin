@@ -3255,6 +3255,7 @@ typedef struct {
   cf_frame_t *frame;
   u16 println_method_ref_i;
   cf_type_method_t *println_type;
+  u16 out_field_ref_i;
 } cg_generator_t;
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
@@ -3293,8 +3294,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   case PAK_BUILTIN_PRINTLN: {
     pg_assert(gen->println_method_ref_i > 0);
     pg_assert(gen->println_type != NULL);
+    pg_assert(gen->out_field_ref_i > 0);
 
-    // FIXME: getfield
+    cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
 
     if (node->lhs != 0) {
       cg_generate_node(gen, parser, class_file,
@@ -3469,7 +3471,6 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
         .kind = CIK_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
                                 .type_descriptor = descriptor_i}}};
-
     const u16 name_and_type_i =
         cf_constant_array_push(&class_file->constant_pool, &name_and_type);
 
@@ -3488,6 +3489,34 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
         cf_constant_array_push(&class_file->constant_pool, &method_ref);
 
     gen->println_method_ref_i = method_ref_i;
+
+    const u16 out_name_i =
+        cf_add_constant_cstring(&class_file->constant_pool, "out");
+    const u16 out_descriptor_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "Ljava/io/PrintStream;");
+
+    const cf_constant_t out_name_and_type = {
+        .kind = CIK_NAME_AND_TYPE,
+        .v = {.name_and_type = {.name = out_name_i,
+                                .type_descriptor = out_descriptor_i}}};
+    const u16 out_name_and_type_i =
+        cf_constant_array_push(&class_file->constant_pool, &out_name_and_type);
+
+    const u16 system_name_i =
+        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/System");
+    const cf_constant_t system_class = {.kind = CIK_CLASS_INFO,
+                                        .v = {.class_name = system_name_i}};
+    const u16 system_class_i =
+        cf_constant_array_push(&class_file->constant_pool, &system_class);
+
+    const cf_constant_t out_field_ref = {
+        .kind = CIK_FIELD_REF,
+        .v = {.field_ref = {.name = system_class_i,
+                            .type_descriptor = out_name_and_type_i}}};
+    const u16 out_field_ref_i =
+        cf_constant_array_push(&class_file->constant_pool, &out_field_ref);
+
+    gen->out_field_ref_i = out_field_ref_i;
   }
 
   { // This class
