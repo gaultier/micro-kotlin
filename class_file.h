@@ -3325,9 +3325,13 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_frame_t frame = {0};
     gen->frame = &frame;
 
-    pg_assert(node->lhs > 0);
-    pg_assert(node->lhs < parser->nodes.len);
-    cg_generate_node(gen, parser, class_file, &parser->nodes.values[node->lhs],
+    // `lhs` is the arguments, `rhs` is the body.
+    // TODO: Handle `lhs`.
+    if (node->lhs>0) pg_assert(0&&"todo");
+
+    pg_assert(node->rhs > 0);
+    pg_assert(node->rhs < parser->nodes.len);
+    cg_generate_node(gen, parser, class_file, &parser->nodes.values[node->rhs],
                      arena);
 
     cf_asm_return(&code.code);
@@ -3438,10 +3442,13 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  const par_ast_node_t *const root = &parser->nodes.values[0];
-
   cg_generate_synthetic_class(parser, class_file, arena);
 
+  if (parser->nodes.len == 1)
+    return;
+
+  // Second node is the root.
+  const par_ast_node_t *const root = &parser->nodes.values[1];
   cg_generator_t gen = {0};
   cg_generate_node(&gen, parser, class_file, root, arena);
 }
