@@ -302,6 +302,7 @@ typedef enum {
   BYTECODE_BIPUSH = 0x10,
   BYTECODE_LDC = 0x12,
   BYTECODE_LDC_W = 0x13,
+  BYTECODE_IADD = 0x60,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
 } cf_op_kind_t;
 
@@ -620,6 +621,16 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   default:
     pg_assert(0 && "unreachable");
   }
+}
+
+void cf_asm_iadd(cf_code_array_t *code, cf_frame_t *frame) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_stack >= 2);
+
+  cf_code_array_push_u8(code, BYTECODE_IADD);
+
+  frame->current_stack -= 2;
 }
 
 void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
@@ -3530,6 +3541,15 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (node->rhs != 0) {
       cg_generate_node(gen, parser, class_file,
                        &parser->nodes.values[node->rhs], arena);
+    }
+
+    const lex_token_t token = parser->lexer->tokens.values[node->main_token];
+    switch (token.kind) {
+      case TOKEN_KIND_NONE: break; // Nothing to do.
+    case TOKEN_KIND_PLUS:
+      cf_asm_iadd(&gen->code->code, gen->frame);
+      break;
+    default:pg_assert(0&&"todo");
     }
     break;
   }
