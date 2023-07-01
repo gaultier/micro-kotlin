@@ -3294,6 +3294,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->println_method_ref_i > 0);
     pg_assert(gen->println_type != NULL);
 
+    // FIXME: getfield
+
     if (node->lhs != 0) {
       cg_generate_node(gen, parser, class_file,
                        &parser->nodes.values[node->lhs], arena);
@@ -3433,18 +3435,25 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
 
   // FIXME: println(Int)
   {
-    cf_type_t println_argument_types[] = {{.kind = CTY_INT}};
-    cf_type_t void_type = {.kind = CTY_VOID};
-    cf_type_t println_type = {
+    cf_type_t *const println_argument_types =
+        arena_alloc(arena, 1, sizeof(cf_type_t));
+    println_argument_types->kind = CTY_INT;
+
+    cf_type_t *const void_type = arena_alloc(arena, 1, sizeof(cf_type_t));
+    void_type->kind = CTY_VOID;
+
+    gen->println_type = arena_alloc(arena, 1, sizeof(cf_type_method_t));
+    *gen->println_type = (cf_type_method_t){
+        .argument_count = 1,
+        .return_type = void_type,
+        .argument_types = println_argument_types,
+    };
+
+    cf_type_t const println_type = {
         .kind = CTY_METHOD,
         .v =
             {
-                .method =
-                    {
-                        .argument_count = 1,
-                        .return_type = &void_type,
-                        .argument_types = println_argument_types,
-                    },
+                .method = *gen->println_type,
             },
     };
     string_t println_type_s = string_reserve(30, arena);
@@ -3478,7 +3487,7 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref);
 
-    gen->println_method_ref_i = method_ref - i;
+    gen->println_method_ref_i = method_ref_i;
   }
 
   { // This class
@@ -3521,13 +3530,13 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  cg_generate_synthetic_class(parser, class_file, arena);
+  cg_generator_t gen = {0};
+  cg_generate_synthetic_class(&gen, parser, class_file, arena);
 
   if (parser->nodes.len == 1)
     return;
 
   // Second node is the root.
   const par_ast_node_t *const root = &parser->nodes.values[1];
-  cg_generator_t gen = {0};
   cg_generate_node(&gen, parser, class_file, root, arena);
 }
