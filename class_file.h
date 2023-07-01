@@ -2309,6 +2309,7 @@ bool cf_class_files_find_method_exactly(
 // ---------------------------------- Lexer
 
 typedef enum {
+  TOKEN_KIND_NONE,
   TOKEN_KIND_NUMBER,
   TOKEN_KIND_PLUS,
   TOKEN_KIND_LEFT_PAREN,
@@ -2321,6 +2322,7 @@ typedef enum {
   TOKEN_KIND_COMMA,
   TOKEN_KIND_DOT,
   TOKEN_KIND_COLON,
+  TOKEN_KIND_NOT,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2656,6 +2658,10 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   };
   lex_line_table_array_push(&lexer->line_table, &line);
 
+  // Push first dummy token.
+  const lex_token_t dummy_token = {0};
+  lex_token_array_push(&lexer->tokens, &dummy_token);
+
   while (!lex_is_at_end(buf, buf_len, current)) {
     const u8 c = **current;
 
@@ -2690,6 +2696,15 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     case ':': {
       const lex_token_t token = {
           .kind = TOKEN_KIND_COLON,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '!': {
+      const lex_token_t token = {
+          .kind = TOKEN_KIND_NOT,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
       lex_token_array_push(&lexer->tokens, &token);
@@ -2764,6 +2779,8 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   pg_assert(buf != NULL);
 
   switch (token.kind) {
+  case TOKEN_KIND_NONE:
+    return 0;
   case TOKEN_KIND_NUMBER:
     return lex_number_length(buf, buf_len, token.source_offset);
 
@@ -2775,6 +2792,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_COMMA:
   case TOKEN_KIND_DOT:
   case TOKEN_KIND_COLON:
+  case TOKEN_KIND_NOT:
     return 1;
 
   case TOKEN_KIND_BUILTIN_PRINTLN:
@@ -2796,7 +2814,7 @@ typedef enum {
   AST_KIND_ADD,
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
-  AST_KIND_LIST,
+  AST_KIND_BINARY,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -2806,7 +2824,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_ADD] = "AST_KIND_ADD",
     [AST_KIND_BUILTIN_PRINTLN] = "AST_KIND_BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "AST_KIND_FUNCTION_DEFINITION",
-    [AST_KIND_LIST] = "AST_KIND_LIST",
+    [AST_KIND_BINARY] = "AST_KIND_BINARY",
 };
 
 typedef struct {
@@ -2896,42 +2914,19 @@ static void par_ast_fprint_node(const par_parser_t *parser,
   if (node->kind == AST_KIND_NONE)
     return;
 
-  if (node->kind != AST_KIND_LIST) {
-    const char *const kind_string = par_ast_node_kind_to_string[node->kind];
-    const lex_token_t token = parser->lexer->tokens.values[node->main_token];
-    const u32 length = lex_find_token_length(parser->lexer, parser->buf,
-                                             parser->buf_len, token);
-    const char *const token_string = &parser->buf[token.source_offset];
-    ut_fwrite_indent(file, indent);
-    fprintf(file, "%s %.*s\n", kind_string, length, token_string);
-
-    indent += 2;
-  }
+  const char *const kind_string = par_ast_node_kind_to_string[node->kind];
+  const lex_token_t token = parser->lexer->tokens.values[node->main_token];
+  const u32 length =
+      lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
+  const char *const token_string = &parser->buf[token.source_offset];
+  ut_fwrite_indent(file, indent);
+  fprintf(file, "%s %.*s\n", kind_string, length, token_string);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  par_ast_fprint_node(parser, &parser->nodes.values[node->lhs], file, indent);
-  par_ast_fprint_node(parser, &parser->nodes.values[node->rhs], file, indent);
-
-#if 0
-  switch (node->kind) {
-  case AST_KIND_NONE:
-    return;
-  case AST_KIND_NUM:
-  case AST_KIND_ADD:
-    break;
-  case AST_KIND_BUILTIN_PRINTLN:
-    break;
-  case AST_KIND_FUNCTION_DEFINITION:
-    break;
-  case AST_KIND_LIST:
-    break;
-  case AST_KIND_MAX:
-    pg_assert(0 && "unreachable");
-    break;
-  default:
-    pg_assert(0 && "unreachable");
-  }
-#endif
+  par_ast_fprint_node(parser, &parser->nodes.values[node->lhs], file,
+                      indent + 2);
+  par_ast_fprint_node(parser, &parser->nodes.values[node->rhs], file,
+                      indent + 2);
 }
 
 static void par_ast_fprint(const par_parser_t *parser, FILE *file) {
@@ -3150,6 +3145,70 @@ static u32 par_parse_statement(par_parser_t *parser) {
     return par_parse_expression(parser);
 }
 
+static u32 par_parse_postfix_unary_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  return par_parse_primary_expression(
+      parser); // TODO: parse {0,n} postfix unary suffix.
+}
+
+static u32 par_parse_prefix_unary_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  if (par_match_token(parser, TOKEN_KIND_NOT)) {
+    pg_assert(0 && "todo");
+  }
+
+  return par_parse_postfix_unary_expression(parser);
+}
+
+static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  return par_parse_prefix_unary_expression(parser);
+}
+
+static u32 par_parse_additive_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = par_parse_multiplicative_expression(parser),
+  };
+  u32 last_node_i = par_ast_node_array_push(&parser->nodes, &node);
+
+  const u32 root_i = last_node_i;
+
+  while (par_match_token(parser, TOKEN_KIND_PLUS)) // TODO: minus.
+  {
+    const u32 main_token = parser->tokens_i - 1;
+    const par_ast_node_t node = {
+        .kind = AST_KIND_BINARY,
+        .main_token = main_token,
+        .lhs = par_parse_multiplicative_expression(parser),
+    };
+    last_node_i = parser->nodes.values[last_node_i].rhs =
+        par_ast_node_array_push(&parser->nodes, &node);
+  }
+  return root_i;
+}
+
 static u32 par_parse_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3157,7 +3216,7 @@ static u32 par_parse_expression(par_parser_t *parser) {
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return par_parse_primary_expression(parser);
+  return par_parse_additive_expression(parser);
 }
 
 static u32 par_parse_block(par_parser_t *parser) {
@@ -3172,7 +3231,7 @@ static u32 par_parse_block(par_parser_t *parser) {
     return 0;
 
   const par_ast_node_t root = {
-      .kind = AST_KIND_LIST,
+      .kind = AST_KIND_BINARY,
   };
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
@@ -3180,7 +3239,7 @@ static u32 par_parse_block(par_parser_t *parser) {
   while (!(par_is_at_end(parser) ||
            par_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)) {
     const par_ast_node_t list = {
-        .kind = AST_KIND_LIST,
+        .kind = AST_KIND_BINARY,
         .lhs = par_parse_statement(parser),
     };
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
@@ -3205,14 +3264,14 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
     return 0;
 
   const par_ast_node_t root = {
-      .kind = AST_KIND_LIST,
+      .kind = AST_KIND_BINARY,
   };
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
 
   do {
     const par_ast_node_t list = {
-        .kind = AST_KIND_LIST,
+        .kind = AST_KIND_BINARY,
         .lhs = par_parse_expression(parser),
     };
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
@@ -3302,14 +3361,14 @@ static u32 par_parse(par_parser_t *parser) {
   par_ast_node_array_push(&parser->nodes, &dummy);
 
   const par_ast_node_t root = {
-      .kind = AST_KIND_LIST,
+      .kind = AST_KIND_BINARY,
   };
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
 
   while (!par_is_at_end(parser)) {
     const par_ast_node_t list = {
-        .kind = AST_KIND_LIST,
+        .kind = AST_KIND_BINARY,
         .lhs = par_parse_declaration(parser),
     };
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
@@ -3460,7 +3519,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = NULL;
     break;
   }
-  case AST_KIND_LIST: {
+  case AST_KIND_BINARY: {
     pg_assert(node->lhs < parser->nodes.len);
     pg_assert(node->rhs < parser->nodes.len);
 
