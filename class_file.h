@@ -2307,6 +2307,7 @@ typedef enum {
   LTK_IDENTIFIER,
   LTK_COMMA,
   LTK_DOT,
+  LTK_COLON,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2672,6 +2673,15 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case ':': {
+      const lex_token_t token = {
+          .kind = LTK_COLON,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '{': {
       const lex_token_t token = {
           .kind = LTK_LEFT_BRACE,
@@ -2740,39 +2750,26 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   pg_assert(buf != NULL);
 
   switch (token.kind) {
-  case LTK_NUMBER: {
-    return lex_number_length(buf, buf_len, token.source_offset);
-  }
-  case LTK_PLUS: {
+    case LTK_NUMBER: return lex_number_length(buf, buf_len, token.source_offset);
+
+  case LTK_PLUS:
+  case LTK_LEFT_PAREN:
+  case LTK_RIGHT_PAREN:
+  case LTK_LEFT_BRACE:
+  case LTK_RIGHT_BRACE:
+  case LTK_COMMA:
+  case LTK_DOT:
+  case LTK_COLON:
     return 1;
-  }
-  case LTK_LEFT_PAREN: {
-    return 1;
-  }
-  case LTK_RIGHT_PAREN: {
-    return 1;
-  }
-  case LTK_LEFT_BRACE: {
-    return 1;
-  }
-  case LTK_RIGHT_BRACE: {
-    return 1;
-  }
-  case LTK_BUILTIN_PRINTLN: {
+
+  case LTK_BUILTIN_PRINTLN:
     return 7;
-  }
-  case LTK_KEYWORD_FUN: {
+
+  case LTK_KEYWORD_FUN:
     return 3;
-  }
-  case LTK_IDENTIFIER: {
+
+  case LTK_IDENTIFIER:
     return lex_identifier_length(buf, buf_len, token.source_offset);
-  }
-  case LTK_COMMA: {
-    return 1;
-  }
-  case LTK_DOT: {
-    return 1;
-  }
   }
 }
 
@@ -3177,7 +3174,7 @@ static u32 par_parse_block(par_parser_t *parser) {
   return root_i;
 }
 
-static u32 par_parse_arguments(par_parser_t *parser) {
+static u32 par_parse_function_arguments(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -3194,8 +3191,7 @@ static u32 par_parse_arguments(par_parser_t *parser) {
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
 
-  do 
-  {
+  do {
     const par_ast_node_t list = {
         .kind = PAK_LIST,
         .lhs = par_parse_expression(parser),
@@ -3203,7 +3199,7 @@ static u32 par_parse_arguments(par_parser_t *parser) {
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
     parser->nodes.values[last_list_i].rhs = list_i;
     last_list_i = list_i;
-  } while(par_match_token(parser, LTK_COMMA));
+  } while (par_match_token(parser, LTK_COMMA));
 
   par_expect_token(parser, LTK_RIGHT_PAREN,
                    "expected right parenthesis after the arguments");
@@ -3223,7 +3219,7 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
 
   par_expect_token(parser, LTK_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
-  const u32 arguments = par_parse_arguments(parser);
+  const u32 arguments = par_parse_function_arguments(parser);
 
   par_expect_token(parser, LTK_LEFT_BRACE,
                    "expected left curly brace before the arguments");
