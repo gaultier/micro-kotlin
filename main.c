@@ -41,6 +41,7 @@ int main(int argc, char *argv[]) {
     par_parse(&parser);
     if (parser.state != PARSER_STATE_OK)
       return 1;
+    par_ast_fprint(&parser, stdout);
 
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),

@@ -2731,7 +2731,17 @@ typedef enum {
   PAK_BUILTIN_PRINTLN,
   PAK_FUNCTION_DEFINITION,
   PAK_LIST,
+  PAK_MAX,
 } par_ast_node_kind_t;
+
+static const char *par_ast_node_kind_to_string[PAK_MAX] = {
+    [PAK_NONE] = "PAK_NONE",
+    [PAK_NUM] = "PAK_NUM",
+    [PAK_ADD] = "PAK_ADD",
+    [PAK_BUILTIN_PRINTLN] = "PAK_BUILTIN_PRINTLN",
+    [PAK_FUNCTION_DEFINITION] = "PAK_FUNCTION_DEFINITION",
+    [PAK_LIST] = "PAK_LIST",
+};
 
 typedef struct {
   par_ast_node_kind_t kind;
@@ -2801,8 +2811,82 @@ typedef struct {
   par_parser_state_t state;
 } par_parser_t;
 
+void ut_fwrite_indent(FILE *file, u16 indent) {
+  for (u16 i = 0; i < indent; i++) {
+    fputc(' ', file);
+  }
+}
+
+static void par_ast_fprint_node(const par_parser_t *parser,
+                                const par_ast_node_t *node, FILE *file,
+                                u16 indent) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(node != NULL);
+
+  if (node->kind == PAK_NONE)
+    return;
+
+  if (node->kind != PAK_LIST) {
+    const char *const kind_string = par_ast_node_kind_to_string[node->kind];
+    const lex_token_t token = parser->lexer->tokens.values[node->main_token];
+    const u32 length = lex_find_token_length(parser->lexer, parser->buf,
+                                             parser->buf_len, token);
+    const u8 *const token_string = &parser->buf[token.source_offset];
+    ut_fwrite_indent(file, indent);
+    fprintf(file, "%s %.*s\n", kind_string, length, token_string);
+
+    indent += 2;
+  }
+
+  pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
+  par_ast_fprint_node(parser, &parser->nodes.values[node->lhs], file,
+                      indent );
+  par_ast_fprint_node(parser, &parser->nodes.values[node->rhs], file,
+                      indent );
+
+#if 0
+  switch (node->kind) {
+  case PAK_NONE:
+    return;
+  case PAK_NUM:
+  case PAK_ADD:
+    break;
+  case PAK_BUILTIN_PRINTLN:
+    break;
+  case PAK_FUNCTION_DEFINITION:
+    break;
+  case PAK_LIST:
+    break;
+  case PAK_MAX:
+    pg_assert(0 && "unreachable");
+    break;
+  default:
+    pg_assert(0 && "unreachable");
+  }
+#endif
+}
+
+static void par_ast_fprint(const par_parser_t *parser, FILE *file) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->nodes.values != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  pg_assert(parser->nodes.len >= 1); // First is dummy.
+
+  // Second is the root.
+  if (parser->nodes.len > 1)
+    par_ast_fprint_node(parser, &parser->nodes.values[1], file, 0);
+}
+
 static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
@@ -2978,7 +3062,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   if (par_match_token(parser, LTK_NUMBER)) {
     const par_ast_node_t node = {
         .kind = PAK_NUM,
-        .main_token = parser->tokens_i,
+        .main_token = parser->tokens_i - 1,
     };
     return par_ast_node_array_push(&parser->nodes, &node);
   }
@@ -3016,6 +3100,10 @@ static u32 par_parse_block(par_parser_t *parser) {
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
+  // Empty block.
+  if (par_match_token(parser, LTK_RIGHT_BRACE))
+    return 0;
+
   const par_ast_node_t list = {
       .kind = PAK_LIST,
       .main_token = parser->tokens_i - 1,
@@ -3024,7 +3112,7 @@ static u32 par_parse_block(par_parser_t *parser) {
   const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
   // TODO: many.
 
-  par_expect_token(parser, LTK_RIGHT_PAREN,
+  par_expect_token(parser, LTK_RIGHT_BRACE,
                    "expected left parenthesis after the arguments");
   return list_i;
 }
@@ -3035,6 +3123,10 @@ static u32 par_parse_arguments(par_parser_t *parser) {
   pg_assert(parser->lexer->tokens.values != NULL);
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+
+  // No arguments.
+  if (par_match_token(parser, LTK_RIGHT_PAREN))
+    return 0;
 
   const par_ast_node_t list = {
       .kind = PAK_LIST,
@@ -3058,7 +3150,7 @@ static u32 par_parse_function_declaration(par_parser_t *parser) {
 
   par_expect_token(parser, LTK_IDENTIFIER,
                    "expected function name (identifier)");
-  const u32 name = parser->tokens_i - 1;
+  const u32 start_token = parser->tokens_i - 1;
 
   par_expect_token(parser, LTK_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
@@ -3067,6 +3159,12 @@ static u32 par_parse_function_declaration(par_parser_t *parser) {
   par_expect_token(parser, LTK_LEFT_BRACE,
                    "expected left parenthesis before the arguments");
   const u32 body = par_parse_block(parser);
+
+  const par_ast_node_t node = {.kind = PAK_FUNCTION_DEFINITION,
+                               .main_token = start_token,
+                               .lhs = arguments,
+                               .rhs = body};
+  return par_ast_node_array_push(&parser->nodes, &node);
 }
 
 static u32 par_parse_declaration(par_parser_t *parser) {
@@ -3131,6 +3229,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node != NULL);
 
   switch (node->kind) {
+  case PAK_NONE:
+    return;
   case PAK_NUM: {
     pg_assert(node->main_token < parser->lexer->tokens.len);
 
