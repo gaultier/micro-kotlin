@@ -3396,7 +3396,6 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (node->lhs > 0)
       pg_assert(0 && "todo");
 
-    pg_assert(node->rhs > 0);
     pg_assert(node->rhs < parser->nodes.len);
     cg_generate_node(gen, parser, class_file, &parser->nodes.values[node->rhs],
                      arena);

@@ -13,6 +13,9 @@
 [x] Write non-trivial program with the API (opcode generation functions)
 [x] Compute class file name
 [ ] Naive register (e.g. locals) allocation
+[ ] Type checking, no inference
+[ ] Field access
+[ ] Control flow
 
 Sugar (nice to have):
 
