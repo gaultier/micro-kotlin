@@ -9,17 +9,17 @@ int main(int argc, char *argv[]) {
   arena_init(&arena, 1 << 29);
 
   {
-    u8 *const source_file_name = (u8 *)argv[1];
-    const int fd = open((char *)source_file_name, O_RDONLY);
+    char *const source_file_name = (char *)argv[1];
+    const int fd = open(source_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
     struct stat st = {0};
-    pg_assert(stat((char *)source_file_name, &st) == 0);
+    pg_assert(stat(source_file_name, &st) == 0);
     pg_assert(st.st_size > 0);
     pg_assert(st.st_size <= UINT32_MAX);
 
     const u32 buf_len = st.st_size;
-    u8 *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
+    char *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
 
     pg_assert(read(fd, buf, buf_len) == buf_len);
     close(fd);
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
         .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
     };
 
-    const u8 *current = buf;
+    const char *current = buf;
     lex_lex(&lexer, buf, buf_len, &current);
 
     par_parser_t parser = {
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
 
     cg_generate(&parser, &class_file, &arena);
 
-    FILE *file = fopen((char *)class_file.file_path.value, "w");
+    FILE *file = fopen(class_file.file_path.value, "w");
     pg_assert(file != NULL);
     cf_write(&class_file, file);
     fclose(file);
@@ -365,9 +365,9 @@ int main(int argc, char *argv[]) {
     int fd = open(class_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
-    u8 *buf = arena_alloc(&arena, 1 << 14, sizeof(u8));
+    char *buf = arena_alloc(&arena, 1 << 14, sizeof(u8));
     ssize_t read_bytes = read(fd, buf, 1 << 14);
-    u8 *current = buf;
+    char *current = buf;
 
     cf_class_file_t class_file = {0};
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
