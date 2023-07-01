@@ -37,7 +37,8 @@
   } while (0)
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
-#define pg_clamp(min, x, max) ((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x)
+#define pg_clamp(min, x, max)                                                  \
+  ((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x)
 
 // ------------------- Utils
 
@@ -456,6 +457,7 @@ typedef struct {
     CONSTANT_POOL_KIND_PACKAGE = 20,
   } kind;
   union {
+    u64 number;        // CONSTANT_POOL_KIND_INT
     string_t s;        // CONSTANT_POOL_KIND_UTF8
     u16 string_utf8_i; // CONSTANT_POOL_KIND_STRING
     struct cf_constant_method_ref_t {
@@ -620,8 +622,8 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   }
 }
 
-void cf_asm_load_constant_string(cf_code_array_t *code, u16 constant_i,
-                                 cf_frame_t *frame) {
+void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
+                          cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -1816,7 +1818,8 @@ void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     break;
   }
   case CONSTANT_POOL_KIND_INT:
-    pg_assert(0 && "unimplemented");
+    fwrite(&constant->kind, sizeof(u8), 1, file);
+    file_write_be_32(file, constant->v.number);
     break;
   case CONSTANT_POOL_KIND_FLOAT:
     pg_assert(0 && "unimplemented");
@@ -3346,13 +3349,17 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->main_token < parser->lexer->tokens.len);
 
     lex_token_t token = parser->lexer->tokens.values[node->main_token];
-    const u64 number = par_number(parser, token);
+
+    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
+                                    .v = {.number = par_number(parser, token)}};
+    const u16 number_i =
+        cf_constant_array_push(&class_file->constant_pool, &constant);
 
     pg_assert(gen->code != NULL);
     pg_assert(gen->code->code.values != NULL);
     pg_assert(gen->frame != NULL);
 
-    cf_asm_push_number(&gen->code->code, number, gen->frame);
+    cf_asm_load_constant(&gen->code->code, number_i, gen->frame);
     break;
   }
   case AST_KIND_ADD: {
