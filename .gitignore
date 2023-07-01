@@ -8,3 +8,4 @@ main_debug
 main_release
 debug_release
 META-INF/
+*.gf
