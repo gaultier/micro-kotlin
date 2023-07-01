@@ -9,6 +9,7 @@ int main(int argc, char *argv[]) {
   arena_init(&arena, 1 << 29);
 
   {
+    // TODO: when parsing multiple files, need to allocate that.
     const string_t source_file_name = {
         .value = argv[1],
         .len = strlen(argv[1]),
@@ -28,6 +29,7 @@ int main(int argc, char *argv[]) {
     close(fd);
 
     lex_lexer_t lexer = {
+        .file_path = source_file_name,
         .line_table = lex_line_table_array_make(1024 + buf_len / 8, &arena),
         .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
     };

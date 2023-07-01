@@ -1426,13 +1426,21 @@ void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
                           u16 constant_pool_len) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
-  if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT || kind == CONSTANT_POOL_KIND_FLOAT ||
-        kind == CONSTANT_POOL_KIND_LONG || kind == CONSTANT_POOL_KIND_DOUBLE || kind == CONSTANT_POOL_KIND_CLASS_INFO ||
-        kind == CONSTANT_POOL_KIND_STRING || kind == CONSTANT_POOL_KIND_FIELD_REF || kind == CONSTANT_POOL_KIND_METHOD_REF ||
-        kind == CONSTANT_POOL_KIND_INTERFACE_METHOD_REF || kind == CONSTANT_POOL_KIND_NAME_AND_TYPE ||
-        kind == CONSTANT_POOL_KIND_METHOD_HANDLE || kind == CONSTANT_POOL_KIND_METHOD_TYPE ||
-        kind == CONSTANT_POOL_KIND_DYNAMIC || kind == CONSTANT_POOL_KIND_INVOKE_DYNAMIC ||
-        kind == CONSTANT_POOL_KIND_MODULE || kind == CONSTANT_POOL_KIND_PACKAGE)) {
+  if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT ||
+        kind == CONSTANT_POOL_KIND_FLOAT || kind == CONSTANT_POOL_KIND_LONG ||
+        kind == CONSTANT_POOL_KIND_DOUBLE ||
+        kind == CONSTANT_POOL_KIND_CLASS_INFO ||
+        kind == CONSTANT_POOL_KIND_STRING ||
+        kind == CONSTANT_POOL_KIND_FIELD_REF ||
+        kind == CONSTANT_POOL_KIND_METHOD_REF ||
+        kind == CONSTANT_POOL_KIND_INTERFACE_METHOD_REF ||
+        kind == CONSTANT_POOL_KIND_NAME_AND_TYPE ||
+        kind == CONSTANT_POOL_KIND_METHOD_HANDLE ||
+        kind == CONSTANT_POOL_KIND_METHOD_TYPE ||
+        kind == CONSTANT_POOL_KIND_DYNAMIC ||
+        kind == CONSTANT_POOL_KIND_INVOKE_DYNAMIC ||
+        kind == CONSTANT_POOL_KIND_MODULE ||
+        kind == CONSTANT_POOL_KIND_PACKAGE)) {
     fprintf(stderr, "Unknown constant kind found: offset=%lu kind=%u\n",
             *current - buf - 1, kind);
     pg_assert(0);
@@ -2074,7 +2082,8 @@ u16 cf_add_constant_string(cf_constant_array_t *constant_pool, string_t s) {
   pg_assert(constant_pool != NULL);
   pg_assert(s.value != NULL);
 
-  const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8, .v = {.s = s}};
+  const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
+                                  .v = {.s = s}};
   return cf_constant_array_push(constant_pool, &constant);
 }
 
@@ -2418,6 +2427,7 @@ u16 lex_line_table_array_push(lex_line_table_array_t *array,
 }
 
 typedef struct {
+  string_t file_path;
   lex_token_array_t tokens;
   lex_line_table_array_t line_table;
 } lex_lexer_t;
@@ -3021,8 +3031,8 @@ static void par_error(par_parser_t *parser, lex_token_t token,
     string_t token_string = {0};
     par_find_token_position(parser, token, &line, &column, &token_string);
 
-    fprintf(stderr, "%u:%u: got `%.*s`, %s\n", line, column, token_string.len,
-            token_string.value, error);
+    fprintf(stderr, "%.*s:%u:%u: got `%.*s`, %s\n", parser->lexer->file_path.len,parser->lexer->file_path.value,
+            line, column, token_string.len, token_string.value, error);
 
     parser->state = PARSER_STATE_ERROR;
     break;
@@ -3504,7 +3514,8 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
         &class_file->constant_pool, "java/io/PrintStream");
 
     const cf_constant_t printstream_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO, .v = {.class_name = printstream_name_i}};
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {.class_name = printstream_name_i}};
     const u16 printstream_class_i =
         cf_constant_array_push(&class_file->constant_pool, &printstream_class);
     const cf_constant_t method_ref = {
@@ -3551,7 +3562,8 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
     const u16 this_class_name_i =
         cf_add_constant_string(&class_file->constant_pool, class_name);
 
-    const cf_constant_t this_class_info = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+    const cf_constant_t this_class_info = {.kind =
+                                               CONSTANT_POOL_KIND_CLASS_INFO,
                                            .v = {
                                                .class_name = this_class_name_i,
                                            }};
