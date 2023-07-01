@@ -91,7 +91,7 @@ typedef struct {
   arena_t *arena;
 } string_t;
 
-string_t string_reserve(u16 cap, arena_t *arena) {
+static string_t string_reserve(u16 cap, arena_t *arena) {
   pg_assert(arena != NULL);
 
   return (string_t){
@@ -101,7 +101,7 @@ string_t string_reserve(u16 cap, arena_t *arena) {
   };
 }
 
-string_t string_make_from_c(char *s, arena_t *arena) {
+static string_t string_make_from_c(char *s, arena_t *arena) {
   pg_assert(s != NULL);
   pg_assert(arena != NULL);
 
@@ -117,7 +117,7 @@ string_t string_make_from_c(char *s, arena_t *arena) {
   return res;
 }
 
-string_t string_make(string_t src, arena_t *arena) {
+static string_t string_make(string_t src, arena_t *arena) {
   pg_assert(src.value != NULL);
   string_t result = string_reserve(src.len, arena);
   memcpy(result.value, src.value, src.len);
@@ -126,7 +126,7 @@ string_t string_make(string_t src, arena_t *arena) {
   return result;
 }
 
-char *ut_memrchr(char *s, u8 c, u64 n) {
+static char *ut_memrchr(char *s, char c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);
 
@@ -142,6 +142,20 @@ static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
+static string_t string_find_last_path_component(string_t path) {
+  pg_assert(path.value != NULL);
+  pg_assert(path.len > 0);
+
+  char *const file = ut_memrchr(path.value, '/', path.len);
+  if (file == NULL)
+    return path;
+
+  return (string_t){
+      .value = file + 1,
+      .len = path.value + path.len - (file + 1),
+  };
+}
+
 static void string_capitalize_first(string_t *s) {
   pg_assert(s->value != NULL);
   pg_assert(s->len > 0);
@@ -151,7 +165,7 @@ static void string_capitalize_first(string_t *s) {
     s->value[0] -= 32;
 }
 
-static void string_drop_before_last_incl(string_t *s, u8 c) {
+static void string_drop_before_last_incl(string_t *s, char c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
 
@@ -164,7 +178,7 @@ static void string_drop_before_last_incl(string_t *s, u8 c) {
   s->value = new_s_value;
 }
 
-static void string_drop_after_last_incl(string_t *s, u8 c) {
+static void string_drop_after_last_incl(string_t *s, char c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
 
@@ -195,7 +209,7 @@ bool string_eq_c(string_t a, char *b) {
   return mem_eq_c(a.value, a.len, b);
 }
 
-void string_append_char(string_t *s, u8 c) {
+void string_append_char(string_t *s, char c) {
   pg_assert(s != NULL);
   pg_assert(s->cap != 0);
   pg_assert(s->len <= s->cap);
@@ -213,6 +227,13 @@ void string_append_char(string_t *s, u8 c) {
   pg_assert(s->value != NULL);
   pg_assert(s->len <= s->cap);
   pg_assert(s->arena != NULL);
+}
+
+void string_append_char_if_not_exists(string_t *s, char c) {
+  pg_assert(s != NULL);
+
+  if (s->len > 0 && s->value[0] != c)
+    string_append_char(s, c);
 }
 
 void string_append_string(string_t *a, const string_t *b) {
@@ -2081,17 +2102,24 @@ u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-string_t cf_make_class_file_name_kt(char *source_file_name, arena_t *arena) {
-  pg_assert(source_file_name != NULL);
+string_t cf_make_class_file_name_kt(string_t source_file_name, arena_t *arena) {
+  pg_assert(source_file_name.value != NULL);
+  pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
 
-  string_t result = string_make_from_c(source_file_name, arena);
-  // FIXME: keep the directory part - right now this only works for files in the
-  // current directory.
-  string_drop_before_last_incl(&result, '/');
-  string_drop_after_last_incl(&result, '.');
-  string_append_cstring(&result, "Kt.class");
-  string_capitalize_first(&result);
+  string_t last_path_component =
+      string_make(string_find_last_path_component(source_file_name), arena);
+  pg_assert(last_path_component.len > 0);
+  pg_assert(last_path_component.value[0] != '/');
+
+  string_drop_after_last_incl(&last_path_component, '.');
+  string_append_cstring(&last_path_component, "Kt.class");
+  string_capitalize_first(&last_path_component);
+
+  string_t result = string_make(source_file_name, arena);
+  string_drop_after_last_incl(&result, '/');
+  string_append_char_if_not_exists(&result, '/');
+  string_append_string(&result, &last_path_component);
   return result;
 }
 
