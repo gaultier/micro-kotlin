@@ -117,7 +117,23 @@ string_t string_make_from_c(const char *s, arena_t *arena) {
   return res;
 }
 
+string_t string_make(string_t src, arena_t *arena) {
+  pg_assert(src.value != NULL);
+  string_t result = string_reserve(src.len, arena);
+  memcpy(result.value, src.value, src.len);
+
+  return result;
+}
+
+static void string_drop_after_last_incl(string_t s, char c) {
+  pg_assert(s.value != NULL);
+  pg_assert(0&&"todo");
+}
+
 bool string_eq(string_t a, string_t b) {
+  pg_assert(a.value != NULL);
+  pg_assert(b.value != NULL);
+
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
 
@@ -2015,11 +2031,11 @@ u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
   return cf_constant_array_push(constant_pool, &constant);
 }
 
-const char *cf_memrchr(const char *s, char c, u64 n) {
+const u8 *ut_memrchr(const u8 *s, char c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);
 
-  const char *res = s + n - 1;
+  const u8 *res = s + n - 1;
   while (res-- != s) {
     if (*res == c)
       return res;
@@ -2028,14 +2044,13 @@ const char *cf_memrchr(const char *s, char c, u64 n) {
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-string_t cf_make_class_file_name_kt(const char *source_file_name,
+string_t cf_make_class_file_name_kt(const u8 *source_file_name,
                                     arena_t *arena) {
   pg_assert(source_file_name != NULL);
   pg_assert(arena != NULL);
 
-  const u64 source_file_name_len = strlen(source_file_name);
-  const char *const dot =
-      cf_memrchr(source_file_name, '.', source_file_name_len);
+  const u64 source_file_name_len = strlen((char *)source_file_name);
+  const u8 *const dot = ut_memrchr(source_file_name, '.', source_file_name_len);
   pg_assert(dot != NULL);
 
   const u64 extension_len = sizeof(".class") - 1;
@@ -3327,7 +3342,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     // `lhs` is the arguments, `rhs` is the body.
     // TODO: Handle `lhs`.
-    if (node->lhs>0) pg_assert(0&&"todo");
+    if (node->lhs > 0)
+      pg_assert(0 && "todo");
 
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < parser->nodes.len);
@@ -3364,6 +3380,21 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   default:
     pg_assert(0 && "unreachable");
   }
+}
+
+static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
+  pg_assert(path.value != NULL);
+  pg_assert(path.len > 0);
+
+  const u8 *const last_directory_separator =
+      ut_memrchr((u8 *)path.value, '/', path.len);
+
+  string_t class_name = string_make(path, arena);
+
+  if (last_directory_separator == NULL)
+    return class_name;
+
+  return class_name;
 }
 
 static void cg_generate_synthetic_class(par_parser_t *parser,

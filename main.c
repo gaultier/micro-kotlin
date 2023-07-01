@@ -9,12 +9,12 @@ int main(int argc, char *argv[]) {
   arena_init(&arena, 1 << 29);
 
   {
-    const char *const source_file_name = argv[1];
-    const int fd = open(source_file_name, O_RDONLY);
+    const u8 *const source_file_name = (u8 *)argv[1];
+    const int fd = open((char*)source_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
     struct stat st = {0};
-    pg_assert(stat(source_file_name, &st) == 0);
+    pg_assert(stat((char *)source_file_name, &st) == 0);
     pg_assert(st.st_size > 0);
     pg_assert(st.st_size <= UINT32_MAX);
 
