@@ -3031,8 +3031,9 @@ static void par_error(par_parser_t *parser, lex_token_t token,
     string_t token_string = {0};
     par_find_token_position(parser, token, &line, &column, &token_string);
 
-    fprintf(stderr, "%.*s:%u:%u: got `%.*s`, %s\n", parser->lexer->file_path.len,parser->lexer->file_path.value,
-            line, column, token_string.len, token_string.value, error);
+    fprintf(stderr, "%.*s:%u:%u: got `%.*s`, %s\n",
+            parser->lexer->file_path.len, parser->lexer->file_path.value, line,
+            column, token_string.len, token_string.value, error);
 
     parser->state = PARSER_STATE_ERROR;
     break;
@@ -3171,7 +3172,8 @@ static u32 par_parse_block(par_parser_t *parser) {
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
 
-  while (par_peek_token(parser).kind != TOKEN_KIND_RIGHT_BRACE) {
+  while (!(par_is_at_end(parser) ||
+           par_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)) {
     const par_ast_node_t list = {
         .kind = AST_KIND_LIST,
         .lhs = par_parse_statement(parser),
@@ -3244,6 +3246,28 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
   return par_ast_node_array_push(&parser->nodes, &node);
 }
 
+static void par_sync_if_panicked(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+
+  if (parser->state != PARSER_STATE_PANIC)
+    return; // Nothing to do.
+
+  parser->state = PARSER_STATE_SYNCED;
+
+  while (!par_is_at_end(parser)) {
+    // TODO: sync at newlines?
+
+    switch (par_peek_token(parser).kind) {
+    case TOKEN_KIND_BUILTIN_PRINTLN:
+    case TOKEN_KIND_KEYWORD_FUN:
+      return;
+    default:; // Do nothing.
+    }
+
+    par_advance_token(parser);
+  }
+}
+
 static u32 par_parse_declaration(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3251,10 +3275,15 @@ static u32 par_parse_declaration(par_parser_t *parser) {
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
+  u32 new_node_i = 0;
   if (par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
-    return par_parse_function_definition(parser);
+    new_node_i = par_parse_function_definition(parser);
   else
-    return par_parse_statement(parser);
+    new_node_i = par_parse_statement(parser);
+
+  par_sync_if_panicked(parser);
+
+  return new_node_i;
 }
 
 static u32 par_parse(par_parser_t *parser) {
