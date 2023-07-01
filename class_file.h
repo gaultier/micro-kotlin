@@ -101,11 +101,11 @@ string_t string_reserve(u16 cap, arena_t *arena) {
   };
 }
 
-string_t string_make_from_c(const char *s, arena_t *arena) {
+string_t string_make_from_c(u8 *s, arena_t *arena) {
   pg_assert(s != NULL);
   pg_assert(arena != NULL);
 
-  const u64 len = strlen(s);
+  const u64 len = strlen((char *)s);
   string_t res = string_reserve(len, arena);
   res.len = len;
   memcpy(res.value, s, len);
@@ -126,7 +126,7 @@ string_t string_make(string_t src, arena_t *arena) {
   return result;
 }
 
-u8 *ut_memrchr(u8 *s, char c, u64 n) {
+u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);
 
@@ -164,7 +164,7 @@ static void string_drop_before_last_incl(string_t *s, u8 c) {
   s->value = new_s_value;
 }
 
-static void string_drop_after_last_incl(string_t *s, char c) {
+static void string_drop_after_last_incl(string_t *s, u8 c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
 
@@ -182,14 +182,14 @@ bool string_eq(string_t a, string_t b) {
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
 
-bool mem_eq_c(const u8 *a, u32 a_len, char *b) {
+bool mem_eq_c(const u8 *a, u32 a_len, u8 *b) {
   pg_assert(b != NULL);
 
-  const u64 b_len = strlen(b);
+  const u64 b_len = strlen((char *)b);
   return a_len == b_len && memcmp(a, b, a_len) == 0;
 }
 
-bool string_eq_c(string_t a, char *b) {
+bool string_eq_c(string_t a, u8 *b) {
   pg_assert(b != NULL);
 
   return mem_eq_c(a.value, a.len, b);
@@ -233,14 +233,14 @@ void string_append_string(string_t *a, const string_t *b) {
   pg_assert(a->arena != NULL);
 }
 
-void string_append_cstring(string_t *a, const char *b) {
+void string_append_cstring(string_t *a, const u8 *b) {
   pg_assert(a != NULL);
   pg_assert(b != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
   pg_assert(a->arena != NULL);
 
-  for (u64 i = 0; i < strlen(b); i++)
+  for (u64 i = 0; i < strlen((char *)b); i++)
     string_append_char(a, b[i]);
 
   pg_assert(a->value != NULL);
@@ -248,7 +248,7 @@ void string_append_cstring(string_t *a, const char *b) {
   pg_assert(a->arena != NULL);
 }
 
-bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
+bool cstring_ends_with(const u8 *s, u64 s_len, const u8 *suffix,
                        u64 suffix_len) {
   pg_assert(s != NULL);
   pg_assert(s_len > 0);
@@ -2053,14 +2053,14 @@ u16 cf_add_constant_string(cf_constant_array_t *constant_pool, string_t s) {
   return cf_constant_array_push(constant_pool, &constant);
 }
 
-u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s) {
+u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, u8 *s) {
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
 
   const cf_constant_t constant = {.kind = CIK_UTF8,
                                   .v = {.s = {
-                                            .len = strlen(s),
-                                            .value = (u8 *)s,
+                                            .len = strlen((char *)s),
+                                            .value = s,
                                         }}};
   return cf_constant_array_push(constant_pool, &constant);
 }
@@ -2077,34 +2077,14 @@ u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-string_t cf_make_class_file_name_kt(u8 *source_file_name,
-                                    arena_t *arena) {
+string_t cf_make_class_file_name_kt(u8 *source_file_name, arena_t *arena) {
   pg_assert(source_file_name != NULL);
   pg_assert(arena != NULL);
 
-  const u64 source_file_name_len = strlen((char *)source_file_name);
-  const u8 *const dot = ut_memrchr(source_file_name, '.', source_file_name_len);
-  pg_assert(dot != NULL);
-
-  const u64 extension_len = sizeof(".class") - 1;
-  const u64 before_dot_incl_len = dot - source_file_name;
-  pg_assert(before_dot_incl_len > 0);
-  const u64 class_file_name_len =
-      before_dot_incl_len + 2 /* `Kt` */ + extension_len;
-  pg_assert(class_file_name_len > extension_len);
-
-  char *class_file_name = arena_alloc(
-      arena, class_file_name_len + 1 /* null terminator */, sizeof(u8));
-  memcpy(class_file_name, source_file_name, before_dot_incl_len);
-  class_file_name[before_dot_incl_len] = 'K';
-  class_file_name[before_dot_incl_len + 1] = 't';
-  memcpy(class_file_name + before_dot_incl_len + 2, ".class",
-         extension_len + 1 /* null terminator */);
-
-  pg_assert(class_file_name[class_file_name_len] == 0);
-
-  string_t result = {.value = (u8 *)class_file_name,
-                     .len = class_file_name_len};
+  string_t result = string_make_from_c(source_file_name, arena);
+  string_drop_before_last_incl(&result, '/');
+  string_drop_after_last_incl(&result, '.');
+  string_append_cstring(&result, "Kt.class");
   string_capitalize_first(&result);
   return result;
 }
@@ -2160,7 +2140,7 @@ u16 cf_class_file_array_push(cf_class_file_array_t *array,
 
 // TODO: one thread that walks the directory recursively and one/many worker
 // threads to parse class files?
-void cf_read_class_files(const char *path, u64 path_len,
+void cf_read_class_files(u8 *path, u64 path_len,
                          cf_class_file_array_t *class_files, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path_len > 0);
@@ -2168,12 +2148,12 @@ void cf_read_class_files(const char *path, u64 path_len,
   pg_assert(arena != NULL);
 
   struct stat st = {0};
-  if (stat(path, &st) == -1) {
+  if (stat((char *)path, &st) == -1) {
     return;
   }
 
   if (S_ISREG(st.st_mode) && cstring_ends_with(path, path_len, ".class", 6)) {
-    const int fd = open(path, O_RDONLY);
+    const int fd = open((char *)path, O_RDONLY);
     pg_assert(fd > 0);
 
     u8 *buf = arena_alloc(arena, st.st_size, sizeof(u8));
@@ -2195,14 +2175,14 @@ void cf_read_class_files(const char *path, u64 path_len,
   pg_assert(S_ISDIR(st.st_mode));
 
   // Recurse
-  DIR *dirp = opendir(path);
+  DIR *dirp = opendir((char *)path);
   if (dirp == NULL)
     return;
 
   struct dirent *entry = {0};
 
 #define PATH_MAX 4096
-  char pathbuf[PATH_MAX + 1] = {0};
+  u8 pathbuf[PATH_MAX + 1] = {0};
   u64 pathbuf_len = path_len;
   pg_assert(pathbuf_len < PATH_MAX);
 
@@ -3325,7 +3305,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     // FIXME: hardcoded type.
     cf_type_t void_type = {.kind = CTY_VOID};
     const string_t string_class_name =
-        string_make_from_c("java/lang/String", arena);
+        string_make_from_c((u8 *)"java/lang/String", arena);
     cf_type_t string_type = {
         .kind = CTY_INSTANCE_REFERENCE,
         .v = {.class_name = string_class_name},
@@ -3471,8 +3451,8 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
   }
 
   { // Super class
-    const u16 constant_java_lang_object_string_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/Object");
+    const u16 constant_java_lang_object_string_i = cf_add_constant_cstring(
+        &class_file->constant_pool, (u8 *)"java/lang/Object");
 
     const cf_constant_t super_class_info = {
         .kind = CIK_CLASS_INFO,
