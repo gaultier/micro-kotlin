@@ -1,7 +1,7 @@
 .PHONY: test
 
-test: main_release
-	for f in *.java; do ./main_release "$$f";  done
+test: main_debug
+	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f";  done
 
 
 main_debug: main.c class_file.h

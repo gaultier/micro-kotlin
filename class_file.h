@@ -3209,7 +3209,7 @@ static u32 par_parse_arguments(par_parser_t *parser) {
   return root_i;
 }
 
-static u32 par_parse_function_declaration(par_parser_t *parser) {
+static u32 par_parse_function_definition(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -3243,7 +3243,7 @@ static u32 par_parse_declaration(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
   if (par_match_token(parser, LTK_KEYWORD_FUN))
-    return par_parse_function_declaration(parser);
+    return par_parse_function_definition(parser);
   else
     return par_parse_statement(parser);
 }
