@@ -3111,7 +3111,6 @@ static u32 par_parse_block(par_parser_t *parser) {
   while (par_peek_token(parser).kind != LTK_RIGHT_BRACE) {
     const par_ast_node_t list = {
         .kind = PAK_LIST,
-        .main_token = parser->tokens_i - 1,
         .lhs = par_parse_statement(parser),
     };
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
@@ -3135,17 +3134,25 @@ static u32 par_parse_arguments(par_parser_t *parser) {
   if (par_match_token(parser, LTK_RIGHT_PAREN))
     return 0;
 
-  const par_ast_node_t list = {
+  const par_ast_node_t root = {
       .kind = PAK_LIST,
-      .main_token = parser->tokens_i - 1,
-      .lhs = par_parse_expression(parser),
   };
-  const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
-  // TODO: many.
+  u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
+  const u32 root_i = last_list_i;
+
+  while (par_peek_token(parser).kind != LTK_RIGHT_BRACE) {
+    const par_ast_node_t list = {
+        .kind = PAK_LIST,
+        .lhs = par_parse_expression(parser),
+    };
+    const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
+    parser->nodes.values[last_list_i].rhs = list_i;
+    last_list_i = list_i;
+  }
 
   par_expect_token(parser, LTK_RIGHT_PAREN,
                    "expected right parenthesis after the arguments");
-  return list_i;
+  return root_i;
 }
 
 static u32 par_parse_function_declaration(par_parser_t *parser) {
