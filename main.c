@@ -31,9 +31,9 @@ int main(int argc, char *argv[]) {
     const u64 estimated_capacity = pg_clamp(64, buf_len / 8, UINT16_MAX);
     lex_lexer_t lexer = {
         .file_path = source_file_name,
-        .line_table = lex_line_table_array_make(estimated_capacity, &arena),
     };
     pg_array_init_reserve(lexer.tokens, estimated_capacity, &arena);
+    pg_array_init_reserve(lexer.line_table, estimated_capacity, &arena);
 
     const char *current = buf;
     lex_lex(&lexer, buf, buf_len, &current);
