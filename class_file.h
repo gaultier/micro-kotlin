@@ -3129,6 +3129,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     return par_ast_node_array_push(&parser->nodes, &node);
   }
 
+  par_advance_token(parser);
   return 0;
 }
 
