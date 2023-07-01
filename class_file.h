@@ -28,6 +28,8 @@
 #define u8 uint8_t
 #define i8 int8_t
 
+// ----------- Utility macros
+
 #define pg_unused(x) (void)(x)
 
 #define pg_assert(condition)                                                   \
@@ -40,22 +42,21 @@
 #define pg_clamp(min, x, max)                                                  \
   ((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x)
 
-// ------------------- Utils
-
+// --------------------------- Arena
 typedef struct {
   char *base;
   u64 current_offset;
-  u64 capacity;
+  u64 cap;
 } arena_t;
 
-static void arena_init(arena_t *arena, u64 capacity) {
+static void arena_init(arena_t *arena, u64 cap) {
   pg_assert(arena != NULL);
 
-  arena->base = mmap(NULL, capacity, PROT_READ | PROT_WRITE,
+  arena->base = mmap(NULL, cap, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   pg_assert(arena->base != NULL);
   pg_assert(((u64)arena->base % 16) == 0);
-  arena->capacity = capacity;
+  arena->cap = cap;
   arena->current_offset = 0;
 }
 
@@ -70,8 +71,8 @@ static u64 align_forward_16(u64 n) {
 
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert(arena != NULL);
-  pg_assert(arena->current_offset < arena->capacity);
-  pg_assert(arena->current_offset + len < arena->capacity);
+  pg_assert(arena->current_offset < arena->cap);
+  pg_assert(arena->current_offset + len < arena->cap);
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
   pg_assert(element_size > 0);
   const u64 actual_len = len * element_size; // TODO: check overflow.
@@ -85,6 +86,72 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert((((u64)arena->current_offset) % 16) == 0);
   return res;
 }
+
+// --------------------------- Array
+
+typedef struct pg_array_header_t {
+  uint64_t len;
+  uint64_t cap;
+  arena_t *arena;
+} pg_array_header_t;
+
+#define pg_array_t(Type) Type *
+
+#ifndef PG_ARRAY_GROW_FORMULA
+#define PG_ARRAY_GROW_FORMULA(x) ((uint64_t)(1.5 * ((double)x) + 8))
+#endif
+
+#define PG_ARRAY_HEADER(x) (((pg_array_header_t *)((void *)x)) - 1)
+#define PG_CONST_ARRAY_HEADER(x)                                               \
+  (((const pg_array_header_t *)((const void *)x)) - 1)
+#define pg_array_len(x) (PG_CONST_ARRAY_HEADER(x)->len)
+#define pg_array_cap(x) (PG_CONST_ARRAY_HEADER(x)->cap)
+
+#define pg_array_init_reserve(x, cap, arena)                                   \
+  do {                                                                         \
+    void **pg__array_ = (void **)&(x);                                         \
+    pg_array_header_t *pg__ah =                                                \
+        (pg_array_header_t *)(my_allocator)                                    \
+            .realloc(NULL,                                                     \
+                     sizeof(pg_array_header_t) +                               \
+                         sizeof(*(x)) * ((uint64_t)cap),                       \
+                     0);                                                       \
+    pg__ah->len = 0;                                                           \
+    pg__ah->cap = (uint64_t)cap;                                               \
+    pg__ah->allocator = my_allocator;                                          \
+    *pg__array_ = (void *)(pg__ah + 1);                                        \
+  } while (0)
+
+#define pg_array_free(x)                                                       \
+  do {                                                                         \
+    pg_array_header_t *pg__ah = PG_ARRAY_HEADER(x);                            \
+    pg__ah->allocator.free(pg__ah);                                            \
+    x = NULL;                                                                  \
+  } while (0)
+
+#define pg_array_grow(x, min_capacity)                                         \
+  do {                                                                         \
+    uint64_t new_capacity = PG_ARRAY_GROW_FORMULA(pg_array_cap(x));            \
+    if (new_capacity < (min_capacity))                                         \
+      new_capacity = (min_capacity);                                           \
+    const uint64_t old_size =                                                  \
+        sizeof(pg_array_header_t) + pg_array_cap(x) * sizeof(*x);              \
+    const uint64_t new_size =                                                  \
+        sizeof(pg_array_header_t) + new_capacity * sizeof(*x);                 \
+    pg_array_header_t *pg__new_header = PG_ARRAY_HEADER(x)->allocator.realloc( \
+        PG_ARRAY_HEADER(x), new_size, old_size);                               \
+    pg__new_header->cap = new_capacity;                                        \
+    x = (void *)(pg__new_header + 1);                                          \
+  } while (0)
+
+#define pg_array_append(x, item)                                               \
+  do {                                                                         \
+    if (pg_array_cap(x) < pg_array_len(x) + 1)                                 \
+      pg_array_grow(x, 0);                                                     \
+    (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
+  } while (0)
+
+// ------------------- Utils
 
 typedef struct {
   u16 cap;
