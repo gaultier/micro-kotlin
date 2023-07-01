@@ -3194,7 +3194,8 @@ static u32 par_parse_arguments(par_parser_t *parser) {
   u32 last_list_i = par_ast_node_array_push(&parser->nodes, &root);
   const u32 root_i = last_list_i;
 
-  while (par_peek_token(parser).kind != LTK_RIGHT_BRACE) {
+  do 
+  {
     const par_ast_node_t list = {
         .kind = PAK_LIST,
         .lhs = par_parse_expression(parser),
@@ -3202,7 +3203,7 @@ static u32 par_parse_arguments(par_parser_t *parser) {
     const u32 list_i = par_ast_node_array_push(&parser->nodes, &list);
     parser->nodes.values[last_list_i].rhs = list_i;
     last_list_i = list_i;
-  }
+  } while(par_match_token(parser, LTK_COMMA));
 
   par_expect_token(parser, LTK_RIGHT_PAREN,
                    "expected right parenthesis after the arguments");
