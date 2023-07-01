@@ -2086,7 +2086,8 @@ string_t cf_make_class_file_name_kt(char *source_file_name, arena_t *arena) {
   pg_assert(arena != NULL);
 
   string_t result = string_make_from_c(source_file_name, arena);
-  // FIXME: keep the directory part - right now this only works for files in the current directory.
+  // FIXME: keep the directory part - right now this only works for files in the
+  // current directory.
   string_drop_before_last_incl(&result, '/');
   string_drop_after_last_incl(&result, '.');
   string_append_cstring(&result, "Kt.class");
@@ -3252,6 +3253,8 @@ static u32 par_parse(par_parser_t *parser) {
 typedef struct {
   cf_attribute_code_t *code;
   cf_frame_t *frame;
+  u16 println_method_ref_i;
+  cf_type_method_t *println_type;
 } cg_generator_t;
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
@@ -3288,10 +3291,16 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case PAK_BUILTIN_PRINTLN: {
+    pg_assert(gen->println_method_ref_i > 0);
+    pg_assert(gen->println_type != NULL);
+
     if (node->lhs != 0) {
       cg_generate_node(gen, parser, class_file,
                        &parser->nodes.values[node->lhs], arena);
     }
+
+    cf_asm_invoke_virtual(&gen->code->code, gen->println_method_ref_i,
+                          gen->frame, gen->println_type);
     break;
   }
   case PAK_FUNCTION_DEFINITION: {
@@ -3408,9 +3417,11 @@ static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
   return class_name;
 }
 
-static void cg_generate_synthetic_class(par_parser_t *parser,
+static void cg_generate_synthetic_class(cg_generator_t *gen,
+                                        par_parser_t *parser,
                                         cf_class_file_t *class_file,
                                         arena_t *arena) {
+  pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens.values != NULL);
@@ -3439,7 +3450,35 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
     string_t println_type_s = string_reserve(30, arena);
     cf_fill_type_descriptor_string(&println_type, &println_type_s);
 
-    cf_add_constant_string(&class_file->constant_pool, println_type_s);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, println_type_s);
+
+    const u16 name_i =
+        cf_add_constant_cstring(&class_file->constant_pool, "println");
+
+    const cf_constant_t name_and_type = {
+        .kind = CIK_NAME_AND_TYPE,
+        .v = {.name_and_type = {.name = name_i,
+                                .type_descriptor = descriptor_i}}};
+
+    const u16 name_and_type_i =
+        cf_constant_array_push(&class_file->constant_pool, &name_and_type);
+
+    const u16 printstream_name_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "java/io/PrintStream");
+
+    const cf_constant_t printstream_class = {
+        .kind = CIK_CLASS_INFO, .v = {.class_name = printstream_name_i}};
+    const u16 printstream_class_i =
+        cf_constant_array_push(&class_file->constant_pool, &printstream_class);
+    const cf_constant_t method_ref = {
+        .kind = CIK_METHOD_REF,
+        .v = {.method_ref = {.class = printstream_class_i,
+                             .name_and_type = name_and_type_i}}};
+    const u16 method_ref_i =
+        cf_constant_array_push(&class_file->constant_pool, &method_ref);
+
+    gen->println_method_ref_i = method_ref - i;
   }
 
   { // This class
