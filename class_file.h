@@ -303,6 +303,7 @@ typedef enum {
   BYTECODE_LDC = 0x12,
   BYTECODE_LDC_W = 0x13,
   BYTECODE_IADD = 0x60,
+  BYTECODE_IMUL = 0x68,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
 } cf_op_kind_t;
 
@@ -623,18 +624,28 @@ void cf_fill_type_descriptor_string(const cf_type_t *type,
   }
 }
 
-void cf_asm_iadd(cf_code_array_t *code, cf_frame_t *frame) {
+static void cf_asm_iadd(cf_code_array_t *code, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
 
   cf_code_array_push_u8(code, BYTECODE_IADD);
 
-  frame->current_stack -= 2;
+  frame->current_stack -= 1;
 }
 
-void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
-                          cf_frame_t *frame) {
+static void cf_asm_imul(cf_code_array_t *code, cf_frame_t *frame) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_stack >= 2);
+
+  cf_code_array_push_u8(code, BYTECODE_IMUL);
+
+  frame->current_stack -= 1;
+}
+
+static void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
+                                 cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -647,9 +658,9 @@ void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
-void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
-                           cf_frame_t *frame,
-                           const cf_type_method_t *method_type) {
+static void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
+                                  cf_frame_t *frame,
+                                  const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
@@ -662,7 +673,8 @@ void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
   frame->current_stack -= method_type->argument_count;
 }
 
-void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_frame_t *frame) {
+static void cf_asm_get_static(cf_code_array_t *code, u16 field_i,
+                              cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(frame != NULL);
@@ -675,13 +687,14 @@ void cf_asm_get_static(cf_code_array_t *code, u16 field_i, cf_frame_t *frame) {
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
-void cf_asm_return(cf_code_array_t *code) {
+static void cf_asm_return(cf_code_array_t *code) {
   cf_code_array_push_u8(code, BYTECODE_RETURN);
 
-  // TODO
+  // TODO: pop the current frame.
 }
 
-void cf_asm_push_number(cf_code_array_t *code, u64 number, cf_frame_t *frame) {
+static void cf_asm_push_number(cf_code_array_t *code, u64 number,
+                               cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(number <= UINT8_MAX && "unimplemented");
   pg_assert(frame != NULL);
@@ -693,9 +706,9 @@ void cf_asm_push_number(cf_code_array_t *code, u64 number, cf_frame_t *frame) {
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
-void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
-                           cf_frame_t *frame,
-                           const cf_type_method_t *method_type) {
+static void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
+                                  cf_frame_t *frame,
+                                  const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
@@ -708,10 +721,9 @@ void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
   frame->current_stack -= method_type->argument_count;
 }
 
-void cf_asm_call_superclass_constructor(cf_code_array_t *code,
-                                        u16 super_class_constructor_i,
-                                        cf_frame_t *frame,
-                                        const cf_type_t *constructor_type) {
+static void cf_asm_call_superclass_constructor(
+    cf_code_array_t *code, u16 super_class_constructor_i, cf_frame_t *frame,
+    const cf_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
   pg_assert(frame != NULL);
@@ -756,7 +768,7 @@ typedef struct {
   arena_t *arena;
 } cf_field_array_t;
 
-cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
+static cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
   pg_assert(arena != NULL);
 
   return (cf_field_array_t){
@@ -767,7 +779,7 @@ cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
   };
 }
 
-void cf_field_array_push(cf_field_array_t *array, const cf_field_t *x) {
+static void cf_field_array_push(cf_field_array_t *array, const cf_field_t *x) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -794,7 +806,7 @@ typedef struct {
   arena_t *arena;
 } cf_interface_array_t;
 
-cf_interface_array_t cf_interface_array_make(u64 cap, arena_t *arena) {
+static cf_interface_array_t cf_interface_array_make(u64 cap, arena_t *arena) {
   pg_assert(arena != NULL);
 
   return (cf_interface_array_t){
@@ -805,7 +817,7 @@ cf_interface_array_t cf_interface_array_make(u64 cap, arena_t *arena) {
   };
 }
 
-void cf_interface_array_push(cf_interface_array_t *array, u16 x) {
+static void cf_interface_array_push(cf_interface_array_t *array, u16 x) {
   pg_assert(array != NULL);
   pg_assert(x > 0);
   pg_assert(array->len < UINT16_MAX);
@@ -865,7 +877,7 @@ typedef struct cf_attribute_code_t cf_attribute_code_t;
 
 typedef struct cf_attribute_source_file_t cf_attribute_source_file_t;
 
-cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
+static cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
   pg_assert(arena != NULL);
 
   return (cf_attribute_array_t){
@@ -876,8 +888,8 @@ cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
   };
 }
 
-void cf_attribute_array_push(cf_attribute_array_t *array,
-                             const cf_attribute_t *x) {
+static void cf_attribute_array_push(cf_attribute_array_t *array,
+                                    const cf_attribute_t *x) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -903,7 +915,7 @@ struct cf_method_t {
   cf_attribute_array_t attributes;
 };
 
-cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
+static cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
   pg_assert(arena != NULL);
 
   return (cf_method_array_t){
@@ -914,7 +926,8 @@ cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
   };
 }
 
-void cf_method_array_push(cf_method_array_t *array, const cf_method_t *x) {
+static void cf_method_array_push(cf_method_array_t *array,
+                                 const cf_method_t *x) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -954,7 +967,7 @@ struct cf_class_file_t {
 };
 typedef struct cf_class_file_t cf_class_file_t;
 
-void file_write_be_16(FILE *file, u16 x) {
+static void file_write_be_16(FILE *file, u16 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[2] = {
@@ -976,7 +989,7 @@ void file_write_be_32(FILE *file, u32 x) {
   fwrite(x_be, sizeof(x_be), 1, file);
 }
 
-u16 buf_read_be_u16(char *buf, u64 size, char **current) {
+static u16 buf_read_be_u16(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
   pg_assert(current != NULL);
@@ -988,7 +1001,7 @@ u16 buf_read_be_u16(char *buf, u64 size, char **current) {
   return x;
 }
 
-u32 buf_read_be_u32(char *buf, u64 size, char **current) {
+static u32 buf_read_be_u32(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
   pg_assert(current != NULL);
@@ -1001,8 +1014,8 @@ u32 buf_read_be_u32(char *buf, u64 size, char **current) {
   return x;
 }
 
-void buf_read_n_u8(char *buf, u64 size, char *dst, u64 dst_len,
-                   char **current) {
+static void buf_read_n_u8(char *buf, u64 size, char *dst, u64 dst_len,
+                          char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
   pg_assert(current != NULL);
@@ -1014,7 +1027,7 @@ void buf_read_n_u8(char *buf, u64 size, char *dst, u64 dst_len,
   *current += dst_len;
 }
 
-u8 buf_read_u8(char *buf, u64 size, char **current) {
+static u8 buf_read_u8(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
   pg_assert(current != NULL);
@@ -1025,7 +1038,7 @@ u8 buf_read_u8(char *buf, u64 size, char **current) {
   return x;
 }
 
-string_t
+static string_t
 cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
                                 u16 i) {
   const cf_constant_t *const constant = cf_constant_array_get(constant_pool, i);
@@ -1033,13 +1046,15 @@ cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
   return constant->v.s;
 }
 
-void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
-                            cf_class_file_t *class_file,
-                            cf_attribute_array_t *attributes, arena_t *arena);
+static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
+                                   cf_class_file_t *class_file,
+                                   cf_attribute_array_t *attributes,
+                                   arena_t *arena);
 
-void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len, char **current,
-                                      cf_class_file_t *class_file,
-                                      cf_attribute_array_t *attributes) {
+static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
+                                             char **current,
+                                             cf_class_file_t *class_file,
+                                             cf_attribute_array_t *attributes) {
 
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -2323,6 +2338,7 @@ typedef enum {
   TOKEN_KIND_NONE,
   TOKEN_KIND_NUMBER,
   TOKEN_KIND_PLUS,
+  TOKEN_KIND_STAR,
   TOKEN_KIND_LEFT_PAREN,
   TOKEN_KIND_RIGHT_PAREN,
   TOKEN_KIND_LEFT_BRACE,
@@ -2749,6 +2765,15 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case '*': {
+      const lex_token_t token = {
+          .kind = TOKEN_KIND_STAR,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      lex_token_array_push(&lexer->tokens, &token);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '.': {
       const lex_token_t token = {
           .kind = TOKEN_KIND_DOT,
@@ -2796,6 +2821,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
     return lex_number_length(buf, buf_len, token.source_offset);
 
   case TOKEN_KIND_PLUS:
+  case TOKEN_KIND_STAR:
   case TOKEN_KIND_LEFT_PAREN:
   case TOKEN_KIND_RIGHT_PAREN:
   case TOKEN_KIND_LEFT_BRACE:
@@ -3188,7 +3214,26 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
   pg_assert(parser->nodes.values != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  return par_parse_prefix_unary_expression(parser);
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = par_parse_prefix_unary_expression(parser),
+  };
+  u32 last_node_i = par_ast_node_array_push(&parser->nodes, &node);
+
+  const u32 root_i = last_node_i;
+
+  while (par_match_token(parser, TOKEN_KIND_STAR)) // TODO: div.
+  {
+    const u32 main_token = parser->tokens_i - 1;
+    const par_ast_node_t node = {
+        .kind = AST_KIND_BINARY,
+        .main_token = main_token,
+        .lhs = par_parse_prefix_unary_expression(parser),
+    };
+    last_node_i = parser->nodes.values[last_node_i].rhs =
+        par_ast_node_array_push(&parser->nodes, &node);
+  }
+  return root_i;
 }
 
 static u32 par_parse_additive_expression(par_parser_t *parser) {
@@ -3545,11 +3590,16 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     const lex_token_t token = parser->lexer->tokens.values[node->main_token];
     switch (token.kind) {
-      case TOKEN_KIND_NONE: break; // Nothing to do.
+    case TOKEN_KIND_NONE:
+      break; // Nothing to do.
     case TOKEN_KIND_PLUS:
       cf_asm_iadd(&gen->code->code, gen->frame);
       break;
-    default:pg_assert(0&&"todo");
+    case TOKEN_KIND_STAR:
+      cf_asm_imul(&gen->code->code, gen->frame);
+      break;
+    default:
+      pg_assert(0 && "todo");
     }
     break;
   }
