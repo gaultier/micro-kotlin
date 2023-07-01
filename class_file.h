@@ -37,6 +37,7 @@
   } while (0)
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
+#define pg_clamp(min, x, max) ((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x)
 
 // ------------------- Utils
 

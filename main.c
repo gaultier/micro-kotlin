@@ -30,8 +30,10 @@ int main(int argc, char *argv[]) {
 
     lex_lexer_t lexer = {
         .file_path = source_file_name,
-        .line_table = lex_line_table_array_make(1024 + buf_len / 8, &arena),
-        .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
+        .line_table = lex_line_table_array_make(
+            pg_clamp(64, buf_len / 8, UINT16_MAX), &arena),
+        .tokens =
+            lex_token_array_make(pg_clamp(64, buf_len / 8, UINT16_MAX), &arena),
     };
 
     const char *current = buf;
@@ -62,6 +64,8 @@ int main(int argc, char *argv[]) {
     pg_assert(file != NULL);
     cf_write(&class_file, file);
     fclose(file);
+
+    LOG("arena=%lu", arena.current_offset);
   }
 
 #if 0
