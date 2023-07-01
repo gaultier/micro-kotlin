@@ -9,8 +9,8 @@ int main(int argc, char *argv[]) {
   arena_init(&arena, 1 << 29);
 
   {
-    const u8 *const source_file_name = (u8 *)argv[1];
-    const int fd = open((char*)source_file_name, O_RDONLY);
+    u8 *const source_file_name = (u8 *)argv[1];
+    const int fd = open((char *)source_file_name, O_RDONLY);
     pg_assert(fd > 0);
 
     struct stat st = {0};
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
     close(fd);
 
     lex_lexer_t lexer = {
-        .line_table = lex_line_table_array_make(1024, &arena),
+        .line_table = lex_line_table_array_make(1024 + buf_len / 8, &arena),
         .tokens = lex_token_array_make(1024 + buf_len / 8, &arena),
     };
 

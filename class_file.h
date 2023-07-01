@@ -121,13 +121,58 @@ string_t string_make(string_t src, arena_t *arena) {
   pg_assert(src.value != NULL);
   string_t result = string_reserve(src.len, arena);
   memcpy(result.value, src.value, src.len);
+  result.len = src.len;
 
   return result;
 }
 
-static void string_drop_after_last_incl(string_t s, char c) {
-  pg_assert(s.value != NULL);
-  pg_assert(0&&"todo");
+u8 *ut_memrchr(u8 *s, char c, u64 n) {
+  pg_assert(s != NULL);
+  pg_assert(n > 0);
+
+  u8 *res = s + n - 1;
+  while (res-- != s) {
+    if (*res == c)
+      return res;
+  }
+  return NULL;
+}
+
+static bool ut_char_is_alphabetic(u8 c) {
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+}
+
+static void string_capitalize_first(string_t *s) {
+  pg_assert(s->value != NULL);
+  pg_assert(s->len > 0);
+  pg_assert(ut_char_is_alphabetic(s->value[0]));
+
+  if ('a' <= s->value[0] && s->value[0] <= 'z')
+    s->value[0] -= 32;
+}
+
+static void string_drop_before_last_incl(string_t *s, u8 c) {
+  pg_assert(s != NULL);
+  pg_assert(s->value != NULL);
+
+  u8 *const last_c = ut_memrchr(s->value, c, s->len);
+  if (last_c == NULL)
+    return; // Nothing to do.
+
+  u8 *const new_s_value = last_c + 1;
+  s->len -= new_s_value - s->value;
+  s->value = new_s_value;
+}
+
+static void string_drop_after_last_incl(string_t *s, char c) {
+  pg_assert(s != NULL);
+  pg_assert(s->value != NULL);
+
+  const u8 *const last_c = ut_memrchr(s->value, c, s->len);
+  if (last_c == NULL)
+    return; // Nothing to do.
+
+  s->len = last_c - s->value;
 }
 
 bool string_eq(string_t a, string_t b) {
@@ -2031,20 +2076,8 @@ u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
   return cf_constant_array_push(constant_pool, &constant);
 }
 
-const u8 *ut_memrchr(const u8 *s, char c, u64 n) {
-  pg_assert(s != NULL);
-  pg_assert(n > 0);
-
-  const u8 *res = s + n - 1;
-  while (res-- != s) {
-    if (*res == c)
-      return res;
-  }
-  return NULL;
-}
-
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-string_t cf_make_class_file_name_kt(const u8 *source_file_name,
+string_t cf_make_class_file_name_kt(u8 *source_file_name,
                                     arena_t *arena) {
   pg_assert(source_file_name != NULL);
   pg_assert(arena != NULL);
@@ -2070,7 +2103,10 @@ string_t cf_make_class_file_name_kt(const u8 *source_file_name,
 
   pg_assert(class_file_name[class_file_name_len] == 0);
 
-  return (string_t){.value = (u8 *)class_file_name, .len = class_file_name_len};
+  string_t result = {.value = (u8 *)class_file_name,
+                     .len = class_file_name_len};
+  string_capitalize_first(&result);
+  return result;
 }
 
 typedef struct {
@@ -2415,18 +2451,6 @@ static u8 lex_advance(const u8 *buf, u32 buf_len, const u8 **current) {
   return lex_is_at_end(buf, buf_len, current) ? 0 : c;
 }
 
-static bool lex_is_alphabetic(const u8 *buf, u32 buf_len,
-                              const u8 *const *current) {
-  pg_assert(buf != NULL);
-  pg_assert(buf_len > 0);
-  pg_assert(current != NULL);
-  pg_assert(*current != NULL);
-  pg_assert(*current - buf <= buf_len);
-
-  return ('a' <= **current && **current <= 'z') ||
-         ('A' <= **current && **current <= 'Z');
-}
-
 static bool lex_is_digit(const u8 *buf, u32 buf_len, const u8 *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -2445,7 +2469,7 @@ static bool lex_is_identifier_char(const u8 *buf, u32 buf_len,
   pg_assert(*current != NULL);
   pg_assert(*current - buf <= buf_len);
 
-  return lex_is_alphabetic(buf, buf_len, current) ||
+  return ut_char_is_alphabetic(**current) ||
          lex_is_digit(buf, buf_len, current) ||
          lex_peek(buf, buf_len, current) == '_';
 }
@@ -2490,7 +2514,7 @@ static u32 lex_identifier_length(const u8 *buf, u32 buf_len,
 
   const u32 start_offset = current_offset;
   const u8 *current = &buf[current_offset];
-  pg_assert(lex_is_alphabetic(buf, buf_len, &current));
+  pg_assert(ut_char_is_alphabetic(*current));
 
   lex_advance(buf, buf_len, &current);
 
@@ -2524,7 +2548,7 @@ static void lex_identifier(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
   pg_assert(*current - buf <= buf_len);
-  pg_assert(lex_is_alphabetic(buf, buf_len, current));
+  pg_assert(ut_char_is_alphabetic(**current));
 
   const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
   const u8 *const identifier = *current;
@@ -2683,7 +2707,7 @@ static void lex_lex(lex_lexer_t *lexer, const u8 *buf, u32 buf_len,
       break;
     }
     default: {
-      if (lex_is_alphabetic(buf, buf_len, current)) {
+      if (ut_char_is_alphabetic(**current)) {
         lex_identifier(lexer, buf, buf_len, current);
       } else if (lex_is_digit(buf, buf_len, current)) {
         lex_number(lexer, buf, buf_len, current);
@@ -3385,14 +3409,15 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
   pg_assert(path.value != NULL);
   pg_assert(path.len > 0);
-
-  const u8 *const last_directory_separator =
-      ut_memrchr((u8 *)path.value, '/', path.len);
-
   string_t class_name = string_make(path, arena);
 
-  if (last_directory_separator == NULL)
-    return class_name;
+  string_drop_before_last_incl(&class_name, '/');
+  pg_assert(class_name.len > 0);
+  pg_assert(class_name.value[0] != '/');
+  string_drop_after_last_incl(&class_name, '.');
+  pg_assert(class_name.len > 0);
+
+  string_capitalize_first(&class_name);
 
   return class_name;
 }
@@ -3431,11 +3456,9 @@ static void cg_generate_synthetic_class(par_parser_t *parser,
     cf_add_constant_string(&class_file->constant_pool, println_type_s);
   }
 
-  {                              // This class
-    const u64 extension_len = 6; /* `class` */
+  { // This class
     const string_t class_name =
-        (string_t){.value = class_file->file_path.value,
-                   .len = class_file->file_path.len - extension_len};
+        cg_make_class_name_from_path(class_file->file_path, arena);
     const u16 this_class_name_i =
         cf_add_constant_string(&class_file->constant_pool, class_name);
 
