@@ -40,7 +40,7 @@
 
 #define pg_max(a, b) ((a) > (b) ? (a) : (b))
 #define pg_clamp(min, x, max)                                                  \
-  ((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x)
+  (((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x))
 
 // --------------------------- Arena
 typedef struct {
@@ -90,66 +90,43 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
 // --------------------------- Array
 
 typedef struct pg_array_header_t {
-  uint64_t len;
-  uint64_t cap;
+  u64 len;
+  u64 cap;
   arena_t *arena;
 } pg_array_header_t;
 
 #define pg_array_t(Type) Type *
-
-#ifndef PG_ARRAY_GROW_FORMULA
-#define PG_ARRAY_GROW_FORMULA(x) ((uint64_t)(1.5 * ((double)x) + 8))
-#endif
-
 #define PG_ARRAY_HEADER(x) (((pg_array_header_t *)((void *)x)) - 1)
-#define PG_CONST_ARRAY_HEADER(x)                                               \
-  (((const pg_array_header_t *)((const void *)x)) - 1)
-#define pg_array_len(x) (PG_CONST_ARRAY_HEADER(x)->len)
-#define pg_array_cap(x) (PG_CONST_ARRAY_HEADER(x)->cap)
+#define pg_array_len(x) (PG_ARRAY_HEADER(x)->len)
+#define pg_array_cap(x) (PG_ARRAY_HEADER(x)->cap)
 
-#define pg_array_init_reserve(x, cap, arena)                                   \
+#define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
   do {                                                                         \
     void **pg__array_ = (void **)&(x);                                         \
-    pg_array_header_t *pg__ah =                                                \
-        (pg_array_header_t *)(my_allocator)                                    \
-            .realloc(NULL,                                                     \
-                     sizeof(pg_array_header_t) +                               \
-                         sizeof(*(x)) * ((uint64_t)cap),                       \
-                     0);                                                       \
+    pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
+        arg_arena, 1,                                                          \
+        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(arg_capacity)));     \
     pg__ah->len = 0;                                                           \
-    pg__ah->cap = (uint64_t)cap;                                               \
-    pg__ah->allocator = my_allocator;                                          \
+    pg__ah->cap = (u64)(arg_capacity);                                         \
+    pg__ah->arena = (arg_arena);                                               \
     *pg__array_ = (void *)(pg__ah + 1);                                        \
-  } while (0)
-
-#define pg_array_free(x)                                                       \
-  do {                                                                         \
-    pg_array_header_t *pg__ah = PG_ARRAY_HEADER(x);                            \
-    pg__ah->allocator.free(pg__ah);                                            \
-    x = NULL;                                                                  \
-  } while (0)
-
-#define pg_array_grow(x, min_capacity)                                         \
-  do {                                                                         \
-    uint64_t new_capacity = PG_ARRAY_GROW_FORMULA(pg_array_cap(x));            \
-    if (new_capacity < (min_capacity))                                         \
-      new_capacity = (min_capacity);                                           \
-    const uint64_t old_size =                                                  \
-        sizeof(pg_array_header_t) + pg_array_cap(x) * sizeof(*x);              \
-    const uint64_t new_size =                                                  \
-        sizeof(pg_array_header_t) + new_capacity * sizeof(*x);                 \
-    pg_array_header_t *pg__new_header = PG_ARRAY_HEADER(x)->allocator.realloc( \
-        PG_ARRAY_HEADER(x), new_size, old_size);                               \
-    pg__new_header->cap = new_capacity;                                        \
-    x = (void *)(pg__new_header + 1);                                          \
   } while (0)
 
 #define pg_array_append(x, item)                                               \
   do {                                                                         \
-    if (pg_array_cap(x) < pg_array_len(x) + 1)                                 \
-      pg_array_grow(x, 0);                                                     \
+    if (pg_array_len(x) >= pg_array_cap(x)) {                                  \
+      const u64 new_cap = pg_array_cap(x) * 2;                                 \
+      pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(            \
+          PG_ARRAY_HEADER(x)->arena, 1,                                        \
+          sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)new_cap));          \
+      memcpy(pg__ah, x,                                                        \
+             sizeof(pg_array_header_t) +                                       \
+                 sizeof(*(x)) * ((u64)pg_array_cap(x)));                       \
+      PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
+    }                                                                          \
     (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
-  } while (0)
+  } while (0);                                                                 \
+  PG_ARRAY_HEADER(x)->len - 1
 
 // ------------------- Utils
 
@@ -2426,55 +2403,6 @@ typedef struct {
 } lex_token_t;
 
 typedef struct {
-  u64 len;
-  u64 cap;
-  lex_token_t *values;
-  arena_t *arena;
-} lex_token_array_t;
-
-static lex_token_array_t lex_token_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (lex_token_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(lex_token_t)),
-      .arena = arena,
-  };
-}
-
-static u16 lex_token_array_push(lex_token_array_t *array,
-                                const lex_token_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT32_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(((u64)array->values) % 16 == 0);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    lex_token_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(lex_token_t));
-    pg_assert(new_array != NULL);
-    pg_assert(((u64)new_array) % 16 == 0);
-
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(lex_token_t));
-    pg_assert(array->values != NULL);
-    pg_assert(((u64)array->values) % 16 == 0);
-    array->cap = new_cap;
-  }
-
-  array->values[array->len] = *x;
-  const u64 index = array->len + 1;
-  pg_assert(index > 0);
-  pg_assert(index <= array->len + 1);
-  array->len += 1;
-  return index;
-}
-
-typedef struct {
   u32 line;
   u32 start_offset;
 } lex_line_table_t;
@@ -2531,7 +2459,7 @@ static u16 lex_line_table_array_push(lex_line_table_array_t *array,
 
 typedef struct {
   string_t file_path;
-  lex_token_array_t tokens;
+  lex_token_t *tokens;
   lex_line_table_array_t line_table;
 } lex_lexer_t;
 
@@ -2671,7 +2599,7 @@ static u32 lex_identifier_length(const char *buf, u32 buf_len,
 static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
                            const char **current) {
   pg_assert(lexer != NULL);
-  pg_assert(lexer->tokens.values != NULL);
+  pg_assert(lexer->tokens != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2688,26 +2616,26 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
         .kind = TOKEN_KIND_KEYWORD_FUN,
         .source_offset = start_offset,
     };
-    lex_token_array_push(&lexer->tokens, &token);
+    pg_array_append(lexer->tokens, token);
   } else if (mem_eq_c(identifier, identifier_len, "println")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_BUILTIN_PRINTLN,
         .source_offset = start_offset,
     };
-    lex_token_array_push(&lexer->tokens, &token);
+    pg_array_append(lexer->tokens, token);
   } else {
     const lex_token_t token = {
         .kind = TOKEN_KIND_IDENTIFIER,
         .source_offset = start_offset,
     };
-    lex_token_array_push(&lexer->tokens, &token);
+    pg_array_append(lexer->tokens, token);
   }
 }
 
 static void lex_number(lex_lexer_t *lexer, const char *buf, u32 buf_len,
                        const char **current) {
   pg_assert(lexer != NULL);
-  pg_assert(lexer->tokens.values != NULL);
+  pg_assert(lexer->tokens != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2734,7 +2662,7 @@ static void lex_number(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       .kind = TOKEN_KIND_NUMBER,
       .source_offset = start_offset,
   };
-  lex_token_array_push(&lexer->tokens, &token);
+  pg_array_append(lexer->tokens, token);
 }
 
 static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
@@ -2742,7 +2670,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table.values != NULL);
   pg_assert(lexer->line_table.len == 0);
-  pg_assert(lexer->tokens.values != NULL);
+  pg_assert(lexer->tokens != NULL);
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2757,7 +2685,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
 
   // Push first dummy token.
   const lex_token_t dummy_token = {0};
-  lex_token_array_push(&lexer->tokens, &dummy_token);
+  pg_array_append(lexer->tokens, dummy_token);
 
   while (!lex_is_at_end(buf, buf_len, current)) {
     const u8 c = **current;
@@ -2768,7 +2696,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_LEFT_PAREN,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2777,7 +2705,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_RIGHT_PAREN,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2786,7 +2714,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_COMMA,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2795,7 +2723,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_COLON,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2804,7 +2732,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_NOT,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2813,7 +2741,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_LEFT_BRACE,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2822,7 +2750,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_RIGHT_BRACE,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2831,7 +2759,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_PLUS,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2840,7 +2768,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_STAR,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -2849,7 +2777,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
           .kind = TOKEN_KIND_DOT,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
-      lex_token_array_push(&lexer->tokens, &token);
+      pg_array_append(lexer->tokens, token);
       lex_advance(buf, buf_len, current);
       break;
     }
@@ -3013,16 +2941,16 @@ static void par_ast_fprint_node(const par_parser_t *parser,
                                 u16 indent) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
   pg_assert(node != NULL);
 
   if (node->kind == AST_KIND_NONE)
     return;
 
   const char *const kind_string = par_ast_node_kind_to_string[node->kind];
-  const lex_token_t token = parser->lexer->tokens.values[node->main_token];
+  const lex_token_t token = parser->lexer->tokens[node->main_token];
   const u32 length =
       lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
   const char *const token_string = &parser->buf[token.source_offset];
@@ -3039,9 +2967,9 @@ static void par_ast_fprint_node(const par_parser_t *parser,
 static void par_ast_fprint(const par_parser_t *parser, FILE *file) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   pg_assert(parser->nodes.len >= 1); // First is dummy.
 
@@ -3053,37 +2981,37 @@ static void par_ast_fprint(const par_parser_t *parser, FILE *file) {
 static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
-  return parser->tokens_i == parser->lexer->tokens.len;
+  return parser->tokens_i == pg_array_len(parser->lexer);
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
-  return parser->lexer->tokens.values[parser->tokens_i];
+  return parser->lexer->tokens[parser->tokens_i];
 }
 
 static lex_token_t par_advance_token(par_parser_t *parser) {
   pg_assert(parser != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
-  return parser->lexer->tokens.values[parser->tokens_i++];
+  return parser->lexer->tokens[parser->tokens_i++];
 }
 
 static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   if (par_peek_token(parser).kind == kind) {
     par_advance_token(parser);
@@ -3097,9 +3025,9 @@ static void par_find_token_position(par_parser_t *parser, lex_token_t token,
                                     string_t *token_string) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
   pg_assert(line != NULL);
   pg_assert(column != NULL);
   pg_assert(token_string != NULL);
@@ -3126,9 +3054,9 @@ static void par_error(par_parser_t *parser, lex_token_t token,
                       const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   switch (parser->state) {
   case PARSER_STATE_OK: {
@@ -3157,9 +3085,9 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
                              const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   if (!par_match_token(parser, kind)) {
     par_error(parser, par_peek_token(parser), error);
@@ -3169,9 +3097,9 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
 static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   pg_assert(token.kind == TOKEN_KIND_NUMBER);
 
@@ -3202,9 +3130,9 @@ static u32 par_parse_expression(par_parser_t *parser);
 static u32 par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN, "expected left parenthesis");
 
@@ -3223,9 +3151,9 @@ static u32 par_parse_builtin_println(par_parser_t *parser) {
 static u32 par_parse_primary_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   if (par_match_token(parser, TOKEN_KIND_NUMBER)) {
     const par_ast_node_t node = {
@@ -3242,9 +3170,9 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
 static u32 par_parse_statement(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN))
     return par_parse_builtin_println(parser);
@@ -3255,9 +3183,9 @@ static u32 par_parse_statement(par_parser_t *parser) {
 static u32 par_parse_postfix_unary_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   return par_parse_primary_expression(
       parser); // TODO: parse {0,n} postfix unary suffix.
@@ -3266,9 +3194,9 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser) {
 static u32 par_parse_prefix_unary_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   if (par_match_token(parser, TOKEN_KIND_NOT)) {
     pg_assert(0 && "todo");
@@ -3280,9 +3208,9 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser) {
 static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
@@ -3309,9 +3237,9 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
 static u32 par_parse_additive_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
@@ -3338,9 +3266,9 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
 static u32 par_parse_expression(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   return par_parse_additive_expression(parser);
 }
@@ -3348,9 +3276,9 @@ static u32 par_parse_expression(par_parser_t *parser) {
 static u32 par_parse_block(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   // Empty block.
   if (par_match_token(parser, TOKEN_KIND_RIGHT_BRACE))
@@ -3381,9 +3309,9 @@ static u32 par_parse_block(par_parser_t *parser) {
 static u32 par_parse_function_arguments(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   // No arguments.
   if (par_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
@@ -3413,9 +3341,9 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
 static u32 par_parse_function_definition(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
                    "expected function name (identifier)");
@@ -3461,9 +3389,9 @@ static void par_sync_if_panicked(par_parser_t *parser) {
 static u32 par_parse_declaration(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   u32 new_node_i = 0;
   if (par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
@@ -3479,9 +3407,9 @@ static u32 par_parse_declaration(par_parser_t *parser) {
 static u32 par_parse(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
 
   const par_ast_node_t dummy = {0};
   par_ast_node_array_push(&parser->nodes, &dummy);
@@ -3520,9 +3448,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(node != NULL);
@@ -3531,9 +3459,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_NONE:
     return;
   case AST_KIND_NUM: {
-    pg_assert(node->main_token < parser->lexer->tokens.len);
+    pg_assert(node->main_token < pg_array_len(parser->lexer));
 
-    lex_token_t token = parser->lexer->tokens.values[node->main_token];
+    lex_token_t token = parser->lexer->tokens[node->main_token];
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = par_number(parser, token)}};
@@ -3569,8 +3497,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     const u32 token_name_i = node->main_token;
-    pg_assert(token_name_i < parser->lexer->tokens.len);
-    const lex_token_t token_name = parser->lexer->tokens.values[token_name_i];
+    pg_assert(token_name_i < pg_array_len(parser->lexer));
+    const lex_token_t token_name = parser->lexer->tokens[token_name_i];
     pg_assert(token_name.kind == TOKEN_KIND_IDENTIFIER);
 
     string_t method_name = {
@@ -3658,7 +3586,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
                        &parser->nodes.values[node->rhs], arena);
     }
 
-    const lex_token_t token = parser->lexer->tokens.values[node->main_token];
+    const lex_token_t token = parser->lexer->tokens[node->main_token];
     switch (token.kind) {
     case TOKEN_KIND_NONE:
       break; // Nothing to do.
@@ -3701,9 +3629,9 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
@@ -3827,9 +3755,9 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
                         arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens.values != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes.values != NULL);
-  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer));
   pg_assert(parser->nodes.len > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);

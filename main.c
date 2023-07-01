@@ -28,13 +28,12 @@ int main(int argc, char *argv[]) {
     pg_assert(read(fd, buf, buf_len) == buf_len);
     close(fd);
 
+    const u64 estimated_capacity = pg_clamp(64, buf_len / 8, UINT16_MAX);
     lex_lexer_t lexer = {
         .file_path = source_file_name,
-        .line_table = lex_line_table_array_make(
-            pg_clamp(64, buf_len / 8, UINT16_MAX), &arena),
-        .tokens =
-            lex_token_array_make(pg_clamp(64, buf_len / 8, UINT16_MAX), &arena),
+        .line_table = lex_line_table_array_make(estimated_capacity, &arena),
     };
+    pg_array_init_reserve(lexer.tokens, estimated_capacity, &arena);
 
     const char *current = buf;
     lex_lex(&lexer, buf, buf_len, &current);
@@ -43,7 +42,7 @@ int main(int argc, char *argv[]) {
         .buf = buf,
         .buf_len = buf_len,
         .lexer = &lexer,
-        .nodes = par_ast_node_array_make(lexer.tokens.len, &arena),
+        .nodes = par_ast_node_array_make(pg_array_len(lexer.tokens), &arena),
     };
     par_parse(&parser);
     if (parser.state != PARSER_STATE_OK)
