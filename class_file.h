@@ -742,41 +742,6 @@ typedef struct {
 typedef struct cf_method_t cf_method_t;
 
 typedef struct cf_interfaces_t cf_interfaces_t;
-typedef struct {
-  u64 len;
-  u64 cap;
-  u16 *values;
-  arena_t *arena;
-} cf_interface_array_t;
-
-static cf_interface_array_t cf_interface_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_interface_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(u16)),
-      .arena = arena,
-  };
-}
-
-static void cf_interface_array_push(cf_interface_array_t *array, u16 x) {
-  pg_assert(array != NULL);
-  pg_assert(x > 0);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_interfaces_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(u16));
-    array->values = memcpy(new_array, array->values, array->len * sizeof(u16));
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = x;
-}
 
 typedef struct {
   u16 start_pc;
@@ -838,7 +803,7 @@ struct cf_class_file_t {
   u16 this_class;
   u16 super_class;
   u16 interfaces_count;
-  cf_interface_array_t interfaces;
+  u16 *interfaces;
   u16 fields_count;
   cf_field_t *fields;
   cf_method_t *methods;
@@ -1612,14 +1577,14 @@ static void cf_buf_read_interfaces(char *buf, u64 buf_len, char **current,
   const char *const current_start = *current;
 
   const u16 interfaces_count = buf_read_be_u16(buf, buf_len, current);
-  class_file->interfaces = cf_interface_array_make(interfaces_count, arena);
+  pg_array_init_reserve(class_file->interfaces, interfaces_count, arena);
 
   for (u16 i = 0; i < interfaces_count; i++) {
     const u16 interface_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(interface_i > 0);
     pg_assert(interface_i <= class_file->constant_pool.len);
 
-    cf_interface_array_push(&class_file->interfaces, interface_i);
+    pg_array_append(class_file->interfaces, interface_i);
   }
 
   const char *const current_end = *current;
@@ -1966,7 +1931,7 @@ static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(arena != NULL);
 
   class_file->constant_pool = cf_constant_array_make(1024, arena);
-  class_file->interfaces = cf_interface_array_make(64, arena);
+  pg_array_init_reserve(class_file->interfaces, 64, arena);
 
   pg_array_init_reserve(class_file->methods, 64, arena);
   pg_array_init_reserve(class_file->fields, 64, arena);
