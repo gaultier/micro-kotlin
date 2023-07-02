@@ -2876,8 +2876,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
   if (par_peek_token(parser).kind != TOKEN_KIND_PLUS)
     return expression_node;
 
-  const par_ast_node_t node = {.kind = AST_KIND_BINARY,
-                                                              .lhs = expression_node};
+  const par_ast_node_t node = {.kind = AST_KIND_BINARY, .lhs = expression_node};
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
@@ -3048,6 +3047,9 @@ static u32 par_parse(par_parser_t *parser) {
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
+
+  parser->tokens_i = 1; // Skip the dummy token.
 
   const par_ast_node_t dummy = {0};
   pg_array_append(parser->nodes, dummy);
@@ -3104,6 +3106,9 @@ static cf_type_t ty_type(par_parser_t *parser, par_ast_node_t *node) {
     return lhs;
   }
   case AST_KIND_FUNCTION_DEFINITION:
+    // Inspect body (rhs).
+    ty_type(parser, &parser->nodes[node->rhs]);
+
     return (cf_type_t){.kind = TYPE_VOID};
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
