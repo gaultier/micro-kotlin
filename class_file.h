@@ -121,9 +121,9 @@ typedef struct pg_array_header_t {
       pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(            \
           PG_ARRAY_HEADER(x)->arena, 1,                                        \
           sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)new_cap));          \
-      memmove(pg__ah, x,                                                        \
-             sizeof(pg_array_header_t) +                                       \
-                 sizeof(*(x)) * ((u64)pg_array_cap(x)));                       \
+      memmove(pg__ah, x,                                                       \
+              sizeof(pg_array_header_t) +                                      \
+                  sizeof(*(x)) * ((u64)pg_array_cap(x)));                      \
       PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
     }                                                                          \
     (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
@@ -740,12 +740,6 @@ typedef struct {
 } cf_field_t;
 
 typedef struct cf_method_t cf_method_t;
-typedef struct {
-  u64 len;
-  u64 cap;
-  cf_method_t *values;
-  arena_t *arena;
-} cf_method_array_t;
 
 typedef struct cf_interfaces_t cf_interfaces_t;
 typedef struct {
@@ -831,37 +825,6 @@ struct cf_method_t {
   cf_attribute_t *attributes;
 };
 
-static cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_method_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_method_t)),
-      .arena = arena,
-  };
-}
-
-static void cf_method_array_push(cf_method_array_t *array,
-                                 const cf_method_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_method_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_method_t));
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_method_t));
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = *x;
-}
-
 const u32 cf_MAGIC_NUMBER = 0xbebafeca;
 const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MINOR_VERSION = 0;
@@ -878,7 +841,7 @@ struct cf_class_file_t {
   cf_interface_array_t interfaces;
   u16 fields_count;
   cf_field_t *fields;
-  cf_method_array_t methods;
+  cf_method_t *methods;
   cf_attribute_t *attributes;
 };
 typedef struct cf_class_file_t cf_class_file_t;
@@ -1621,14 +1584,14 @@ static void cf_buf_read_method(char *buf, u64 buf_len, char **current,
   cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
                          arena);
 
-  cf_method_array_push(&class_file->methods, &method);
+  pg_array_append(class_file->methods, method);
 }
 
 static void cf_buf_read_methods(char *buf, u64 buf_len, char **current,
                                 cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, buf_len, current);
-  class_file->methods = cf_method_array_make(methods_count, arena);
+  pg_array_init_reserve(class_file->methods, methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
     cf_buf_read_method(buf, buf_len, current, class_file, arena);
@@ -1973,10 +1936,10 @@ static void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  file_write_be_16(file, class_file->methods.len);
+  file_write_be_16(file, pg_array_len(class_file->methods));
 
-  for (uint64_t i = 0; i < class_file->methods.len; i++) {
-    const cf_method_t *const method = &class_file->methods.values[i];
+  for (uint64_t i = 0; i < pg_array_len(class_file->methods); i++) {
+    const cf_method_t *const method = &class_file->methods[i];
     cf_write_method(file, method);
   }
 }
@@ -2003,12 +1966,12 @@ static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(arena != NULL);
 
   class_file->constant_pool = cf_constant_array_make(1024, arena);
-  class_file->interfaces = cf_interface_array_make(1024, arena);
+  class_file->interfaces = cf_interface_array_make(64, arena);
 
-  class_file->methods = cf_method_array_make(1024, arena);
-  pg_array_init_reserve(class_file->fields, 1024, arena);
+  pg_array_init_reserve(class_file->methods, 64, arena);
+  pg_array_init_reserve(class_file->fields, 64, arena);
 
-  pg_array_init_reserve(class_file->attributes, 1024, arena);
+  pg_array_init_reserve(class_file->attributes, 64, arena);
 }
 
 static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
@@ -2233,8 +2196,8 @@ cf_class_files_find_method_exactly(const cf_class_file_array_t *class_files,
     if (!string_eq(this_class_name, class_name))
       continue;
 
-    for (u64 j = 0; j < class_file->methods.len; j++) {
-      const cf_method_t *const this_method = &class_file->methods.values[j];
+    for (u64 j = 0; j < pg_array_len(class_file->methods); j++) {
+      const cf_method_t *const this_method = &class_file->methods[j];
       // TODO: check attributes?
 
       const string_t this_method_name = cf_constant_array_get_as_string(
@@ -3359,7 +3322,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
         .v = {.code = code}};
     pg_array_append(method.attributes, attribute_code);
-    cf_method_array_push(&class_file->methods, &method);
+    pg_array_append(class_file->methods, method);
 
     gen->code = NULL;
     break;
