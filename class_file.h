@@ -128,6 +128,7 @@ typedef struct pg_array_header_t {
     }                                                                          \
     (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
   } while (0)
+
 // ------------------- Utils
 
 typedef struct {
