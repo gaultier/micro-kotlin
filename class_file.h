@@ -2840,10 +2840,11 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const par_ast_node_t node = {
-      .kind = AST_KIND_BINARY,
-      .lhs = par_parse_prefix_unary_expression(parser),
-  };
+  const u32 expression_node = par_parse_prefix_unary_expression(parser);
+  if (par_peek_token(parser).kind != TOKEN_KIND_STAR)
+    return expression_node;
+
+  const par_ast_node_t node = {.kind = AST_KIND_BINARY, .lhs = expression_node};
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
@@ -2871,10 +2872,12 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const par_ast_node_t node = {
-      .kind = AST_KIND_BINARY,
-      .lhs = par_parse_multiplicative_expression(parser),
-  };
+  const u32 expression_node = par_parse_multiplicative_expression(parser);
+  if (par_peek_token(parser).kind != TOKEN_KIND_PLUS)
+    return expression_node;
+
+  const par_ast_node_t node = {.kind = AST_KIND_BINARY,
+                                                              .lhs = expression_node};
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
