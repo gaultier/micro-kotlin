@@ -65,6 +65,27 @@ int main(int argc, char *argv[]) {
     fclose(file);
 
     LOG("arena=%lu", arena.current_offset);
+    {
+      LOG("\n----------- Verifiying%s", "");
+
+      int fd = open(class_file.file_path.value, O_RDONLY);
+      pg_assert(fd > 0);
+
+      struct stat st = {0};
+      pg_assert(stat(class_file.file_path.value, &st) == 0);
+      pg_assert(st.st_size > 0);
+      pg_assert(st.st_size <= UINT32_MAX);
+
+      const u32 buf_len = st.st_size;
+      char *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
+
+      pg_assert(read(fd, buf, buf_len) == buf_len);
+      close(fd);
+
+      cf_class_file_t class_file = {0};
+      char *current = buf;
+      cf_buf_read_class_file(buf, buf_len, &current, &class_file, &arena);
+    }
   }
 
 #if 0
@@ -352,7 +373,10 @@ int main(int argc, char *argv[]) {
       cf_method_array_push(&class_file.methods, &main);
     }
 
-    const char *const source_file_name = argv[1];
+    const string_t source_file_name = {
+        .value = argv[1],
+        .len = strlen(argv[1]),
+    };
     const char *const class_file_name =
         cf_make_class_file_name(source_file_name, &arena);
 
@@ -362,23 +386,6 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
 
     LOG("arena=%lu", arena.current_offset);
-  }
-  {
-    LOG("\n----------- Verifiying%s", "");
-
-    const char *const source_file_name = argv[1];
-    const char *const class_file_name =
-        cf_make_class_file_name_kt(source_file_name, &arena);
-
-    int fd = open(class_file_name, O_RDONLY);
-    pg_assert(fd > 0);
-
-    char *buf = arena_alloc(&arena, 1 << 14, sizeof(u8));
-    ssize_t read_bytes = read(fd, buf, 1 << 14);
-    char *current = buf;
-
-    cf_class_file_t class_file = {0};
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, &arena);
   }
 #endif
 }

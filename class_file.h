@@ -753,43 +753,6 @@ typedef struct {
   arena_t *arena;
 } cf_method_array_t;
 
-typedef struct {
-  u64 len;
-  u64 cap;
-  cf_field_t *values;
-  arena_t *arena;
-} cf_field_array_t;
-
-static cf_field_array_t cf_field_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_field_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_field_t)),
-      .arena = arena,
-  };
-}
-
-static void cf_field_array_push(cf_field_array_t *array, const cf_field_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_field_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_field_t));
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_field_t));
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = *x;
-}
-
 typedef struct cf_interfaces_t cf_interfaces_t;
 typedef struct {
   u64 len;
@@ -830,7 +793,7 @@ static void cf_interface_array_push(cf_interface_array_t *array, u16 x) {
 typedef struct {
   u16 start_pc;
   u16 line_number;
-} cf_line_number_table_t;
+} cf_line_number_table_entry_t;
 
 struct cf_attribute_t {
   enum cf_attribute_kind_t {
@@ -855,10 +818,8 @@ struct cf_attribute_t {
       u16 source_file;
     } source_file; // ATTRIBUTE_KIND_SOURCE_FILE
 
-    struct cf_attribute_line_number_table_t {
-      u16 line_number_table_count;
-      cf_line_number_table_t *line_number_tables;
-    } line_number_table; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
+    cf_line_number_table_entry_t
+        *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
   } v;
 };
 
@@ -953,7 +914,7 @@ struct cf_class_file_t {
   u16 interfaces_count;
   cf_interface_array_t interfaces;
   u16 fields_count;
-  cf_field_array_t fields;
+  cf_field_t *fields;
   cf_method_array_t methods;
   cf_attribute_array_t attributes;
 };
@@ -1080,7 +1041,6 @@ static void cf_buf_read_code_attribute_exceptions(char *buf, u64 buf_len,
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(exceptions != NULL);
-  pg_assert(*exceptions != NULL);
 
   const char *const current_start = *current;
 
@@ -1764,14 +1724,14 @@ static void cf_buf_read_field(char *buf, u64 buf_len, char **current,
   cf_buf_read_attributes(buf, buf_len, current, class_file, &field.attributes,
                          arena);
 
-  cf_field_array_push(&class_file->fields, &field);
+  pg_array_append(class_file->fields, field);
 }
 
 static void cf_buf_read_fields(char *buf, u64 buf_len, char **current,
                                cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, buf_len, current);
-  class_file->fields = cf_field_array_make(fields_count, arena);
+  pg_array_init_reserve(class_file->fields, fields_count, arena);
 
   for (u16 i = 0; i < fields_count; i++) {
     cf_buf_read_field(buf, buf_len, current, class_file, arena);
@@ -1959,11 +1919,9 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     return size;
   }
   case ATTRIBUTE_KIND_LINE_NUMBER_TABLE: {
-    const cf_attribute_line_number_table_t *const attribute_line_number_table =
-        &attribute->v.line_number_table;
-    return sizeof(attribute_line_number_table->line_number_table_count) +
-           attribute_line_number_table->line_number_table_count *
-               sizeof(cf_line_number_table_t);
+    return sizeof(u16) /* count */ +
+           pg_array_len(attribute->v.line_number_table_entries) *
+               sizeof(cf_line_number_table_entry_t);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE:
     pg_assert(0 && "unimplemented");
@@ -2014,13 +1972,10 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_32(file, size);
 
-    const cf_attribute_line_number_table_t *const attribute_line_number_table =
-        &attribute->v.line_number_table;
-
-    for (u64 i = 0; i < attribute_line_number_table->line_number_table_count;
+    for (u64 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
          i++) {
-      cf_line_number_table_t line_number_table =
-          attribute_line_number_table->line_number_tables[i];
+      cf_line_number_table_entry_t line_number_table =
+          attribute->v.line_number_table_entries[i];
       file_write_be_16(file, line_number_table.start_pc);
       file_write_be_16(file, line_number_table.line_number);
     }
@@ -2091,7 +2046,7 @@ static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   class_file->interfaces = cf_interface_array_make(1024, arena);
 
   class_file->methods = cf_method_array_make(1024, arena);
-  class_file->fields = cf_field_array_make(1024, arena);
+  pg_array_init_reserve(class_file->fields, 1024, arena);
 
   class_file->attributes = cf_attribute_array_make(1024, arena);
 }
