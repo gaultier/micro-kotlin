@@ -401,46 +401,6 @@ typedef struct {
 typedef struct {
   u64 len;
   u64 cap;
-  cf_exception_t *values;
-  arena_t *arena;
-} cf_exception_array_t;
-
-static cf_exception_array_t cf_exception_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_exception_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_exception_t)),
-      .arena = arena,
-  };
-}
-
-static void cf_exception_array_push(cf_exception_array_t *array,
-                                    const cf_exception_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_exception_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_exception_t));
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_exception_t));
-    pg_assert(array->values != NULL);
-    pg_assert(((u64)(array->values)) % 16 == 0);
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = *x;
-}
-
-typedef struct {
-  u64 len;
-  u64 cap;
   char *values;
   arena_t *arena;
 } cf_code_array_t;
@@ -887,7 +847,7 @@ struct cf_attribute_t {
       u16 max_stack;
       u16 max_locals;
       cf_code_array_t code;
-      cf_exception_array_t exceptions;
+      cf_exception_t *exceptions;
       cf_attribute_array_t attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
@@ -1110,19 +1070,22 @@ static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
   cf_attribute_array_push(attributes, &attribute);
 }
 
-static void cf_buf_read_code_attribute_exceptions(
-    char *buf, u64 buf_len, char **current, cf_class_file_t *class_file,
-    cf_exception_array_t *exceptions, arena_t *arena) {
+static void cf_buf_read_code_attribute_exceptions(char *buf, u64 buf_len,
+                                                  char **current,
+                                                  cf_class_file_t *class_file,
+                                                  cf_exception_t **exceptions,
+                                                  arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(exceptions != NULL);
+  pg_assert(*exceptions != NULL);
 
   const char *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
-  *exceptions = cf_exception_array_make(table_len, arena);
+  pg_array_init_reserve(*exceptions, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
     cf_exception_t exception = {0};
@@ -1132,7 +1095,7 @@ static void cf_buf_read_code_attribute_exceptions(
     exception.handler_pc = buf_read_be_u16(buf, buf_len, current);
     exception.catch_type = buf_read_be_u16(buf, buf_len, current);
 
-    cf_exception_array_push(exceptions, &exception);
+    pg_array_append(*exceptions, exception);
   }
 
   const char *const current_end = *current;
@@ -1985,7 +1948,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
                sizeof(u32) + code->code.len +
                sizeof(u16) /* exception count */ +
-               +code->exceptions.len * sizeof(cf_exception_t) +
+               +pg_array_len(code->exceptions) * sizeof(cf_exception_t) +
                sizeof(u16) // attributes length
         ;
 
@@ -2041,7 +2004,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     file_write_be_32(file, code->code.len);
     fwrite(code->code.values, code->code.len, sizeof(u8), file);
 
-    file_write_be_16(file, code->exceptions.len);
+    file_write_be_16(file, pg_array_len(code->exceptions));
 
     cf_write_attributes(file, &code->attributes);
 
