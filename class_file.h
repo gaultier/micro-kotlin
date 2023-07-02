@@ -731,18 +731,12 @@ static void cf_asm_call_superclass_constructor(
 }
 
 typedef struct cf_attribute_t cf_attribute_t;
-typedef struct {
-  u64 len;
-  u64 cap;
-  cf_attribute_t *values;
-  arena_t *arena;
-} cf_attribute_array_t;
 
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
-  cf_attribute_array_t attributes;
+  cf_attribute_t* attributes;
 } cf_field_t;
 
 typedef struct cf_method_t cf_method_t;
@@ -811,7 +805,7 @@ struct cf_attribute_t {
       u16 max_locals;
       cf_code_array_t code;
       cf_exception_t *exceptions;
-      cf_attribute_array_t attributes;
+      cf_attribute_t *attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
     struct cf_attribute_source_file_t {
@@ -830,42 +824,11 @@ typedef struct cf_attribute_code_t cf_attribute_code_t;
 
 typedef struct cf_attribute_source_file_t cf_attribute_source_file_t;
 
-static cf_attribute_array_t cf_attribute_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_attribute_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_attribute_t)),
-      .arena = arena,
-  };
-}
-
-static void cf_attribute_array_push(cf_attribute_array_t *array,
-                                    const cf_attribute_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_attribute_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_attribute_t));
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_attribute_t));
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = *x;
-}
-
 struct cf_method_t {
   u16 access_flags;
   u16 name;
   u16 descriptor;
-  cf_attribute_array_t attributes;
+  cf_attribute_t *attributes;
 };
 
 static cf_method_array_t cf_method_array_make(u64 cap, arena_t *arena) {
@@ -916,7 +879,7 @@ struct cf_class_file_t {
   u16 fields_count;
   cf_field_t *fields;
   cf_method_array_t methods;
-  cf_attribute_array_t attributes;
+  cf_attribute_t *attributes;
 };
 typedef struct cf_class_file_t cf_class_file_t;
 
@@ -1001,19 +964,19 @@ cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
 
 static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
                                    cf_class_file_t *class_file,
-                                   cf_attribute_array_t *attributes,
-                                   arena_t *arena);
+                                   cf_attribute_t **attributes, arena_t *arena);
 
 static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
                                              char **current,
                                              cf_class_file_t *class_file,
-                                             cf_attribute_array_t *attributes) {
+                                             cf_attribute_t **attributes) {
 
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
+  pg_assert(*attributes != NULL);
 
   const char *const current_start = *current;
 
@@ -1028,7 +991,7 @@ static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
 
   cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                               .v = {.source_file = source_file}};
-  cf_attribute_array_push(attributes, &attribute);
+  pg_array_append(*attributes, attribute);
 }
 
 static void cf_buf_read_code_attribute_exceptions(char *buf, u64 buf_len,
@@ -1066,7 +1029,7 @@ static void cf_buf_read_code_attribute_exceptions(char *buf, u64 buf_len,
 static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
                                        cf_class_file_t *class_file,
                                        u32 attribute_len, u16 name,
-                                       cf_attribute_array_t *attributes,
+                                       cf_attribute_t **attributes,
                                        arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -1096,7 +1059,7 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
 
   cf_attribute_t attribute = {
       .kind = ATTRIBUTE_KIND_CODE, .name = name, .v = {.code = code}};
-  cf_attribute_array_push(attributes, &attribute);
+  pg_array_append(*attributes, attribute);
 
   const char *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -1229,9 +1192,10 @@ static void cf_buf_read_signature_attribute(char *buf, u64 buf_len,
 }
 
 // TODO: store this data.
-static void cf_buf_read_exceptions_attribute(
-    char *buf, u64 buf_len, char **current, cf_class_file_t *class_file,
-    u32 attribute_len, cf_attribute_array_t *attributes, arena_t *arena) {
+static void
+cf_buf_read_exceptions_attribute(char *buf, u64 buf_len, char **current,
+                                 cf_class_file_t *class_file, u32 attribute_len,
+                                 cf_attribute_t **attributes, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -1294,14 +1258,12 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
 // to it!
 static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
-                                  cf_attribute_array_t *attributes,
-                                  arena_t *arena) {
+                                  cf_attribute_t **attributes, arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
-  pg_assert(attributes->cap > 0);
   pg_assert(arena != NULL);
 
   const u16 name_i = buf_read_be_u16(buf, buf_len, current);
@@ -1389,7 +1351,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
 
 static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
                                    cf_class_file_t *class_file,
-                                   cf_attribute_array_t *attributes,
+                                   cf_attribute_t **attributes,
                                    arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -1399,7 +1361,7 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
   pg_assert(arena != NULL);
 
   const u16 attribute_count = buf_read_be_u16(buf, buf_len, current);
-  *attributes = cf_attribute_array_make(attribute_count, arena);
+  pg_array_init_reserve(*attributes, attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
     cf_buf_read_attribute(buf, buf_len, current, class_file, attributes, arena);
@@ -1912,8 +1874,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                sizeof(u16) // attributes length
         ;
 
-    for (uint64_t i = 0; i < code->attributes.len; i++) {
-      const cf_attribute_t *const child_attribute = &code->attributes.values[i];
+    for (uint64_t i = 0; i < pg_array_len(code->attributes); i++) {
+      const cf_attribute_t *const child_attribute = &code->attributes[i];
       size += cf_compute_attribute_size(child_attribute);
     }
     return size;
@@ -1929,8 +1891,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   pg_assert(0 && "unreachable");
 }
 
-static void cf_write_attributes(FILE *file,
-                                const cf_attribute_array_t *attributes);
+static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes);
 
 static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   pg_assert(file != NULL);
@@ -1964,7 +1925,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     file_write_be_16(file, pg_array_len(code->exceptions));
 
-    cf_write_attributes(file, &code->attributes);
+    cf_write_attributes(file, code->attributes);
 
     break;
   }
@@ -1991,12 +1952,11 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   }
 }
 
-static void cf_write_attributes(FILE *file,
-                                const cf_attribute_array_t *attributes) {
-  file_write_be_16(file, attributes->len);
+static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes) {
+  file_write_be_16(file, pg_array_len(attributes));
 
-  for (uint64_t i = 0; i < attributes->len; i++) {
-    const cf_attribute_t *const attribute = &attributes->values[i];
+  for (uint64_t i = 0; i < pg_array_len(attributes); i++) {
+    const cf_attribute_t *const attribute = &attributes[i];
     cf_write_attribute(file, attribute);
   }
 }
@@ -2006,7 +1966,7 @@ static void cf_write_method(FILE *file, const cf_method_t *method) {
   file_write_be_16(file, method->name);
   file_write_be_16(file, method->descriptor);
 
-  cf_write_attributes(file, &method->attributes);
+  cf_write_attributes(file, method->attributes);
 }
 
 static void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
@@ -2034,7 +1994,7 @@ static void cf_write(const cf_class_file_t *class_file, FILE *file) {
   cf_write_interfaces(class_file, file);
   cf_write_fields(class_file, file);
   cf_write_methods(class_file, file);
-  cf_write_attributes(file, &class_file->attributes);
+  cf_write_attributes(file, class_file->attributes);
   fflush(file);
 }
 
@@ -2048,7 +2008,7 @@ static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   class_file->methods = cf_method_array_make(1024, arena);
   pg_array_init_reserve(class_file->fields, 1024, arena);
 
-  class_file->attributes = cf_attribute_array_make(1024, arena);
+  pg_array_init_reserve(class_file->attributes, 1024, arena);
 }
 
 static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
@@ -2056,14 +2016,14 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_assert(arena != NULL);
 
   code->code = cf_code_array_make(32, arena);
-  code->attributes = cf_attribute_array_make(1024, arena);
+  pg_array_init_reserve(code->attributes, 1024, arena);
 }
 
 static void cf_method_init(cf_method_t *method, arena_t *arena) {
   pg_assert(method != NULL);
   pg_assert(arena != NULL);
 
-  method->attributes = cf_attribute_array_make(1024, arena);
+  pg_array_init_reserve(method->attributes, 1024, arena);
 }
 
 static u16 cf_add_constant_string(cf_constant_array_t *constant_pool,
@@ -3411,8 +3371,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .access_flags = CAF_ACC_STATIC | CAF_ACC_PUBLIC /* FIXME */,
         .name = method_name_i,
         .descriptor = descriptor_i,
-        .attributes = cf_attribute_array_make(8, arena),
     };
+    pg_array_init_reserve(method.attributes, 8, arena);
 
     cf_attribute_code_t code = {.max_locals = type.v.method.argument_count};
     cf_attribute_code_init(&code, arena);
@@ -3436,7 +3396,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = ATTRIBUTE_KIND_CODE,
         .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
         .v = {.code = code}};
-    cf_attribute_array_push(&method.attributes, &attribute_code);
+    pg_array_append(method.attributes, attribute_code);
     cf_method_array_push(&class_file->methods, &method);
 
     gen->code = NULL;
