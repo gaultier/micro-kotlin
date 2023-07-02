@@ -45,10 +45,14 @@ int main(int argc, char *argv[]) {
     };
     pg_array_init_reserve(parser.nodes, pg_array_len(lexer.tokens), &arena);
 
-    par_parse(&parser);
+    const u32 root_i = par_parse(&parser);
+    ty_type(&parser, &parser.nodes[root_i]);
     if (parser.state != PARSER_STATE_OK)
       return 1;
+
+#ifdef PG_WITH_LOG
     par_ast_fprint(&parser, stdout);
+#endif
 
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),

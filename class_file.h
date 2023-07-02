@@ -370,6 +370,7 @@ typedef struct {
 
 struct cf_type_t {
   enum cf_type_kind_t {
+    TYPE_NONE,
     TYPE_VOID,
     TYPE_BYTE,
     TYPE_CHAR,
@@ -2520,7 +2521,6 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 typedef enum {
   AST_KIND_NONE,
   AST_KIND_NUM,
-  AST_KIND_ADD,
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
   AST_KIND_BINARY,
@@ -2530,7 +2530,6 @@ typedef enum {
 static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = "AST_KIND_NONE",
     [AST_KIND_NUM] = "AST_KIND_NUM",
-    [AST_KIND_ADD] = "AST_KIND_ADD",
     [AST_KIND_BUILTIN_PRINTLN] = "AST_KIND_BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "AST_KIND_FUNCTION_DEFINITION",
     [AST_KIND_BINARY] = "AST_KIND_BINARY",
@@ -3069,6 +3068,44 @@ static u32 par_parse(par_parser_t *parser) {
   return root_i;
 }
 
+// --------------------------------- Typing
+
+// TODO: something smarter.
+static bool ty_type_eq(cf_type_t lhs, cf_type_t rhs) {
+  if (lhs.kind == rhs.kind)
+    return true;
+
+  return false;
+}
+
+static cf_type_t ty_type(par_parser_t *parser, par_ast_node_t *node) {
+  pg_assert(parser != NULL);
+  pg_assert(node != NULL);
+
+  switch (node->kind) {
+  case AST_KIND_NONE:
+    return (cf_type_t){.kind = TYPE_VOID};
+  case AST_KIND_BUILTIN_PRINTLN:
+    return (cf_type_t){.kind = TYPE_VOID};
+  case AST_KIND_NUM:
+    return (cf_type_t){.kind = TYPE_INT}; // TODO: something smarter.
+  case AST_KIND_BINARY: {
+    const cf_type_t lhs = ty_type(parser, &parser->nodes[node->lhs]);
+    const cf_type_t rhs = ty_type(parser, &parser->nodes[node->rhs]);
+    if (!ty_type_eq(lhs, rhs)) {
+      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      par_error(parser, token, "incompatible types");
+      return (cf_type_t){.kind = TYPE_VOID};
+    }
+
+    return lhs;
+  }
+  case AST_KIND_FUNCTION_DEFINITION:
+    return (cf_type_t){.kind = TYPE_VOID};
+  case AST_KIND_MAX:
+    pg_assert(0 && "unreachable");
+  }
+}
 // --------------------------------- Code generation
 
 typedef struct {
@@ -3110,10 +3147,6 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame != NULL);
 
     cf_asm_load_constant(gen->code->code, number_i, gen->frame);
-    break;
-  }
-  case AST_KIND_ADD: {
-    pg_assert(0 && "todo");
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
