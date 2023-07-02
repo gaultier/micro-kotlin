@@ -42,8 +42,9 @@ int main(int argc, char *argv[]) {
         .buf = buf,
         .buf_len = buf_len,
         .lexer = &lexer,
-        .nodes = par_ast_node_array_make(pg_array_len(lexer.tokens), &arena),
     };
+    pg_array_init_reserve(parser.nodes, pg_array_len(lexer.tokens), &arena);
+
     par_parse(&parser);
     if (parser.state != PARSER_STATE_OK)
       return 1;
