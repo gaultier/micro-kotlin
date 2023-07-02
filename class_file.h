@@ -398,40 +398,11 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-typedef struct {
-  u64 len;
-  u64 cap;
-  char *values;
-  arena_t *arena;
-} cf_code_array_t;
-
-static cf_code_array_t cf_code_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_code_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(u8)),
-      .arena = arena,
-  };
+static void cf_code_array_push_u8(u8 *array, u8 x) {
+  pg_array_append(array, x);
 }
 
-static void cf_code_array_push_u8(cf_code_array_t *array, u8 x) {
-  pg_assert(array != NULL);
-  pg_assert(array->len < UINT32_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    char *const new_array = arena_alloc(array->arena, new_cap, sizeof(u8));
-    array->values = memcpy(new_array, array->values, array->len * sizeof(u8));
-    array->cap = new_cap;
-  }
-
-  array->values[array->len++] = x;
-}
-static void cf_code_array_push_u16(cf_code_array_t *array, u16 x) {
+static void cf_code_array_push_u16(u8 *array, u16 x) {
   cf_code_array_push_u8(array, (u8)(x & 0xff00));
   cf_code_array_push_u8(array, (u8)(x & 0x00ff));
 }
@@ -629,7 +600,7 @@ static void cf_fill_type_descriptor_string(const cf_type_t *type,
   }
 }
 
-static void cf_asm_iadd(cf_code_array_t *code, cf_frame_t *frame) {
+static void cf_asm_iadd(u8 *code, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
@@ -639,7 +610,7 @@ static void cf_asm_iadd(cf_code_array_t *code, cf_frame_t *frame) {
   frame->current_stack -= 1;
 }
 
-static void cf_asm_imul(cf_code_array_t *code, cf_frame_t *frame) {
+static void cf_asm_imul(u8 *code, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
@@ -649,8 +620,7 @@ static void cf_asm_imul(cf_code_array_t *code, cf_frame_t *frame) {
   frame->current_stack -= 1;
 }
 
-static void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
-                                 cf_frame_t *frame) {
+static void cf_asm_load_constant(u8 *code, u16 constant_i, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -663,8 +633,7 @@ static void cf_asm_load_constant(cf_code_array_t *code, u16 constant_i,
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
-static void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
-                                  cf_frame_t *frame,
+static void cf_asm_invoke_virtual(u8 *code, u16 method_ref_i, cf_frame_t *frame,
                                   const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -678,8 +647,7 @@ static void cf_asm_invoke_virtual(cf_code_array_t *code, u16 method_ref_i,
   frame->current_stack -= method_type->argument_count;
 }
 
-static void cf_asm_get_static(cf_code_array_t *code, u16 field_i,
-                              cf_frame_t *frame) {
+static void cf_asm_get_static(u8 *code, u16 field_i, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(frame != NULL);
@@ -692,14 +660,13 @@ static void cf_asm_get_static(cf_code_array_t *code, u16 field_i,
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
-static void cf_asm_return(cf_code_array_t *code) {
+static void cf_asm_return(u8 *code) {
   cf_code_array_push_u8(code, BYTECODE_RETURN);
 
   // TODO: pop the current frame.
 }
 
-static void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
-                                  cf_frame_t *frame,
+static void cf_asm_invoke_special(u8 *code, u16 method_ref_i, cf_frame_t *frame,
                                   const cf_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -713,9 +680,10 @@ static void cf_asm_invoke_special(cf_code_array_t *code, u16 method_ref_i,
   frame->current_stack -= method_type->argument_count;
 }
 
-static void cf_asm_call_superclass_constructor(
-    cf_code_array_t *code, u16 super_class_constructor_i, cf_frame_t *frame,
-    const cf_type_t *constructor_type) {
+static void
+cf_asm_call_superclass_constructor(u8 *code, u16 super_class_constructor_i,
+                                   cf_frame_t *frame,
+                                   const cf_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
   pg_assert(frame != NULL);
@@ -762,7 +730,7 @@ struct cf_attribute_t {
     struct cf_attribute_code_t {
       u16 max_stack;
       u16 max_locals;
-      cf_code_array_t code;
+      u8 *code;
       cf_exception_t *exceptions;
       cf_attribute_t *attributes;
     } code; // ATTRIBUTE_KIND_CODE
@@ -858,7 +826,7 @@ static u32 buf_read_be_u32(char *buf, u64 size, char **current) {
   return x;
 }
 
-static void buf_read_n_u8(char *buf, u64 size, char *dst, u64 dst_len,
+static void buf_read_n_u8(char *buf, u64 size, u8 *dst, u64 dst_len,
                           char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
@@ -975,9 +943,9 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
   pg_assert(*current + code_len <= buf + buf_len);
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
-  code.code = cf_code_array_make(code_len, arena);
-  buf_read_n_u8(buf, buf_len, code.code.values, code_len, current);
-  code.code.len = code_len;
+  pg_array_init_reserve(code.code, code_len, arena);
+  buf_read_n_u8(buf, buf_len, code.code, code_len, current);
+  PG_ARRAY_HEADER(code.code)->len = code_len;
 
   cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
                                         &code.exceptions, arena);
@@ -1796,7 +1764,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     const cf_attribute_code_t *const code = &attribute->v.code;
 
     u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
-               sizeof(u32) + code->code.len +
+               sizeof(u32) + pg_array_len(code->code) +
                sizeof(u16) /* exception count */ +
                +pg_array_len(code->exceptions) * sizeof(cf_exception_t) +
                sizeof(u16) // attributes length
@@ -1848,8 +1816,8 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     file_write_be_16(file, code->max_locals);
 
-    file_write_be_32(file, code->code.len);
-    fwrite(code->code.values, code->code.len, sizeof(u8), file);
+    file_write_be_32(file, pg_array_len(code->code));
+    fwrite(code->code, pg_array_len(code->code), sizeof(u8), file);
 
     file_write_be_16(file, pg_array_len(code->exceptions));
 
@@ -1943,7 +1911,7 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
-  code->code = cf_code_array_make(32, arena);
+  pg_array_init_reserve(code->code, 64, arena);
   pg_array_init_reserve(code->attributes, 1024, arena);
 }
 
@@ -3137,10 +3105,10 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         cf_constant_array_push(&class_file->constant_pool, &constant);
 
     pg_assert(gen->code != NULL);
-    pg_assert(gen->code->code.values != NULL);
+    pg_assert(gen->code->code != NULL);
     pg_assert(gen->frame != NULL);
 
-    cf_asm_load_constant(&gen->code->code, number_i, gen->frame);
+    cf_asm_load_constant(gen->code->code, number_i, gen->frame);
     break;
   }
   case AST_KIND_ADD: {
@@ -3152,14 +3120,14 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->println_type != NULL);
     pg_assert(gen->out_field_ref_i > 0);
 
-    cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
+    cf_asm_get_static(gen->code->code, gen->out_field_ref_i, gen->frame);
 
     if (node->lhs != 0) {
       cg_generate_node(gen, parser, class_file, &parser->nodes[node->lhs],
                        arena);
     }
 
-    cf_asm_invoke_virtual(&gen->code->code, gen->println_method_ref_i,
+    cf_asm_invoke_virtual(gen->code->code, gen->println_method_ref_i,
                           gen->frame, gen->println_type);
     break;
   }
@@ -3227,7 +3195,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs < pg_array_len(parser->nodes));
     cg_generate_node(gen, parser, class_file, &parser->nodes[node->rhs], arena);
 
-    cf_asm_return(&code.code);
+    cf_asm_return(code.code);
 
     gen->code->max_stack = gen->frame->max_stack;
     cf_attribute_t attribute_code = {
@@ -3258,10 +3226,10 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_NONE:
       break; // Nothing to do.
     case TOKEN_KIND_PLUS:
-      cf_asm_iadd(&gen->code->code, gen->frame);
+      cf_asm_iadd(gen->code->code, gen->frame);
       break;
     case TOKEN_KIND_STAR:
-      cf_asm_imul(&gen->code->code, gen->frame);
+      cf_asm_imul(gen->code->code, gen->frame);
       break;
     default:
       pg_assert(0 && "todo");
