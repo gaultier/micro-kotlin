@@ -97,7 +97,7 @@ typedef struct pg_array_header_t {
 
 #define pg_array_t(Type) Type *
 #define PG_ARRAY_HEADER(x) (((pg_array_header_t *)((void *)x)) - 1)
-#define pg_array_len(x) (PG_ARRAY_HEADER(x)->len)
+#define pg_array_len(x) (((x) == NULL) ? 0 : (PG_ARRAY_HEADER(x)->len))
 #define pg_array_cap(x) (PG_ARRAY_HEADER(x)->cap)
 
 #define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
