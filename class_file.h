@@ -2046,60 +2046,10 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   return result;
 }
 
-typedef struct {
-  u64 len;
-  u64 cap;
-  cf_class_file_t *values;
-  arena_t *arena;
-} cf_class_file_array_t;
-
-static cf_class_file_array_t cf_class_file_array_make(u64 cap, arena_t *arena) {
-  pg_assert(arena != NULL);
-
-  return (cf_class_file_array_t){
-      .len = 0,
-      .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_class_file_t)),
-      .arena = arena,
-  };
-}
-
-static u16 cf_class_file_array_push(cf_class_file_array_t *array,
-                                    const cf_class_file_t *x) {
-  pg_assert(array != NULL);
-  pg_assert(x != NULL);
-  pg_assert(array->len < UINT16_MAX);
-  pg_assert(array->values != NULL);
-  pg_assert(((u64)array->values) % 16 == 0);
-  pg_assert(array->cap != 0);
-
-  if (array->len == array->cap) {
-    const u64 new_cap = array->cap * 2;
-    cf_class_file_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_class_file_t));
-    pg_assert(new_array != NULL);
-    pg_assert(((u64)new_array) % 16 == 0);
-
-    array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_class_file_t));
-    pg_assert(array->values != NULL);
-    pg_assert(((u64)array->values) % 16 == 0);
-    array->cap = new_cap;
-  }
-
-  array->values[array->len] = *x;
-  const u64 index = array->len + 1;
-  pg_assert(index > 0);
-  pg_assert(index <= array->len + 1);
-  array->len += 1;
-  return index;
-}
-
 // TODO: one thread that walks the directory recursively and one/many worker
 // threads to parse class files?
 static void cf_read_class_files(char *path, u64 path_len,
-                                cf_class_file_array_t *class_files,
-                                arena_t *arena) {
+                                cf_class_file_t **class_files, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path_len > 0);
   pg_assert(class_files != NULL);
@@ -2124,7 +2074,7 @@ static void cf_read_class_files(char *path, u64 path_len,
         .file_path = string_make_from_c(path, arena),
     };
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
-    cf_class_file_array_push(class_files, &class_file);
+    pg_array_append(*class_files, class_file);
     return;
   }
   if (!S_ISDIR(st.st_mode))
@@ -2171,17 +2121,15 @@ static void cf_read_class_files(char *path, u64 path_len,
 }
 
 static bool
-cf_class_files_find_method_exactly(const cf_class_file_array_t *class_files,
+cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
                                    string_t class_name, string_t method_name,
                                    string_t descriptor) {
   pg_assert(class_files != NULL);
   pg_assert(descriptor.len > 0);
   pg_assert(descriptor.value != NULL);
-  pg_assert(class_files->values != NULL);
-  pg_assert(class_files->len <= class_files->cap);
 
-  for (u64 i = 0; i < class_files->len; i++) {
-    const cf_class_file_t *const class_file = &class_files->values[i];
+  for (u64 i = 0; i < pg_array_len(class_files); i++) {
+    const cf_class_file_t *const class_file = &class_files[i];
     pg_assert(class_file->file_path.cap >= class_file->file_path.len);
     pg_assert(class_file->file_path.len > 0);
     pg_assert(class_file->file_path.value != NULL);
