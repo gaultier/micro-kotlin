@@ -3263,7 +3263,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
 typedef struct {
   cf_attribute_code_t *code;
   cf_frame_t *frame;
-  u32 println_int_type_i;
   u16 out_field_ref_i;
   const cf_class_file_t *class_files;
 } cg_generator_t;
@@ -3514,7 +3513,7 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  // FIXME: println(Int)
+  // FIXME: System.out for println.
   {
     const u16 out_name_i =
         cf_add_constant_cstring(&class_file->constant_pool, "out");
