@@ -2112,6 +2112,8 @@ typedef enum {
   TOKEN_KIND_RIGHT_BRACE,
   TOKEN_KIND_BUILTIN_PRINTLN,
   TOKEN_KIND_KEYWORD_FUN,
+  TOKEN_KIND_KEYWORD_FALSE,
+  TOKEN_KIND_KEYWORD_TRUE,
   TOKEN_KIND_IDENTIFIER,
   TOKEN_KIND_COMMA,
   TOKEN_KIND_DOT,
@@ -2287,6 +2289,18 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   } else if (mem_eq_c(identifier, identifier_len, "println")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_BUILTIN_PRINTLN,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token);
+  } else if (mem_eq_c(identifier, identifier_len, "true")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_TRUE,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token);
+  } else if (mem_eq_c(identifier, identifier_len, "false")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_FALSE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token);
@@ -2512,6 +2526,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 typedef enum {
   AST_KIND_NONE,
   AST_KIND_NUM,
+  AST_KIND_BOOL,
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
   AST_KIND_BINARY,
@@ -2519,11 +2534,12 @@ typedef enum {
 } par_ast_node_kind_t;
 
 static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
-    [AST_KIND_NONE] = "AST_KIND_NONE",
-    [AST_KIND_NUM] = "AST_KIND_NUM",
-    [AST_KIND_BUILTIN_PRINTLN] = "AST_KIND_BUILTIN_PRINTLN",
-    [AST_KIND_FUNCTION_DEFINITION] = "AST_KIND_FUNCTION_DEFINITION",
-    [AST_KIND_BINARY] = "AST_KIND_BINARY",
+    [AST_KIND_NONE] = "NONE",
+    [AST_KIND_NUM] = "NUM",
+    [AST_KIND_BOOL] = "BOOL",
+    [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
+    [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
+    [AST_KIND_BINARY] = "BINARY",
 };
 
 typedef struct {
@@ -2772,6 +2788,13 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   if (par_match_token(parser, TOKEN_KIND_NUMBER)) {
     const par_ast_node_t node = {
         .kind = AST_KIND_NUM,
+        .main_token = parser->tokens_i - 1,
+    };
+    pg_array_append(parser->nodes, node);
+    return pg_array_last_index(parser->nodes);
+  } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE)) {
+    const par_ast_node_t node = {
+        .kind = AST_KIND_BOOL,
         .main_token = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node);
