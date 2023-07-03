@@ -65,7 +65,16 @@ int main(int argc, char *argv[]) {
     };
     cf_init(&class_file, &arena);
 
-    cg_generate(&parser, &class_file, &arena);
+    cf_class_file_t *class_files = NULL;
+    pg_array_init_reserve(class_files, 32768, &arena);
+    {
+      LOG("'arena before reading class files'=%lu", arena.current_offset);
+      char *const class_path = "/home/pg/scratch/java-module"; // FIXME
+      cf_read_class_files(class_path, strlen(class_path), &class_files, &arena);
+      LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
+          arena.current_offset);
+    }
+    cg_generate(&parser, &class_file, class_files, &arena);
 
     FILE *file = fopen(class_file.file_path.value, "w");
     pg_assert(file != NULL);

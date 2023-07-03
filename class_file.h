@@ -3102,7 +3102,7 @@ static bool ty_type_eq(cf_type_t lhs, cf_type_t rhs) {
 static string_t ty_type_to_human_string(cf_type_t type, arena_t *arena) {
   switch (type.kind) {
   case TYPE_NONE:
-    return string_make_from_c("none", arena);
+    return string_make_from_c("Any", arena);
   case TYPE_INT:
     return string_make_from_c("Int", arena);
   case TYPE_VOID:
@@ -3180,6 +3180,7 @@ typedef struct {
   u16 println_method_ref_i;
   cf_type_method_t *println_type;
   u16 out_field_ref_i;
+  const cf_class_file_t *class_files;
 } cg_generator_t;
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
@@ -3412,7 +3413,7 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
     string_t println_type_s = string_reserve(30, arena);
     cf_fill_type_descriptor_string(&println_type, &println_type_s);
 
-    const u16 descriptor_i =
+    const u16 println_int_descriptor_i =
         cf_add_constant_string(&class_file->constant_pool, println_type_s);
 
     const u16 name_i =
@@ -3421,7 +3422,7 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
     const cf_constant_t name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
-                                .type_descriptor = descriptor_i}}};
+                                .type_descriptor = println_int_descriptor_i}}};
     const u16 name_and_type_i =
         cf_constant_array_push(&class_file->constant_pool, &name_and_type);
 
@@ -3502,7 +3503,7 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
 }
 
 static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
-                        arena_t *arena) {
+                        const cf_class_file_t *class_files, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3512,7 +3513,7 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  cg_generator_t gen = {0};
+  cg_generator_t gen = {.class_files = class_files};
   cg_generate_synthetic_class(&gen, parser, class_file, arena);
 
   if (pg_array_len(parser->nodes) == 1)
