@@ -2451,7 +2451,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
 
       if (!lex_is_at_end(buf, buf_len, current))
         pg_array_append(lexer->line_table,
-                        lex_get_current_offset(buf, buf_len, current) + 1);
+                        lex_get_current_offset(buf, buf_len, current) );
 
       break;
     }
@@ -2470,6 +2470,9 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     }
     }
   }
+  // Ensure the line table has at least 2 items: line_table=[0]=0,
+  // line_table[last]=buf_len, for easier logic later to find token positions.
+  pg_array_append(lexer->line_table, buf_len);
 }
 
 static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
@@ -2565,14 +2568,17 @@ static void par_find_token_position(const par_parser_t *parser,
   pg_assert(line != NULL);
   pg_assert(column != NULL);
   pg_assert(token_string != NULL);
+  pg_assert(pg_array_len(parser->lexer->line_table) > 1);
 
   token_string->value = &parser->buf[token.source_offset];
   token_string->len =
       lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
 
-  for (u32 i = 0; i < pg_array_len(parser->lexer->line_table); i++) {
+  for (u32 i = 0; i < pg_array_len(parser->lexer->line_table) - 1; i++) {
     const u32 line_start_offset = parser->lexer->line_table[i];
-    if (token.source_offset > line_start_offset) {
+    const u32 line_end_offset_excl = parser->lexer->line_table[i + 1];
+    if (line_start_offset <= token.source_offset &&
+        token.source_offset <= line_end_offset_excl) {
       *line = i + 1;
       *column = 1 + token.source_offset - line_start_offset;
 
