@@ -2866,7 +2866,6 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
-      .main_token = parser->tokens_i,
   };
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);

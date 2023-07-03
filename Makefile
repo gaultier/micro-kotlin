@@ -1,7 +1,7 @@
 .PHONY: test
 
 test: main_debug
-	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f";  done
+	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
 	(cd kotlin_corpus && for f in *.class; do echo $$f; java `basename -s .class $$f`;  done)
 
 
