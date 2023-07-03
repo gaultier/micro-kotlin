@@ -2127,14 +2127,9 @@ typedef struct {
 } lex_token_t;
 
 typedef struct {
-  u32 line;
-  u32 start_offset;
-} lex_line_table_entry_t;
-
-typedef struct {
   string_t file_path;
   lex_token_t *tokens;
-  lex_line_table_entry_t *line_table;
+  u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
 } lex_lexer_t;
 
 static u32 lex_get_current_offset(const char *buf, u32 buf_len,
@@ -2351,11 +2346,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   pg_assert(*current != NULL);
 
   // Push first line.
-  const lex_line_table_entry_t line = {
-      .line = 1,
-      .start_offset = 0,
-  };
-  pg_array_append(lexer->line_table, line);
+  pg_array_append(lexer->line_table, 0);
 
   // Push first dummy token.
   const lex_token_t dummy_token = {0};
@@ -2457,14 +2448,10 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     }
     case '\n': {
       lex_advance(buf, buf_len, current);
-      const lex_line_table_entry_t line = {
-          .line =
-              lexer->line_table[pg_array_len(lexer->line_table) - 1].line + 1,
-          .start_offset = lex_get_current_offset(buf, buf_len, current)+1,
-      };
 
       if (!lex_is_at_end(buf, buf_len, current))
-        pg_array_append(lexer->line_table, line);
+        pg_array_append(lexer->line_table,
+                        lex_get_current_offset(buf, buf_len, current) + 1);
 
       break;
     }
@@ -2584,10 +2571,10 @@ static void par_find_token_position(const par_parser_t *parser,
       lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
 
   for (u32 i = 0; i < pg_array_len(parser->lexer->line_table); i++) {
-    const lex_line_table_entry_t entry = parser->lexer->line_table[i];
-    if (token.source_offset > entry.start_offset) {
-      *line = entry.line;
-      *column = 1 + token.source_offset - entry.start_offset;
+    const u32 line_start_offset = parser->lexer->line_table[i];
+    if (token.source_offset > line_start_offset) {
+      *line = i + 1;
+      *column = 1 + token.source_offset - line_start_offset;
 
       return;
     }
