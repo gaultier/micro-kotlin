@@ -3187,6 +3187,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
     const par_type_t *const lhs_type = &parser->types[lhs->type_i];
+
     const par_type_t void_type = {.kind = TYPE_VOID};
     const par_type_t println_type = {
         .kind = TYPE_METHOD,
@@ -3196,6 +3197,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
                   .argument_types_i = ty_add_type(&parser->types, lhs_type),
               }}};
     pg_array_append(parser->types, println_type);
+    node->type_i = pg_array_last_index(parser->types);
 
     string_t descriptor = string_reserve(64, arena);
     cf_fill_type_descriptor_string(
@@ -3203,11 +3205,21 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     pg_array_last(parser->types)->v.method.descriptor = descriptor;
 
-    pg_assert(cf_class_files_find_method_exactly(
-        class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
-        string_make_from_c_no_alloc("println"), descriptor));
+    if (cf_class_files_find_method_exactly(
+            class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
+            string_make_from_c_no_alloc("println"), descriptor)) {
+      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "incompatible types: ");
+      string_append_string(
+          &error, ty_type_to_human_string(parser->types, node->type_i, arena));
+      string_append_cstring(&error, " vs ");
+      string_append_string(
+          &error, ty_type_to_human_string(parser->types, lhs->type_i, arena));
+      par_error(parser, token, error.value);
+    }
 
-    return node->type_i = pg_array_last_index(parser->types);
+    return node->type_i;
   }
   case AST_KIND_NUM:
     pg_array_append(parser->types,
