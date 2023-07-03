@@ -3198,14 +3198,25 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   switch (node->kind) {
   case AST_KIND_NONE:
     return;
-  case AST_KIND_BOOL:
-    {
-      break;
-    }
+  case AST_KIND_BOOL: {
+    pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
+    const lex_token_t token = parser->lexer->tokens[node->main_token];
+    const bool is_true = parser->buf[token.source_offset] == 't';
+    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
+                                    .v = {.number = is_true}};
+    const u16 number_i =
+        cf_constant_array_push(&class_file->constant_pool, &constant);
+
+    pg_assert(gen->code != NULL);
+    pg_assert(gen->code->code != NULL);
+    pg_assert(gen->frame != NULL);
+
+    cf_asm_load_constant(gen->code->code, number_i, gen->frame);
+    break;
+  }
   case AST_KIND_NUM: {
     pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
-
-    lex_token_t token = parser->lexer->tokens[node->main_token];
+    const lex_token_t token = parser->lexer->tokens[node->main_token];
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = par_number(parser, token)}};
