@@ -2848,6 +2848,8 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     };
     pg_array_append(parser->nodes, node);
     return pg_array_last_index(parser->nodes);
+  } else if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN)) {
+    return par_parse_builtin_println(parser);
   }
 
   par_advance_token(parser);
@@ -2861,10 +2863,7 @@ static u32 par_parse_statement(par_parser_t *parser) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN))
-    return par_parse_builtin_println(parser);
-  else
-    return par_parse_expression(parser);
+  return par_parse_expression(parser);
 }
 
 static u32 par_parse_postfix_unary_expression(par_parser_t *parser) {
@@ -2900,28 +2899,17 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   const u32 expression_node = par_parse_prefix_unary_expression(parser);
-  if (par_peek_token(parser).kind != TOKEN_KIND_STAR)
+  if (!par_match_token(parser, TOKEN_KIND_STAR))
     return expression_node;
 
-  const par_ast_node_t node = {.kind = AST_KIND_BINARY, .lhs = expression_node};
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = expression_node,
+      .main_token = parser->tokens_i - 1,
+      .rhs = par_parse_multiplicative_expression(parser),
+  };
   pg_array_append(parser->nodes, node);
-  u32 last_node_i = pg_array_last_index(parser->nodes);
-
-  const u32 root_i = last_node_i;
-
-  while (par_match_token(parser, TOKEN_KIND_STAR)) // TODO: div.
-  {
-    const u32 main_token = parser->tokens_i - 1;
-    const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
-        .main_token = main_token,
-        .lhs = par_parse_prefix_unary_expression(parser),
-    };
-    pg_array_append(parser->nodes, node);
-    last_node_i = parser->nodes[last_node_i].rhs =
-        pg_array_last_index(parser->nodes);
-  }
-  return root_i;
+  return pg_array_last_index(parser->nodes);
 }
 
 static u32 par_parse_additive_expression(par_parser_t *parser) {
@@ -2932,31 +2920,17 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   const u32 expression_node = par_parse_multiplicative_expression(parser);
-  if (par_peek_token(parser).kind != TOKEN_KIND_PLUS)
+  if (!par_match_token(parser, TOKEN_KIND_PLUS))
     return expression_node;
 
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
+      .main_token = parser->tokens_i - 1,
+      .rhs = par_parse_additive_expression(parser),
   };
   pg_array_append(parser->nodes, node);
-  u32 last_node_i = pg_array_last_index(parser->nodes);
-
-  const u32 root_i = last_node_i;
-
-  while (par_match_token(parser, TOKEN_KIND_PLUS)) // TODO: minus.
-  {
-    const u32 main_token = parser->tokens_i - 1;
-    const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
-        .main_token = main_token,
-        .lhs = par_parse_multiplicative_expression(parser),
-    };
-    pg_array_append(parser->nodes, node);
-    last_node_i = parser->nodes[last_node_i].rhs =
-        pg_array_last_index(parser->nodes);
-  }
-  return root_i;
+  return pg_array_last_index(parser->nodes);
 }
 
 static u32 par_parse_expression(par_parser_t *parser) {
@@ -3142,7 +3116,8 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
-// TODO: something smarter.
+// TODO: Something smarter.
+// TODO: Find a better name.
 static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
                        u32 *result_i) {
   pg_assert(types != NULL);
@@ -3172,7 +3147,7 @@ static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
   return false;
 }
 
-static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
+static u32 ty_resolve_types(par_parser_t *parser, u32 node_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
@@ -3186,7 +3161,7 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL});
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BUILTIN_PRINTLN:
-    ty_type(parser, node->lhs, arena);
+    ty_resolve_types(parser, node->lhs, arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);
@@ -3195,8 +3170,8 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
                     (par_type_t){.kind = TYPE_INT}); // TODO: something smarter.
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BINARY: {
-    const u32 lhs_i = ty_type(parser, node->lhs, arena);
-    const u32 rhs_i = ty_type(parser, node->rhs, arena);
+    const u32 lhs_i = ty_resolve_types(parser, node->lhs, arena);
+    const u32 rhs_i = ty_resolve_types(parser, node->rhs, arena);
 
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
@@ -3214,9 +3189,9 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
     return node->type_i;
   }
   case AST_KIND_FUNCTION_DEFINITION:
-    ty_type(parser, node->lhs, arena);
+    ty_resolve_types(parser, node->lhs, arena);
     // Inspect body (rhs).
-    ty_type(parser, node->rhs, arena);
+    ty_resolve_types(parser, node->rhs, arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);

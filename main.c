@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const u32 root_i = par_parse(&parser, &arena);
-    ty_type(&parser, root_i, &arena);
+    ty_resolve_types(&parser, root_i, &arena);
 
 #ifdef PG_WITH_LOG
     const u64 arena_offset_before = arena.current_offset;
