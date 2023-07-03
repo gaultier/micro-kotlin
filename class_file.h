@@ -2953,28 +2953,19 @@ static u32 par_parse_block(par_parser_t *parser) {
   // Empty block.
   if (par_match_token(parser, TOKEN_KIND_RIGHT_BRACE))
     return 0;
+  if (par_is_at_end(parser)) {
+    par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
+                     "expected right curly brace after the arguments");
+    return 0;
+  }
 
   const par_ast_node_t root = {
       .kind = AST_KIND_BINARY,
+      .lhs = par_parse_statement(parser),
+      .rhs = par_parse_block(parser),
   };
   pg_array_append(parser->nodes, root);
-  u32 last_node_i = pg_array_last_index(parser->nodes);
-  const u32 root_i = last_node_i;
-
-  while (!(par_is_at_end(parser) ||
-           par_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)) {
-    const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
-        .lhs = par_parse_statement(parser),
-    };
-    pg_array_append(parser->nodes, node);
-    last_node_i = parser->nodes[last_node_i].rhs =
-        pg_array_last_index(parser->nodes);
-  }
-
-  par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
-                   "expected right curly brace after the arguments");
-  return root_i;
+  return pg_array_last_index(parser->nodes);
 }
 
 static u32 par_parse_function_arguments(par_parser_t *parser) {
@@ -3077,6 +3068,22 @@ static u32 par_parse_declaration(par_parser_t *parser) {
   return new_node_i;
 }
 
+static u32 par_parse_declarations(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = par_parse_declaration(parser),
+      .rhs = par_is_at_end(parser)? 0 : par_parse_declarations(parser),
+  };
+  pg_array_append(parser->nodes, node);
+  return pg_array_last_index(parser->nodes);
+}
+
 static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3092,22 +3099,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t dummy = {0};
   pg_array_append(parser->nodes, dummy);
 
-  const par_ast_node_t root = {
-      .kind = AST_KIND_BINARY,
-  };
-  pg_array_append(parser->nodes, root);
-  u32 last_node_i = pg_array_last_index(parser->nodes);
-  const u32 root_i = last_node_i;
-
-  while (!par_is_at_end(parser)) {
-    const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
-        .lhs = par_parse_declaration(parser),
-    };
-    pg_array_append(parser->nodes, node);
-    last_node_i = parser->nodes[last_node_i].rhs =
-        pg_array_last_index(parser->nodes);
-  }
+  const u32 root_i = par_parse_declarations(parser);
 
   pg_array_init_reserve(parser->types, pg_array_len(parser->nodes) + 32, arena);
   pg_array_append(parser->types, (par_type_t){0}); // Default value.
