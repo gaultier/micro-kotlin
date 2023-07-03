@@ -165,6 +165,12 @@ static string_t string_make_from_c(char *s, arena_t *arena) {
   return res;
 }
 
+static string_t string_make_from_c_no_alloc(char *s) {
+  pg_assert(s != NULL);
+
+  return (string_t){.value = s, .len = strlen(s)};
+}
+
 static string_t string_make(string_t src, arena_t *arena) {
   pg_assert(src.value != NULL);
   string_t result = string_reserve(src.len, arena);
@@ -3023,7 +3029,8 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
       .main_token = start_token,
   };
   pg_array_append(parser->nodes, node);
-  const u32 fn_i = parser->current_function_i = pg_array_last_index(parser->nodes);
+  const u32 fn_i = parser->current_function_i =
+      pg_array_last_index(parser->nodes);
 
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
@@ -3033,7 +3040,7 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
   par_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
                    "expected left curly brace before the arguments");
   parser->nodes[parser->current_function_i].rhs = par_parse_block(parser);
-  parser->current_function_i=0;
+  parser->current_function_i = 0;
 
   return fn_i;
 }
@@ -3149,8 +3156,11 @@ static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
   return false;
 }
 
-static u32 ty_resolve_types(par_parser_t *parser, u32 node_i, arena_t *arena) {
+static u32 ty_resolve_types(par_parser_t *parser,
+                            const cf_class_file_t *class_files, u32 node_i,
+                            arena_t *arena) {
   pg_assert(parser != NULL);
+  pg_assert(class_files != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   par_ast_node_t *const node = &parser->nodes[node_i];
@@ -3162,18 +3172,24 @@ static u32 ty_resolve_types(par_parser_t *parser, u32 node_i, arena_t *arena) {
   case AST_KIND_BOOL:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL});
     return node->type_i = pg_array_last_index(parser->types);
-  case AST_KIND_BUILTIN_PRINTLN:
-    ty_resolve_types(parser, node->lhs, arena);
+  case AST_KIND_BUILTIN_PRINTLN: {
+    ty_resolve_types(parser, class_files, node->lhs, arena);
+
+    pg_assert(cf_class_files_find_method_exactly(
+        class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
+        string_make_from_c_no_alloc("println"),
+        string_make_from_c_no_alloc("(I)V")));
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);
+  }
   case AST_KIND_NUM:
     pg_array_append(parser->types,
                     (par_type_t){.kind = TYPE_INT}); // TODO: something smarter.
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BINARY: {
-    const u32 lhs_i = ty_resolve_types(parser, node->lhs, arena);
-    const u32 rhs_i = ty_resolve_types(parser, node->rhs, arena);
+    const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
+    const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
 
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
@@ -3190,9 +3206,9 @@ static u32 ty_resolve_types(par_parser_t *parser, u32 node_i, arena_t *arena) {
     return node->type_i;
   }
   case AST_KIND_FUNCTION_DEFINITION:
-    ty_resolve_types(parser, node->lhs, arena);
+    ty_resolve_types(parser, class_files, node->lhs, arena);
     // Inspect body (rhs).
-    ty_resolve_types(parser, node->rhs, arena);
+    ty_resolve_types(parser, class_files, node->rhs, arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);
@@ -3272,6 +3288,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
 
     cg_generate_node(gen, parser, class_file, node->lhs, arena);
+
+    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
+    const par_type_t *const lhs_type = &parser->types[lhs->type_i];
 
     const par_type_t type = parser->types[gen->println_int_type_i];
     pg_assert(type.kind == TYPE_METHOD);
