@@ -531,9 +531,9 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   pg_assert(type_i < pg_array_len(types));
   pg_assert(type_descriptor != NULL);
 
-  const par_type_t type = types[type_i];
+  const par_type_t *const type = &types[type_i];
 
-  switch (type.kind) {
+  switch (type->kind) {
   case TYPE_VOID: {
     string_append_char(type_descriptor, 'V');
     break;
@@ -563,7 +563,7 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
     break;
   }
   case TYPE_INSTANCE_REFERENCE: {
-    const string_t class_name = type.v.class_name;
+    const string_t class_name = type->v.class_name;
 
     string_append_char(type_descriptor, 'L');
     string_append_string(type_descriptor, class_name);
@@ -582,23 +582,24 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   case TYPE_ARRAY_REFERENCE: {
     string_append_char(type_descriptor, '[');
 
-    cf_fill_type_descriptor_string(types, type.v.array_type_i, type_descriptor);
+    cf_fill_type_descriptor_string(types, type->v.array_type_i,
+                                   type_descriptor);
 
     break;
   }
   case TYPE_CONSTRUCTOR:
   case TYPE_METHOD: {
-    const par_type_method_t method_type = type.v.method;
+    const par_type_method_t *const method_type = &type->v.method;
     string_append_char(type_descriptor, '(');
 
-    for (u64 i = 0; i < method_type.argument_count; i++) {
-      cf_fill_type_descriptor_string(types, method_type.argument_types_i,
+    for (u64 i = 0; i < method_type->argument_count; i++) {
+      cf_fill_type_descriptor_string(types, method_type->argument_types_i,
                                      type_descriptor);
     }
 
     string_append_char(type_descriptor, ')');
 
-    cf_fill_type_descriptor_string(types, method_type.return_type_i,
+    cf_fill_type_descriptor_string(types, method_type->return_type_i,
                                    type_descriptor);
 
     break;
@@ -2071,6 +2072,8 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
   pg_assert(descriptor.len > 0);
   pg_assert(descriptor.value != NULL);
 
+  // TODO: use the file path <-> class name mapping to search less?
+
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
     pg_assert(class_file->file_path.cap >= class_file->file_path.len);
@@ -2100,8 +2103,9 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
       const string_t this_method_descriptor = cf_constant_array_get_as_string(
           &class_file->constant_pool, this_method->descriptor);
 
-      if (!string_eq(this_method_descriptor, descriptor))
+      if (!string_eq(this_method_descriptor, descriptor)) {
         continue;
+      }
 
       return true; // TODO: return `method`?
     }
@@ -3205,7 +3209,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     pg_array_last(parser->types)->v.method.descriptor = descriptor;
 
-    if (cf_class_files_find_method_exactly(
+    if (!cf_class_files_find_method_exactly(
             class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
             string_make_from_c_no_alloc("println"), descriptor)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
