@@ -44,6 +44,11 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const u32 root_i = par_parse(&parser, &arena);
+    {
+      const u64 arena_offset_before = arena.current_offset;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
+      arena.current_offset = arena_offset_before;
+    }
 
     cf_class_file_t *class_files = NULL;
     pg_array_init_reserve(class_files, 32768, &arena);
@@ -54,13 +59,14 @@ int main(int argc, char *argv[]) {
       LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
           arena.current_offset);
     }
-    ty_resolve_types(&parser,class_files, root_i, &arena);
+    ty_resolve_types(&parser, class_files, root_i, &arena);
 
-#ifdef PG_WITH_LOG
-    const u64 arena_offset_before = arena.current_offset;
-    par_ast_fprint_node(&parser, root_i, stdout, 0, &arena);
-    arena.current_offset = arena_offset_before;
-#endif
+    {
+      const u64 arena_offset_before = arena.current_offset;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
+      arena.current_offset = arena_offset_before;
+    }
+
     if (parser.state != PARSER_STATE_OK)
       return 1;
 

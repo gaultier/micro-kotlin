@@ -2566,6 +2566,7 @@ typedef enum {
   AST_KIND_FUNCTION_DEFINITION,
   AST_KIND_BINARY,
   AST_KIND_VAR_DEFINITION,
+  AST_KIND_VAR_REFERENCE,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -2576,6 +2577,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
+    [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
     [AST_KIND_BINARY] = "BINARY",
 };
 
@@ -2700,15 +2702,16 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
   string_t token_string = {0};
   par_find_token_position(parser, token, &line, &column, &token_string);
 
+#ifdef PG_WITH_LOG
   ut_fwrite_indent(file, indent);
+#endif
 
-  string_t human_type =
+  const string_t human_type =
       ty_type_to_human_string(parser->types, node->type_i, arena);
-  fprintf(file, "[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)\n",
-          node - parser->nodes, kind_string, token_string.len,
-          token_string.value, human_type.len, human_type.value,
-          parser->lexer->file_path.len, parser->lexer->file_path.value, line,
-          column, token.source_offset);
+  LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+      kind_string, token_string.len, token_string.value, human_type.len,
+      human_type.value, parser->lexer->file_path.len,
+      parser->lexer->file_path.value, line, column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
@@ -2881,6 +2884,13 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     return pg_array_last_index(parser->nodes);
   } else if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN)) {
     return par_parse_builtin_println(parser);
+  } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
+    const par_ast_node_t node = {
+        .kind = AST_KIND_VAR_REFERENCE,
+        .main_token = parser->tokens_i - 1,
+    };
+    pg_array_append(parser->nodes, node);
+    return pg_array_last_index(parser->nodes);
   }
 
   par_advance_token(parser);
@@ -3283,7 +3293,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
 
-    if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
+    if (node->main_token != 0 &&
+        !ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ");
@@ -3330,6 +3341,11 @@ static u32 ty_resolve_types(par_parser_t *parser,
     }
 
     return node->type_i = lhs_i;
+  }
+  case AST_KIND_VAR_REFERENCE: {
+    pg_assert(0 && "todo");
+    return node->type_i;
+    break;
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
@@ -3554,6 +3570,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_VAR_DEFINITION:
+    pg_assert(0 && "todo");
+  case AST_KIND_VAR_REFERENCE:
     pg_assert(0 && "todo");
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");

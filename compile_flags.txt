@@ -2,3 +2,4 @@
 -Wextra
 -Wunused
 -std=c99
+-DPG_WITH_LOG=1
