@@ -378,7 +378,7 @@ struct cf_type_t {
     TYPE_LONG,
     TYPE_INSTANCE_REFERENCE,
     TYPE_SHORT,
-    TYPE_BOOLEAN,
+    TYPE_BOOL,
     TYPE_ARRAY_REFERENCE,
     TYPE_METHOD,
     TYPE_CONSTRUCTOR,
@@ -564,7 +564,7 @@ static void cf_fill_type_descriptor_string(const cf_type_t *type,
     string_append_char(type_descriptor, 'S');
     break;
   }
-  case TYPE_BOOLEAN: {
+  case TYPE_BOOL: {
     string_append_char(type_descriptor, 'Z');
     break;
   }
@@ -2495,6 +2495,10 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   switch (token.kind) {
   case TOKEN_KIND_NONE:
     return 0;
+  case TOKEN_KIND_KEYWORD_FALSE:
+    return 5;
+  case TOKEN_KIND_KEYWORD_TRUE:
+    return 4;
   case TOKEN_KIND_NUMBER:
     return lex_number_length(buf, buf_len, token.source_offset);
 
@@ -2619,8 +2623,6 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
 
   const char *const kind_string = par_ast_node_kind_to_string[node->kind];
   const lex_token_t token = parser->lexer->tokens[node->main_token];
-  const u32 length =
-      lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
   u32 line = 0;
   u32 column = 0;
   string_t token_string = {0};
@@ -2792,7 +2794,8 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     };
     pg_array_append(parser->nodes, node);
     return pg_array_last_index(parser->nodes);
-  } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE)) {
+  } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE) ||
+             par_match_token(parser, TOKEN_KIND_KEYWORD_TRUE)) {
     const par_ast_node_t node = {
         .kind = AST_KIND_BOOL,
         .main_token = parser->tokens_i - 1,
@@ -3104,7 +3107,7 @@ static string_t ty_type_to_human_string(cf_type_t type, arena_t *arena) {
     return string_make_from_c("Int", arena);
   case TYPE_VOID:
     return string_make_from_c("void", arena);
-  case TYPE_BOOLEAN:
+  case TYPE_BOOL:
     return string_make_from_c("Boolean", arena);
   case TYPE_BYTE:
     return string_make_from_c("Byte", arena);
@@ -3137,6 +3140,8 @@ static cf_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   switch (node->kind) {
   case AST_KIND_NONE:
     return (cf_type_t){.kind = TYPE_VOID};
+  case AST_KIND_BOOL:
+    return (cf_type_t){.kind = TYPE_BOOL};
   case AST_KIND_BUILTIN_PRINTLN:
     return (cf_type_t){.kind = TYPE_VOID};
   case AST_KIND_NUM:
@@ -3193,6 +3198,10 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   switch (node->kind) {
   case AST_KIND_NONE:
     return;
+  case AST_KIND_BOOL:
+    {
+      break;
+    }
   case AST_KIND_NUM: {
     pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
 
