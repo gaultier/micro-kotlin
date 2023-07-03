@@ -2451,7 +2451,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
 
       if (!lex_is_at_end(buf, buf_len, current))
         pg_array_append(lexer->line_table,
-                        lex_get_current_offset(buf, buf_len, current) );
+                        lex_get_current_offset(buf, buf_len, current));
 
       break;
     }
