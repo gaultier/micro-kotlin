@@ -532,6 +532,8 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   const par_type_t *const type = &types[type_i];
 
   switch (type->kind) {
+  case TYPE_ANY:
+    pg_assert(0 && "unreachable");
   case TYPE_VOID: {
     string_append_char(type_descriptor, 'V');
     break;
@@ -602,8 +604,6 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
 
     break;
   }
-  default:
-    pg_assert(0 && "unreachable");
   }
 }
 
