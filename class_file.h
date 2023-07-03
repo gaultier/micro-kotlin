@@ -371,6 +371,7 @@ typedef struct {
   u32 return_type_i;
   u8 argument_count;
   u32 argument_types_i;
+  string_t descriptor;
 } par_type_method_t;
 
 struct par_type_t {
@@ -3156,6 +3157,15 @@ static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
   return false;
 }
 
+static u32 ty_add_type(par_type_t **types, const par_type_t *type) {
+  pg_assert(types != NULL);
+  pg_assert(type != NULL);
+
+  // TODO: Deduplicate.
+  pg_array_append(*types, *type);
+  return pg_array_last_index(*types);
+}
+
 static u32 ty_resolve_types(par_parser_t *parser,
                             const cf_class_file_t *class_files, u32 node_i,
                             arena_t *arena) {
@@ -3175,12 +3185,28 @@ static u32 ty_resolve_types(par_parser_t *parser,
   case AST_KIND_BUILTIN_PRINTLN: {
     ty_resolve_types(parser, class_files, node->lhs, arena);
 
+    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
+    const par_type_t *const lhs_type = &parser->types[lhs->type_i];
+    const par_type_t void_type = {.kind = TYPE_VOID};
+    const par_type_t println_type = {
+        .kind = TYPE_METHOD,
+        .v = {.method = {
+                  .argument_count = 1,
+                  .return_type_i = ty_add_type(&parser->types, &void_type),
+                  .argument_types_i = ty_add_type(&parser->types, lhs_type),
+              }}};
+    pg_array_append(parser->types, println_type);
+
+    string_t descriptor = string_reserve(64, arena);
+    cf_fill_type_descriptor_string(
+        parser->types, pg_array_last_index(parser->types), &descriptor);
+
+    pg_array_last(parser->types)->v.method.descriptor = descriptor;
+
     pg_assert(cf_class_files_find_method_exactly(
         class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
-        string_make_from_c_no_alloc("println"),
-        string_make_from_c_no_alloc("(I)V")));
+        string_make_from_c_no_alloc("println"), descriptor));
 
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);
   }
   case AST_KIND_NUM:
@@ -3221,7 +3247,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
 typedef struct {
   cf_attribute_code_t *code;
   cf_frame_t *frame;
-  u16 println_method_ref_i;
   u32 println_int_type_i;
   u16 out_field_ref_i;
   const cf_class_file_t *class_files;
@@ -3281,22 +3306,47 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
-    pg_assert(gen->println_method_ref_i > 0);
-    pg_assert(gen->println_int_type_i < pg_array_len(parser->types));
     pg_assert(gen->out_field_ref_i > 0);
 
     cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
 
     cg_generate_node(gen, parser, class_file, node->lhs, arena);
 
-    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
-    const par_type_t *const lhs_type = &parser->types[lhs->type_i];
+    const par_type_t *const type = &parser->types[node->type_i];
+    pg_assert(type->kind == TYPE_METHOD);
 
-    const par_type_t type = parser->types[gen->println_int_type_i];
-    pg_assert(type.kind == TYPE_METHOD);
+    const par_type_method_t *const method = &type->v.method;
 
-    cf_asm_invoke_virtual(&gen->code->code, gen->println_method_ref_i,
-                          gen->frame, &type.v.method);
+    pg_assert(method->descriptor.value != NULL);
+    pg_assert(method->descriptor.len > 0);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, method->descriptor);
+    const u16 name_i =
+        cf_add_constant_cstring(&class_file->constant_pool, "println");
+
+    const cf_constant_t name_and_type = {
+        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
+        .v = {.name_and_type = {.name = name_i,
+                                .type_descriptor = descriptor_i}}};
+    const u16 name_and_type_i =
+        cf_constant_array_push(&class_file->constant_pool, &name_and_type);
+
+    const u16 printstream_name_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "java/io/PrintStream");
+
+    const cf_constant_t printstream_class = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {.class_name = printstream_name_i}};
+    const u16 printstream_class_i =
+        cf_constant_array_push(&class_file->constant_pool, &printstream_class);
+    const cf_constant_t method_ref = {
+        .kind = CONSTANT_POOL_KIND_METHOD_REF,
+        .v = {.method_ref = {.class = printstream_class_i,
+                             .name_and_type = name_and_type_i}}};
+    const u16 method_ref_i =
+        cf_constant_array_push(&class_file->constant_pool, &method_ref);
+
+    cf_asm_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method);
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
@@ -3432,6 +3482,8 @@ static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
   return class_name;
 }
 
+// static void ty_add_method_type(par_type_t ** types, )
+
 static void cg_generate_synthetic_class(cg_generator_t *gen,
                                         par_parser_t *parser,
                                         cf_class_file_t *class_file,
@@ -3448,55 +3500,6 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
 
   // FIXME: println(Int)
   {
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_INT});
-    const u32 println_argument_types_i = pg_array_last_index(parser->types);
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
-    const u32 type_void_i = pg_array_last_index(parser->types);
-
-    const par_type_t println_int_type = {
-        .kind = TYPE_METHOD,
-        .v = {.method = {
-                  .argument_count = 1,
-                  .return_type_i = type_void_i,
-                  .argument_types_i = println_argument_types_i,
-              }}};
-    pg_array_append(parser->types, println_int_type);
-    gen->println_int_type_i = pg_array_last_index(parser->types);
-
-    string_t println_int_type_s = string_reserve(30, arena);
-    cf_fill_type_descriptor_string(parser->types, gen->println_int_type_i,
-                                   &println_int_type_s);
-
-    const u16 println_int_descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, println_int_type_s);
-
-    const u16 name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "println");
-
-    const cf_constant_t name_and_type = {
-        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = name_i,
-                                .type_descriptor = println_int_descriptor_i}}};
-    const u16 name_and_type_i =
-        cf_constant_array_push(&class_file->constant_pool, &name_and_type);
-
-    const u16 printstream_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/io/PrintStream");
-
-    const cf_constant_t printstream_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.class_name = printstream_name_i}};
-    const u16 printstream_class_i =
-        cf_constant_array_push(&class_file->constant_pool, &printstream_class);
-    const cf_constant_t method_ref = {
-        .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.class = printstream_class_i,
-                             .name_and_type = name_and_type_i}}};
-    const u16 method_ref_i =
-        cf_constant_array_push(&class_file->constant_pool, &method_ref);
-
-    gen->println_method_ref_i = method_ref_i;
-
     const u16 out_name_i =
         cf_add_constant_cstring(&class_file->constant_pool, "out");
     const u16 out_descriptor_i = cf_add_constant_cstring(
