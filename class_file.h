@@ -3102,15 +3102,20 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 // --------------------------------- Typing
 
 // TODO: something smarter.
-static bool ty_type_eq(par_type_t lhs, par_type_t rhs) {
-  if (lhs.kind == rhs.kind)
+static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i) {
+  const par_type_t *const lhs = &types[lhs_i];
+  const par_type_t *const rhs = &types[rhs_i];
+  if (lhs->kind == rhs->kind)
     return true;
 
   return false;
 }
 
-static string_t ty_type_to_human_string(par_type_t type, arena_t *arena) {
-  switch (type.kind) {
+static string_t ty_type_to_human_string(const par_type_t *types, u32 type_i,
+                                        arena_t *arena) {
+  const par_type_t *const type = &types[type_i];
+
+  switch (type->kind) {
   case TYPE_NONE:
     return string_make_from_c("Any", arena);
   case TYPE_INT:
@@ -3134,7 +3139,7 @@ static string_t ty_type_to_human_string(par_type_t type, arena_t *arena) {
   case TYPE_INSTANCE_REFERENCE:
     return string_make_from_c("Instance<todo>", arena);
   case TYPE_METHOD:
-    return string_make_from_c("Method", arena);
+    return string_make_from_c("Method<todo>", arena);
   case TYPE_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
   case TYPE_FLOAT:
@@ -3142,48 +3147,50 @@ static string_t ty_type_to_human_string(par_type_t type, arena_t *arena) {
   }
 }
 
-static par_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
+static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
-  const par_ast_node_t *const node = &parser->nodes[node_i];
+  par_ast_node_t *const node = &parser->nodes[node_i];
   switch (node->kind) {
   case AST_KIND_NONE:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
-    return *pg_array_last(parser->types);
+
+    return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BOOL:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL});
-    return *pg_array_last(parser->types);
+    return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BUILTIN_PRINTLN:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
-    return *pg_array_last(parser->types);
+    return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_NUM:
     pg_array_append(parser->types,
                     (par_type_t){.kind = TYPE_INT}); // TODO: something smarter.
-    return *pg_array_last(parser->types);
+    return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BINARY: {
-    const par_type_t lhs = ty_type(parser, node->lhs, arena);
-    const par_type_t rhs = ty_type(parser, node->rhs, arena);
-    if (!ty_type_eq(lhs, rhs)) {
+    const u32 lhs_i = ty_type(parser, node->lhs, arena);
+    const u32 rhs_i = ty_type(parser, node->rhs, arena);
+    if (!ty_type_eq(parser->types, lhs_i, rhs_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       LOG("type error: node_i=%u", node_i);
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ");
-      string_append_string(&error, ty_type_to_human_string(lhs, arena));
+      string_append_string(
+          &error, ty_type_to_human_string(parser->types, lhs_i, arena));
       string_append_cstring(&error, " vs ");
-      string_append_string(&error, ty_type_to_human_string(rhs, arena));
+      string_append_string(
+          &error, ty_type_to_human_string(parser->types, rhs_i, arena));
       par_error(parser, token, error.value);
     }
 
-    pg_array_append(parser->types, lhs);
-    return *pg_array_last(parser->types);
+    return node->type_i = lhs_i;
   }
   case AST_KIND_FUNCTION_DEFINITION:
     // Inspect body (rhs).
     ty_type(parser, node->rhs, arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
-    return *pg_array_last(parser->types);
+    return node->type_i=pg_array_last_index(parser->types);
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }

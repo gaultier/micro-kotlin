@@ -1,7 +1,7 @@
 .PHONY: test
 
 main_debug: main.c class_file.h
-	$(CC) -DPG_WITH_LOG=1 -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=address,undefined $< -o $@ 
+	$(CC) -DPG_WITH_LOG=1 -O1 -g3 -Wall -Wextra -std=c99 -fsanitize=address,undefined $< -o $@ 
 
 test: main_debug
 	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
