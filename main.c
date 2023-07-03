@@ -44,14 +44,13 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const u32 root_i = par_parse(&parser, &arena);
-    if (parser.state != PARSER_STATE_OK)
-      return 1;
+    ty_type(&parser, root_i, &arena);
 
 #ifdef PG_WITH_LOG
-    par_ast_fprint_node(&parser, root_i, stdout, 0);
+    const u64 arena_offset_before = arena.current_offset;
+    par_ast_fprint_node(&parser, root_i, stdout, 0, &arena);
+    arena.current_offset = arena_offset_before;
 #endif
-
-    ty_type(&parser, root_i, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 

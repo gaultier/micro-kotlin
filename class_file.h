@@ -369,7 +369,7 @@ typedef struct {
 
 struct par_type_t {
   enum cf_type_kind_t {
-    TYPE_NONE,
+    TYPE_ANY,
     TYPE_VOID,
     TYPE_BYTE,
     TYPE_CHAR,
@@ -2613,8 +2613,44 @@ static void par_find_token_position(const par_parser_t *parser,
   /* pg_assert(*column > 0); */
 }
 
+static string_t ty_type_to_human_string(const par_type_t *types, u32 type_i,
+                                        arena_t *arena) {
+  const par_type_t *const type = &types[type_i];
+
+  switch (type->kind) {
+  case TYPE_ANY:
+    return string_make_from_c("Any", arena);
+  case TYPE_INT:
+    return string_make_from_c("Int", arena);
+  case TYPE_VOID:
+    return string_make_from_c("void", arena);
+  case TYPE_BOOL:
+    return string_make_from_c("Boolean", arena);
+  case TYPE_BYTE:
+    return string_make_from_c("Byte", arena);
+  case TYPE_CHAR:
+    return string_make_from_c("Char", arena);
+  case TYPE_SHORT:
+    return string_make_from_c("Short", arena);
+  case TYPE_LONG:
+    return string_make_from_c("Long", arena);
+  case TYPE_DOUBLE:
+    return string_make_from_c("Double", arena);
+  case TYPE_ARRAY_REFERENCE:
+    return string_make_from_c("Array<todo>", arena);
+  case TYPE_INSTANCE_REFERENCE:
+    return string_make_from_c("Instance<todo>", arena);
+  case TYPE_METHOD:
+    return string_make_from_c("Method<todo>", arena);
+  case TYPE_CONSTRUCTOR:
+    return string_make_from_c("Constructor<todo>", arena);
+  case TYPE_FLOAT:
+    return string_make_from_c("Float", arena);
+  }
+}
+
 static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
-                                FILE *file, u16 indent) {
+                                FILE *file, u16 indent, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -2634,14 +2670,18 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
   par_find_token_position(parser, token, &line, &column, &token_string);
 
   ut_fwrite_indent(file, indent);
-  fprintf(file, "[%ld] %s %.*s (at %.*s:%u:%u:%u)\n", node - parser->nodes,
-          kind_string, token_string.len, token_string.value,
+
+  string_t human_type =
+      ty_type_to_human_string(parser->types, node->type_i, arena);
+  fprintf(file, "[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)\n",
+          node - parser->nodes, kind_string, token_string.len,
+          token_string.value, human_type.len, human_type.value,
           parser->lexer->file_path.len, parser->lexer->file_path.value, line,
           column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  par_ast_fprint_node(parser, node->lhs, file, indent + 2);
-  par_ast_fprint_node(parser, node->rhs, file, indent + 2);
+  par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
+  par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -3096,55 +3136,40 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   }
 
   pg_array_init_reserve(parser->types, pg_array_len(parser->nodes) + 32, arena);
+  pg_array_append(parser->types, (par_type_t){0}); // Default value.
   return root_i;
 }
 
 // --------------------------------- Typing
 
 // TODO: something smarter.
-static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i) {
+static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
+                       u32 *result_i) {
+  pg_assert(types != NULL);
+  pg_assert(lhs_i < pg_array_len(types));
+  pg_assert(rhs_i < pg_array_len(types));
+  pg_assert(result_i != NULL);
+
   const par_type_t *const lhs = &types[lhs_i];
   const par_type_t *const rhs = &types[rhs_i];
-  if (lhs->kind == rhs->kind)
+  if (lhs->kind == rhs->kind) {
+    *result_i = lhs_i;
     return true;
+  }
+
+  // Any is compatible with everything.
+  if (lhs->kind == TYPE_ANY) {
+    *result_i = rhs_i;
+    return true;
+  }
+
+  // Any is compatible with everything.
+  if (rhs->kind == TYPE_ANY) {
+    *result_i = lhs_i;
+    return true;
+  }
 
   return false;
-}
-
-static string_t ty_type_to_human_string(const par_type_t *types, u32 type_i,
-                                        arena_t *arena) {
-  const par_type_t *const type = &types[type_i];
-
-  switch (type->kind) {
-  case TYPE_NONE:
-    return string_make_from_c("Any", arena);
-  case TYPE_INT:
-    return string_make_from_c("Int", arena);
-  case TYPE_VOID:
-    return string_make_from_c("void", arena);
-  case TYPE_BOOL:
-    return string_make_from_c("Boolean", arena);
-  case TYPE_BYTE:
-    return string_make_from_c("Byte", arena);
-  case TYPE_CHAR:
-    return string_make_from_c("Char", arena);
-  case TYPE_SHORT:
-    return string_make_from_c("Short", arena);
-  case TYPE_LONG:
-    return string_make_from_c("Long", arena);
-  case TYPE_DOUBLE:
-    return string_make_from_c("Double", arena);
-  case TYPE_ARRAY_REFERENCE:
-    return string_make_from_c("Array<todo>", arena);
-  case TYPE_INSTANCE_REFERENCE:
-    return string_make_from_c("Instance<todo>", arena);
-  case TYPE_METHOD:
-    return string_make_from_c("Method<todo>", arena);
-  case TYPE_CONSTRUCTOR:
-    return string_make_from_c("Constructor<todo>", arena);
-  case TYPE_FLOAT:
-    return string_make_from_c("Float", arena);
-  }
 }
 
 static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
@@ -3154,13 +3179,15 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   par_ast_node_t *const node = &parser->nodes[node_i];
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
+    pg_array_append(parser->types, (par_type_t){.kind = TYPE_ANY});
 
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BOOL:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL});
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BUILTIN_PRINTLN:
+    ty_type(parser, node->lhs, arena);
+
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_NUM:
@@ -3170,7 +3197,8 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   case AST_KIND_BINARY: {
     const u32 lhs_i = ty_type(parser, node->lhs, arena);
     const u32 rhs_i = ty_type(parser, node->rhs, arena);
-    if (!ty_type_eq(parser->types, lhs_i, rhs_i)) {
+
+    if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       LOG("type error: node_i=%u", node_i);
       string_t error = string_reserve(256, arena);
@@ -3183,14 +3211,15 @@ static u32 ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
       par_error(parser, token, error.value);
     }
 
-    return node->type_i = lhs_i;
+    return node->type_i;
   }
   case AST_KIND_FUNCTION_DEFINITION:
+    ty_type(parser, node->lhs, arena);
     // Inspect body (rhs).
     ty_type(parser, node->rhs, arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
-    return node->type_i=pg_array_last_index(parser->types);
+    return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
