@@ -283,18 +283,16 @@ static void string_append_char_if_not_exists(string_t *s, char c) {
     string_append_char(s, c);
 }
 
-static void string_append_string(string_t *a, const string_t *b) {
+static void string_append_string(string_t *a, string_t b) {
   pg_assert(a != NULL);
-  pg_assert(b != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
   pg_assert(a->arena != NULL);
-  pg_assert(b->cap != 0);
-  pg_assert(b->len <= b->cap);
-  pg_assert(b->arena != NULL);
+  pg_assert(b.cap != 0);
+  pg_assert(b.len <= b.cap);
 
-  for (u64 i = 0; i < b->len; i++)
-    string_append_char(a, b->value[i]);
+  for (u64 i = 0; i < b.len; i++)
+    string_append_char(a, b.value[i]);
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
@@ -557,7 +555,7 @@ static void cf_fill_type_descriptor_string(const cf_type_t *type,
     const string_t class_name = type->v.class_name;
 
     string_append_char(type_descriptor, 'L');
-    string_append_string(type_descriptor, &class_name);
+    string_append_string(type_descriptor, class_name);
     string_append_char(type_descriptor, ';');
 
     break;
@@ -1977,7 +1975,7 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   string_t result = string_make(source_file_name, arena);
   string_drop_after_last_incl(&result, '/');
   string_append_char_if_not_exists(&result, '/');
-  string_append_string(&result, &last_path_component);
+  string_append_string(&result, last_path_component);
   return result;
 }
 
@@ -3076,7 +3074,40 @@ static bool ty_type_eq(cf_type_t lhs, cf_type_t rhs) {
   return false;
 }
 
-static cf_type_t ty_type(par_parser_t *parser, u32 node_i) {
+static string_t ty_type_to_human_string(cf_type_t type, arena_t *arena) {
+  switch (type.kind) {
+  case TYPE_NONE:
+    return string_make_from_c("none", arena);
+  case TYPE_INT:
+    return string_make_from_c("Int", arena);
+  case TYPE_VOID:
+    return string_make_from_c("void", arena);
+  case TYPE_BOOLEAN:
+    return string_make_from_c("Boolean", arena);
+  case TYPE_BYTE:
+    return string_make_from_c("Byte", arena);
+  case TYPE_CHAR:
+    return string_make_from_c("Char", arena);
+  case TYPE_SHORT:
+    return string_make_from_c("Short", arena);
+  case TYPE_LONG:
+    return string_make_from_c("Long", arena);
+  case TYPE_DOUBLE:
+    return string_make_from_c("Double", arena);
+  case TYPE_ARRAY_REFERENCE:
+    return string_make_from_c("Array<todo>", arena);
+  case TYPE_INSTANCE_REFERENCE:
+    return string_make_from_c("Instance<todo>", arena);
+  case TYPE_METHOD:
+    return string_make_from_c("Method", arena);
+  case TYPE_CONSTRUCTOR:
+    return string_make_from_c("Constructor<todo>", arena);
+  case TYPE_FLOAT:
+    return string_make_from_c("Float", arena);
+  }
+}
+
+static cf_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
@@ -3089,12 +3120,17 @@ static cf_type_t ty_type(par_parser_t *parser, u32 node_i) {
   case AST_KIND_NUM:
     return (cf_type_t){.kind = TYPE_INT}; // TODO: something smarter.
   case AST_KIND_BINARY: {
-    const cf_type_t lhs = ty_type(parser, node->lhs);
-    const cf_type_t rhs = ty_type(parser, node->rhs);
+    const cf_type_t lhs = ty_type(parser, node->lhs, arena);
+    const cf_type_t rhs = ty_type(parser, node->rhs, arena);
     if (!ty_type_eq(lhs, rhs)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       LOG("type error: node_i=%u", node_i);
-      par_error(parser, token, "incompatible types");
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "incompatible types: ");
+      string_append_string(&error, ty_type_to_human_string(lhs, arena));
+      string_append_cstring(&error, " vs ");
+      string_append_string(&error, ty_type_to_human_string(rhs, arena));
+      par_error(parser, token, error.value);
       return (cf_type_t){.kind = TYPE_VOID};
     }
 
@@ -3102,7 +3138,7 @@ static cf_type_t ty_type(par_parser_t *parser, u32 node_i) {
   }
   case AST_KIND_FUNCTION_DEFINITION:
     // Inspect body (rhs).
-    ty_type(parser, node->rhs);
+    ty_type(parser, node->rhs, arena);
 
     return (cf_type_t){.kind = TYPE_VOID};
   case AST_KIND_MAX:

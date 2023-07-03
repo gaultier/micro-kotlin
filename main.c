@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     par_ast_fprint_node(&parser, root_i, stdout, 0);
 #endif
 
-    ty_type(&parser, root_i);
+    ty_type(&parser, root_i, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
