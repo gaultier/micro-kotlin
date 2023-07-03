@@ -2564,16 +2564,16 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
   }
 }
 
-static void par_ast_fprint_node(const par_parser_t *parser,
-                                const par_ast_node_t *node, FILE *file,
-                                u16 indent) {
+static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
+                                FILE *file, u16 indent) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(node != NULL);
+  pg_assert(node_i < pg_array_len(parser->nodes));
 
+  const par_ast_node_t *const node = &parser->nodes[node_i];
   if (node->kind == AST_KIND_NONE)
     return;
 
@@ -2583,25 +2583,12 @@ static void par_ast_fprint_node(const par_parser_t *parser,
       lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
   const char *const token_string = &parser->buf[token.source_offset];
   ut_fwrite_indent(file, indent);
-  fprintf(file, "%s %.*s\n", kind_string, length, token_string);
+  fprintf(file, "[%ld] %s %.*s\n", node - parser->nodes, kind_string, length,
+          token_string);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  par_ast_fprint_node(parser, &parser->nodes[node->lhs], file, indent + 2);
-  par_ast_fprint_node(parser, &parser->nodes[node->rhs], file, indent + 2);
-}
-
-static void par_ast_fprint(const par_parser_t *parser, FILE *file) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-
-  pg_assert(pg_array_len(parser->nodes) >= 1); // First is dummy.
-
-  // Second is the root.
-  if (pg_array_len(parser->nodes) > 1)
-    par_ast_fprint_node(parser, &parser->nodes[1], file, 0);
+  par_ast_fprint_node(parser, node->lhs, file, indent + 2);
+  par_ast_fprint_node(parser, node->rhs, file, indent + 2);
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
