@@ -3054,7 +3054,6 @@ static u32 par_parse_var_definition(par_parser_t *parser) {
                    "expected colon between variable name and type");
 
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER, "expected type");
-  const u32 type_token = parser->tokens_i - 1;
 
   par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
 
@@ -3554,7 +3553,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     }
     break;
   }
-  default:
+  case AST_KIND_VAR_DEFINITION:
+                        pg_assert(0&&"todo");
+  case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
 }
