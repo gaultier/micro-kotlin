@@ -3078,7 +3078,7 @@ static u32 par_parse_declarations(par_parser_t *parser) {
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
       .lhs = par_parse_declaration(parser),
-      .rhs = par_is_at_end(parser)? 0 : par_parse_declarations(parser),
+      .rhs = par_is_at_end(parser) ? 0 : par_parse_declarations(parser),
   };
   pg_array_append(parser->nodes, node);
   return pg_array_last_index(parser->nodes);
@@ -3167,7 +3167,6 @@ static u32 ty_resolve_types(par_parser_t *parser, u32 node_i, arena_t *arena) {
 
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
-      LOG("type error: node_i=%u", node_i);
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ");
       string_append_string(
@@ -3203,8 +3202,8 @@ typedef struct {
 } cg_generator_t;
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
-                             cf_class_file_t *class_file,
-                             const par_ast_node_t *node, arena_t *arena) {
+                             cf_class_file_t *class_file, u32 node_i,
+                             arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3213,7 +3212,12 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
   pg_assert(pg_array_len(parser->nodes) > 0);
   pg_assert(class_file != NULL);
-  pg_assert(node != NULL);
+  pg_assert(node_i < pg_array_len(parser->nodes));
+
+  if (node_i == 0)
+    return;
+
+  const par_ast_node_t *const node = &parser->nodes[node_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
@@ -3257,10 +3261,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
 
-    if (node->lhs != 0) {
-      cg_generate_node(gen, parser, class_file, &parser->nodes[node->lhs],
-                       arena);
-    }
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
 
     const par_type_t type = parser->types[gen->println_int_type_i];
     pg_assert(type.kind == TYPE_METHOD);
@@ -3344,8 +3345,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (node->lhs > 0)
       pg_assert(0 && "todo");
 
-    pg_assert(node->rhs < pg_array_len(parser->nodes));
-    cg_generate_node(gen, parser, class_file, &parser->nodes[node->rhs], arena);
+    cg_generate_node(gen, parser, class_file, node->rhs, arena);
 
     cf_asm_return(&code.code);
 
@@ -3364,14 +3364,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    if (node->lhs != 0) {
-      cg_generate_node(gen, parser, class_file, &parser->nodes[node->lhs],
-                       arena);
-    }
-    if (node->rhs != 0) {
-      cg_generate_node(gen, parser, class_file, &parser->nodes[node->rhs],
-                       arena);
-    }
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_generate_node(gen, parser, class_file, node->rhs, arena);
 
     const lex_token_t token = parser->lexer->tokens[node->main_token];
     switch (token.kind) {
@@ -3534,7 +3528,8 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
 }
 
 static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
-                        const cf_class_file_t *class_files, arena_t *arena) {
+                        const cf_class_file_t *class_files, u32 root_i,
+                        arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3550,7 +3545,5 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   if (pg_array_len(parser->nodes) == 1)
     return;
 
-  // Second node is the root.
-  const par_ast_node_t *const root = &parser->nodes[1];
-  cg_generate_node(&gen, parser, class_file, root, arena);
+  cg_generate_node(&gen, parser, class_file, root_i, arena);
 }

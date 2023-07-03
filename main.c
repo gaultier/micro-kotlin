@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
       LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
           arena.current_offset);
     }
-    cg_generate(&parser, &class_file, class_files, &arena);
+    cg_generate(&parser, &class_file, class_files, root_i, &arena);
 
     FILE *file = fopen(class_file.file_path.value, "w");
     pg_assert(file != NULL);
