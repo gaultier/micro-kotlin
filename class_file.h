@@ -358,15 +358,15 @@ typedef struct {
   u16 max_locals;
 } cf_frame_t;
 
-struct cf_type_t;
+struct par_type_t;
 
 typedef struct {
-  struct cf_type_t *return_type;
+  struct par_type_t *return_type;
   u8 argument_count;
-  struct cf_type_t *argument_types;
-} cf_type_method_t;
+  struct par_type_t *argument_types;
+} par_type_method_t;
 
-struct cf_type_t {
+struct par_type_t {
   enum cf_type_kind_t {
     TYPE_NONE,
     TYPE_VOID,
@@ -384,12 +384,12 @@ struct cf_type_t {
     TYPE_CONSTRUCTOR,
   } kind;
   union {
-    string_t class_name;          // TYPE_INSTANCE_REFERENCE
-    cf_type_method_t method;      // TYPE_METHOD, TYPE_CONSTRUCTOR
-    struct cf_type_t *array_type; // TYPE_ARRAY_REFERENCE
+    string_t class_name;           // TYPE_INSTANCE_REFERENCE
+    par_type_method_t method;      // TYPE_METHOD, TYPE_CONSTRUCTOR
+    struct par_type_t *array_type; // TYPE_ARRAY_REFERENCE
   } v;
 };
-typedef struct cf_type_t cf_type_t;
+typedef struct par_type_t par_type_t;
 
 typedef struct {
   u16 start_pc;
@@ -517,7 +517,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-static void cf_fill_type_descriptor_string(const cf_type_t *type,
+static void cf_fill_type_descriptor_string(const par_type_t *type,
                                            string_t *type_descriptor) {
   pg_assert(type != NULL);
   pg_assert(type_descriptor != NULL);
@@ -571,7 +571,7 @@ static void cf_fill_type_descriptor_string(const cf_type_t *type,
   case TYPE_ARRAY_REFERENCE: {
     string_append_char(type_descriptor, '[');
 
-    const cf_type_t *const array_type = type->v.array_type;
+    const par_type_t *const array_type = type->v.array_type;
     pg_assert(array_type != NULL);
     cf_fill_type_descriptor_string(array_type, type_descriptor);
 
@@ -579,13 +579,13 @@ static void cf_fill_type_descriptor_string(const cf_type_t *type,
   }
   case TYPE_CONSTRUCTOR:
   case TYPE_METHOD: {
-    const cf_type_method_t *const method_type = &type->v.method;
+    const par_type_method_t *const method_type = &type->v.method;
     string_append_char(type_descriptor, '(');
 
     for (u64 i = 0; i < method_type->argument_count; i++) {
       pg_assert(method_type->argument_types != NULL);
 
-      const cf_type_t *const argument_type = &method_type->argument_types[i];
+      const par_type_t *const argument_type = &method_type->argument_types[i];
       cf_fill_type_descriptor_string(argument_type, type_descriptor);
     }
 
@@ -634,7 +634,7 @@ static void cf_asm_load_constant(u8 *code, u16 constant_i, cf_frame_t *frame) {
 }
 
 static void cf_asm_invoke_virtual(u8 *code, u16 method_ref_i, cf_frame_t *frame,
-                                  const cf_type_method_t *method_type) {
+                                  const par_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
@@ -667,7 +667,7 @@ static void cf_asm_return(u8 *code) {
 }
 
 static void cf_asm_invoke_special(u8 *code, u16 method_ref_i, cf_frame_t *frame,
-                                  const cf_type_method_t *method_type) {
+                                  const par_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
@@ -683,7 +683,7 @@ static void cf_asm_invoke_special(u8 *code, u16 method_ref_i, cf_frame_t *frame,
 static void
 cf_asm_call_superclass_constructor(u8 *code, u16 super_class_constructor_i,
                                    cf_frame_t *frame,
-                                   const cf_type_t *constructor_type) {
+                                   const par_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
   pg_assert(frame != NULL);
@@ -693,7 +693,7 @@ cf_asm_call_superclass_constructor(u8 *code, u16 super_class_constructor_i,
   cf_code_array_push_u8(
       code, BYTECODE_ALOAD_0); // TODO: move the responsability to the caller?
 
-  const cf_type_method_t *const method_type = &constructor_type->v.method;
+  const par_type_method_t *const method_type = &constructor_type->v.method;
   pg_assert(method_type != NULL);
   cf_asm_invoke_special(code, super_class_constructor_i, frame, method_type);
 }
@@ -2567,6 +2567,7 @@ typedef struct {
   lex_lexer_t *lexer;
   par_ast_node_t *nodes;
   par_parser_state_t state;
+  par_type_t *types;
 } par_parser_t;
 
 static void ut_fwrite_indent(FILE *file, u16 indent) {
@@ -2773,6 +2774,7 @@ static u32 par_parse_builtin_println(par_parser_t *parser) {
       .lhs = par_parse_expression(parser),
   };
   pg_array_append(parser->nodes, node);
+  pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
   const u32 node_i = pg_array_last_index(parser->nodes);
 
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
@@ -2788,11 +2790,13 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   if (par_match_token(parser, TOKEN_KIND_NUMBER)) {
+
     const par_ast_node_t node = {
         .kind = AST_KIND_NUM,
         .main_token = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){.kind = TYPE_INT /* FIXME*/});
     return pg_array_last_index(parser->nodes);
   } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE) ||
              par_match_token(parser, TOKEN_KIND_KEYWORD_TRUE)) {
@@ -2801,6 +2805,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
         .main_token = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL});
     return pg_array_last_index(parser->nodes);
   }
 
@@ -2859,6 +2864,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
 
   const par_ast_node_t node = {.kind = AST_KIND_BINARY, .lhs = expression_node};
   pg_array_append(parser->nodes, node);
+  pg_array_append(parser->types, (par_type_t){0});
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
   const u32 root_i = last_node_i;
@@ -2872,6 +2878,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser) {
         .lhs = par_parse_prefix_unary_expression(parser),
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){0});
     last_node_i = parser->nodes[last_node_i].rhs =
         pg_array_last_index(parser->nodes);
   }
@@ -2894,6 +2901,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
       .lhs = expression_node,
   };
   pg_array_append(parser->nodes, node);
+  pg_array_append(parser->types, (par_type_t){0});
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
   const u32 root_i = last_node_i;
@@ -2907,6 +2915,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
         .lhs = par_parse_multiplicative_expression(parser),
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){0});
     last_node_i = parser->nodes[last_node_i].rhs =
         pg_array_last_index(parser->nodes);
   }
@@ -2938,6 +2947,7 @@ static u32 par_parse_block(par_parser_t *parser) {
       .kind = AST_KIND_BINARY,
   };
   pg_array_append(parser->nodes, root);
+  pg_array_append(parser->types, (par_type_t){0});
   u32 last_node_i = pg_array_last_index(parser->nodes);
   const u32 root_i = last_node_i;
 
@@ -2948,6 +2958,7 @@ static u32 par_parse_block(par_parser_t *parser) {
         .lhs = par_parse_statement(parser),
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){0});
     last_node_i = parser->nodes[last_node_i].rhs =
         pg_array_last_index(parser->nodes);
   }
@@ -2972,6 +2983,7 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
       .kind = AST_KIND_BINARY,
   };
   pg_array_append(parser->nodes, node);
+  pg_array_append(parser->types, (par_type_t){0});
   u32 last_node_i = pg_array_last_index(parser->nodes);
   const u32 root_i = last_node_i;
 
@@ -2981,6 +2993,7 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
         .lhs = par_parse_expression(parser),
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){0});
     last_node_i = parser->nodes[last_node_i].rhs =
         pg_array_last_index(parser->nodes);
   } while (par_match_token(parser, TOKEN_KIND_COMMA));
@@ -3014,6 +3027,7 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
                                .lhs = arguments,
                                .rhs = body};
   pg_array_append(parser->nodes, node);
+  pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
   return pg_array_last_index(parser->nodes);
 }
 
@@ -3057,23 +3071,29 @@ static u32 par_parse_declaration(par_parser_t *parser) {
   return new_node_i;
 }
 
-static u32 par_parse(par_parser_t *parser) {
+static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
   pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
+
+  pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 8,
+                        arena);
+  pg_array_init_reserve(parser->types, pg_array_len(parser->lexer->tokens) * 8,
+                        arena);
 
   parser->tokens_i = 1; // Skip the dummy token.
 
   const par_ast_node_t dummy = {0};
   pg_array_append(parser->nodes, dummy);
+  pg_array_append(parser->types, (par_type_t){0});
 
   const par_ast_node_t root = {
       .kind = AST_KIND_BINARY,
   };
   pg_array_append(parser->nodes, root);
+  pg_array_append(parser->types, (par_type_t){0});
   u32 last_node_i = pg_array_last_index(parser->nodes);
   const u32 root_i = last_node_i;
 
@@ -3083,23 +3103,26 @@ static u32 par_parse(par_parser_t *parser) {
         .lhs = par_parse_declaration(parser),
     };
     pg_array_append(parser->nodes, node);
+    pg_array_append(parser->types, (par_type_t){0});
     last_node_i = parser->nodes[last_node_i].rhs =
         pg_array_last_index(parser->nodes);
   }
+
+  pg_assert(pg_array_len(parser->nodes) == pg_array_len(parser->types));
   return root_i;
 }
 
 // --------------------------------- Typing
 
 // TODO: something smarter.
-static bool ty_type_eq(cf_type_t lhs, cf_type_t rhs) {
+static bool ty_type_eq(par_type_t lhs, par_type_t rhs) {
   if (lhs.kind == rhs.kind)
     return true;
 
   return false;
 }
 
-static string_t ty_type_to_human_string(cf_type_t type, arena_t *arena) {
+static string_t ty_type_to_human_string(par_type_t type, arena_t *arena) {
   switch (type.kind) {
   case TYPE_NONE:
     return string_make_from_c("Any", arena);
@@ -3132,23 +3155,23 @@ static string_t ty_type_to_human_string(cf_type_t type, arena_t *arena) {
   }
 }
 
-static cf_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
+static par_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
   switch (node->kind) {
   case AST_KIND_NONE:
-    return (cf_type_t){.kind = TYPE_VOID};
+    return (par_type_t){.kind = TYPE_VOID};
   case AST_KIND_BOOL:
-    return (cf_type_t){.kind = TYPE_BOOL};
+    return (par_type_t){.kind = TYPE_BOOL};
   case AST_KIND_BUILTIN_PRINTLN:
-    return (cf_type_t){.kind = TYPE_VOID};
+    return (par_type_t){.kind = TYPE_VOID};
   case AST_KIND_NUM:
-    return (cf_type_t){.kind = TYPE_INT}; // TODO: something smarter.
+    return (par_type_t){.kind = TYPE_INT}; // TODO: something smarter.
   case AST_KIND_BINARY: {
-    const cf_type_t lhs = ty_type(parser, node->lhs, arena);
-    const cf_type_t rhs = ty_type(parser, node->rhs, arena);
+    const par_type_t lhs = ty_type(parser, node->lhs, arena);
+    const par_type_t rhs = ty_type(parser, node->rhs, arena);
     if (!ty_type_eq(lhs, rhs)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       LOG("type error: node_i=%u", node_i);
@@ -3158,7 +3181,7 @@ static cf_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
       string_append_cstring(&error, " vs ");
       string_append_string(&error, ty_type_to_human_string(rhs, arena));
       par_error(parser, token, error.value);
-      return (cf_type_t){.kind = TYPE_VOID};
+      return (par_type_t){.kind = TYPE_VOID};
     }
 
     return lhs;
@@ -3167,7 +3190,7 @@ static cf_type_t ty_type(par_parser_t *parser, u32 node_i, arena_t *arena) {
     // Inspect body (rhs).
     ty_type(parser, node->rhs, arena);
 
-    return (cf_type_t){.kind = TYPE_VOID};
+    return (par_type_t){.kind = TYPE_VOID};
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
@@ -3178,7 +3201,7 @@ typedef struct {
   cf_attribute_code_t *code;
   cf_frame_t *frame;
   u16 println_method_ref_i;
-  cf_type_method_t *println_type;
+  par_type_method_t *println_type;
   u16 out_field_ref_i;
   const cf_class_file_t *class_files;
 } cg_generator_t;
@@ -3262,18 +3285,18 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         cf_add_constant_string(&class_file->constant_pool, method_name);
 
     // FIXME: hardcoded type.
-    cf_type_t void_type = {.kind = TYPE_VOID};
+    par_type_t void_type = {.kind = TYPE_VOID};
     const string_t string_class_name =
         string_make_from_c("java/lang/String", arena);
-    cf_type_t string_type = {
+    par_type_t string_type = {
         .kind = TYPE_INSTANCE_REFERENCE,
         .v = {.class_name = string_class_name},
     };
-    cf_type_t main_argument_types[] = {{
+    par_type_t main_argument_types[] = {{
         .kind = TYPE_ARRAY_REFERENCE,
         .v = {.array_type = &string_type},
     }};
-    cf_type_t type = {
+    par_type_t type = {
         .kind = TYPE_METHOD,
         .v =
             {
@@ -3389,21 +3412,21 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
 
   // FIXME: println(Int)
   {
-    cf_type_t *const println_argument_types =
-        arena_alloc(arena, 1, sizeof(cf_type_t));
+    par_type_t *const println_argument_types =
+        arena_alloc(arena, 1, sizeof(par_type_t));
     println_argument_types->kind = TYPE_INT;
 
-    cf_type_t *const void_type = arena_alloc(arena, 1, sizeof(cf_type_t));
+    par_type_t *const void_type = arena_alloc(arena, 1, sizeof(par_type_t));
     void_type->kind = TYPE_VOID;
 
-    gen->println_type = arena_alloc(arena, 1, sizeof(cf_type_method_t));
-    *gen->println_type = (cf_type_method_t){
+    gen->println_type = arena_alloc(arena, 1, sizeof(par_type_method_t));
+    *gen->println_type = (par_type_method_t){
         .argument_count = 1,
         .return_type = void_type,
         .argument_types = println_argument_types,
     };
 
-    cf_type_t const println_type = {
+    par_type_t const println_type = {
         .kind = TYPE_METHOD,
         .v =
             {

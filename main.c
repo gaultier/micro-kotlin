@@ -43,9 +43,7 @@ int main(int argc, char *argv[]) {
         .buf_len = buf_len,
         .lexer = &lexer,
     };
-    pg_array_init_reserve(parser.nodes, pg_array_len(lexer.tokens), &arena);
-
-    const u32 root_i = par_parse(&parser);
+    const u32 root_i = par_parse(&parser, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
