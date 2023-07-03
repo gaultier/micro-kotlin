@@ -101,5 +101,4 @@ int main(int argc, char *argv[]) {
       cf_buf_read_class_file(buf, buf_len, &current, &class_file, &arena);
     }
   }
-
 }

@@ -2572,6 +2572,7 @@ typedef struct {
   par_ast_node_t *nodes;
   par_parser_state_t state;
   par_type_t *types;
+  u32 current_function_i;
 } par_parser_t;
 
 static void ut_fwrite_indent(FILE *file, u16 indent) {
@@ -2863,6 +2864,11 @@ static u32 par_parse_statement(par_parser_t *parser) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
+  if (parser->current_function_i == 0) {
+    par_error(parser, par_peek_token(parser),
+              "code outside of a function body");
+  }
+
   return par_parse_expression(parser);
 }
 
@@ -3012,20 +3018,24 @@ static u32 par_parse_function_definition(par_parser_t *parser) {
                    "expected function name (identifier)");
   const u32 start_token = parser->tokens_i - 1;
 
+  const par_ast_node_t node = {
+      .kind = AST_KIND_FUNCTION_DEFINITION,
+      .main_token = start_token,
+  };
+  pg_array_append(parser->nodes, node);
+  const u32 fn_i = parser->current_function_i = pg_array_last_index(parser->nodes);
+
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
-  const u32 arguments = par_parse_function_arguments(parser);
+  parser->nodes[parser->current_function_i].lhs =
+      par_parse_function_arguments(parser);
 
   par_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
                    "expected left curly brace before the arguments");
-  const u32 body = par_parse_block(parser);
+  parser->nodes[parser->current_function_i].rhs = par_parse_block(parser);
+  parser->current_function_i=0;
 
-  const par_ast_node_t node = {.kind = AST_KIND_FUNCTION_DEFINITION,
-                               .main_token = start_token,
-                               .lhs = arguments,
-                               .rhs = body};
-  pg_array_append(parser->nodes, node);
-  return pg_array_last_index(parser->nodes);
+  return fn_i;
 }
 
 static void par_sync_if_panicked(par_parser_t *parser) {
