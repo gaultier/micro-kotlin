@@ -2456,13 +2456,16 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       break;
     }
     case '\n': {
+      lex_advance(buf, buf_len, current);
       const lex_line_table_entry_t line = {
           .line =
               lexer->line_table[pg_array_len(lexer->line_table) - 1].line + 1,
-          .start_offset = lex_get_current_offset(buf, buf_len, current),
+          .start_offset = lex_get_current_offset(buf, buf_len, current)+1,
       };
-      pg_array_append(lexer->line_table, line);
-      lex_advance(buf, buf_len, current);
+
+      if (!lex_is_at_end(buf, buf_len, current))
+        pg_array_append(lexer->line_table, line);
+
       break;
     }
     case ' ': {
@@ -2564,6 +2567,36 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
   }
 }
 
+static void par_find_token_position(const par_parser_t *parser,
+                                    lex_token_t token, u32 *line, u32 *column,
+                                    string_t *token_string) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(line != NULL);
+  pg_assert(column != NULL);
+  pg_assert(token_string != NULL);
+
+  token_string->value = &parser->buf[token.source_offset];
+  token_string->len =
+      lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
+
+  for (u32 i = 0; i < pg_array_len(parser->lexer->line_table); i++) {
+    const lex_line_table_entry_t entry = parser->lexer->line_table[i];
+    if (token.source_offset > entry.start_offset) {
+      *line = entry.line;
+      *column = 1 + token.source_offset - entry.start_offset;
+
+      return;
+    }
+  }
+  /* pg_assert(*line > 0); */
+  pg_assert(*line <= pg_array_len(parser->lexer->line_table));
+  /* pg_assert(*column > 0); */
+}
+
 static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
                                 FILE *file, u16 indent) {
   pg_assert(parser != NULL);
@@ -2581,10 +2614,16 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
   const lex_token_t token = parser->lexer->tokens[node->main_token];
   const u32 length =
       lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
-  const char *const token_string = &parser->buf[token.source_offset];
+  u32 line = 0;
+  u32 column = 0;
+  string_t token_string = {0};
+  par_find_token_position(parser, token, &line, &column, &token_string);
+
   ut_fwrite_indent(file, indent);
-  fprintf(file, "[%ld] %s %.*s\n", node - parser->nodes, kind_string, length,
-          token_string);
+  fprintf(file, "[%ld] %s %.*s (at %.*s:%u:%u:%u)\n", node - parser->nodes,
+          kind_string, token_string.len, token_string.value,
+          parser->lexer->file_path.len, parser->lexer->file_path.value, line,
+          column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   par_ast_fprint_node(parser, node->lhs, file, indent + 2);
@@ -2631,36 +2670,6 @@ static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
     return true;
   }
   return false;
-}
-
-static void par_find_token_position(par_parser_t *parser, lex_token_t token,
-                                    u32 *line, u32 *column,
-                                    string_t *token_string) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(line != NULL);
-  pg_assert(column != NULL);
-  pg_assert(token_string != NULL);
-
-  token_string->value = &parser->buf[token.source_offset];
-  token_string->len =
-      lex_find_token_length(parser->lexer, parser->buf, parser->buf_len, token);
-
-  for (u32 i = 0; i < pg_array_len(parser->lexer->line_table); i++) {
-    const lex_line_table_entry_t entry = parser->lexer->line_table[i];
-    if (token.source_offset > entry.start_offset) {
-      *line = entry.line;
-      *column = 1 + token.source_offset - entry.start_offset;
-
-      return;
-    }
-  }
-  pg_assert(*line > 0);
-  pg_assert(*line <= pg_array_len(parser->lexer->line_table));
-  pg_assert(*column > 0);
 }
 
 static void par_error(par_parser_t *parser, lex_token_t token,
@@ -2863,7 +2872,11 @@ static u32 par_parse_additive_expression(par_parser_t *parser) {
   if (par_peek_token(parser).kind != TOKEN_KIND_PLUS)
     return expression_node;
 
-  const par_ast_node_t node = {.kind = AST_KIND_BINARY, .lhs = expression_node};
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = expression_node,
+      .main_token = parser->tokens_i,
+  };
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);
 
@@ -3070,10 +3083,11 @@ static bool ty_type_eq(cf_type_t lhs, cf_type_t rhs) {
   return false;
 }
 
-static cf_type_t ty_type(par_parser_t *parser, par_ast_node_t *node) {
+static cf_type_t ty_type(par_parser_t *parser, u32 node_i) {
   pg_assert(parser != NULL);
-  pg_assert(node != NULL);
+  pg_assert(node_i < pg_array_len(parser->nodes));
 
+  const par_ast_node_t *const node = &parser->nodes[node_i];
   switch (node->kind) {
   case AST_KIND_NONE:
     return (cf_type_t){.kind = TYPE_VOID};
@@ -3082,10 +3096,11 @@ static cf_type_t ty_type(par_parser_t *parser, par_ast_node_t *node) {
   case AST_KIND_NUM:
     return (cf_type_t){.kind = TYPE_INT}; // TODO: something smarter.
   case AST_KIND_BINARY: {
-    const cf_type_t lhs = ty_type(parser, &parser->nodes[node->lhs]);
-    const cf_type_t rhs = ty_type(parser, &parser->nodes[node->rhs]);
+    const cf_type_t lhs = ty_type(parser, node->lhs);
+    const cf_type_t rhs = ty_type(parser, node->rhs);
     if (!ty_type_eq(lhs, rhs)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
+      LOG("type error: node_i=%u", node_i);
       par_error(parser, token, "incompatible types");
       return (cf_type_t){.kind = TYPE_VOID};
     }
@@ -3094,7 +3109,7 @@ static cf_type_t ty_type(par_parser_t *parser, par_ast_node_t *node) {
   }
   case AST_KIND_FUNCTION_DEFINITION:
     // Inspect body (rhs).
-    ty_type(parser, &parser->nodes[node->rhs]);
+    ty_type(parser, node->rhs);
 
     return (cf_type_t){.kind = TYPE_VOID};
   case AST_KIND_MAX:
