@@ -295,8 +295,6 @@ static void string_append_string(string_t *a, string_t b) {
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
   pg_assert(a->arena != NULL);
-  pg_assert(b.cap != 0);
-  pg_assert(b.len <= b.cap);
 
   for (u64 i = 0; i < b.len; i++)
     string_append_char(a, b.value[i]);
@@ -2774,7 +2772,7 @@ static void par_error(par_parser_t *parser, lex_token_t token,
     string_t token_string = {0};
     par_find_token_position(parser, token, &line, &column, &token_string);
 
-    fprintf(stderr, "%.*s:%u:%u: got `%.*s`, %s\n",
+    fprintf(stderr, "%.*s:%u:%u: around `%.*s`, %s\n",
             parser->lexer->file_path.len, parser->lexer->file_path.value, line,
             column, token_string.len, token_string.value, error);
 
@@ -2889,6 +2887,33 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   return 0;
 }
 
+static u32 par_parse_var_definition(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
+                   "expected variable name (identifier)");
+  const u32 name_token = parser->tokens_i - 1;
+
+  par_expect_token(parser, TOKEN_KIND_COLON,
+                   "expected colon between variable name and type");
+
+  par_expect_token(parser, TOKEN_KIND_IDENTIFIER, "expected type");
+
+  par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_VAR_DEFINITION,
+      .main_token = name_token,
+      .lhs = par_parse_expression(parser),
+  };
+  pg_array_append(parser->nodes, node);
+  return pg_array_last_index(parser->nodes);
+}
+
 static u32 par_parse_statement(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -2899,9 +2924,13 @@ static u32 par_parse_statement(par_parser_t *parser) {
   if (parser->current_function_i == 0) {
     par_error(parser, par_peek_token(parser),
               "code outside of a function body");
+    return 0;
   }
 
-  return par_parse_expression(parser);
+  if (par_match_token(parser, TOKEN_KIND_KEYWORD_VAR))
+    return par_parse_var_definition(parser);
+  else
+    return par_parse_expression(parser);
 }
 
 static u32 par_parse_postfix_unary_expression(par_parser_t *parser) {
@@ -3039,33 +3068,6 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
   return root_i;
 }
 
-static u32 par_parse_var_definition(par_parser_t *parser) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-
-  par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
-                   "expected variable name (identifier)");
-  const u32 name_token = parser->tokens_i - 1;
-
-  par_expect_token(parser, TOKEN_KIND_COLON,
-                   "expected colon between variable name and type");
-
-  par_expect_token(parser, TOKEN_KIND_IDENTIFIER, "expected type");
-
-  par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
-
-  const par_ast_node_t node = {
-      .kind = AST_KIND_VAR_DEFINITION,
-      .main_token = name_token,
-      .lhs = par_parse_expression(parser),
-  };
-  pg_array_append(parser->nodes, node);
-  return pg_array_last_index(parser->nodes);
-}
-
 static u32 par_parse_function_definition(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3130,8 +3132,6 @@ static u32 par_parse_declaration(par_parser_t *parser) {
   u32 new_node_i = 0;
   if (par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
     new_node_i = par_parse_function_definition(parser);
-  else if (par_match_token(parser, TOKEN_KIND_KEYWORD_VAR))
-    new_node_i = par_parse_var_definition(parser);
   else
     new_node_i = par_parse_statement(parser);
 
@@ -3319,7 +3319,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     const string_t type_inferred_string =
         ty_type_to_human_string(parser->types, lhs_i, arena);
 
-    if (!string_eq(type_inferred_string, type_inferred_string)) {
+    if (!string_eq(type_literal_string, type_inferred_string)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ");
@@ -3554,7 +3554,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_VAR_DEFINITION:
-                        pg_assert(0&&"todo");
+    pg_assert(0 && "todo");
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
