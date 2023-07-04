@@ -3692,7 +3692,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals =
-        gen->frame->max_locals; // TODO: method argument count.
+        gen->frame->max_locals + main_type.v.method.argument_count;
 
     cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,

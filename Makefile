@@ -3,7 +3,11 @@
 main_debug: main.c class_file.h
 	$(CC) -DPG_WITH_LOG=1 -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=address,undefined $< -o $@ 
 
-test: main_debug
+test_debug: main_debug
+	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
+	(cd kotlin_corpus && for f in *.class; do echo $$f; java `basename -s .class $$f`;  done)
+
+test_release: main_release
 	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
 	(cd kotlin_corpus && for f in *.class; do echo $$f; java `basename -s .class $$f`;  done)
 
