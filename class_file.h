@@ -3661,7 +3661,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->variables != NULL);
     pg_assert(node->type_i > 0);
 
-    // TODO: set variable in a local slot
+    // TODO: store variable in a local slot
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
