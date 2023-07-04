@@ -2166,6 +2166,8 @@ typedef enum {
   TOKEN_KIND_KEYWORD_FALSE,
   TOKEN_KIND_KEYWORD_TRUE,
   TOKEN_KIND_KEYWORD_VAR,
+  TOKEN_KIND_KEYWORD_IF,
+  TOKEN_KIND_KEYWORD_ELSE,
   TOKEN_KIND_IDENTIFIER,
   TOKEN_KIND_EQUAL,
   TOKEN_KIND_COMMA,
@@ -2360,6 +2362,18 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   } else if (mem_eq_c(identifier, identifier_len, "var")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_KEYWORD_VAR,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token);
+  } else if (mem_eq_c(identifier, identifier_len, "if")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_IF,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token);
+  } else if (mem_eq_c(identifier, identifier_len, "else")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_ELSE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token);
@@ -2563,13 +2577,6 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   switch (token.kind) {
   case TOKEN_KIND_NONE:
     return 0;
-  case TOKEN_KIND_KEYWORD_FALSE:
-    return 5;
-  case TOKEN_KIND_KEYWORD_TRUE:
-    return 4;
-  case TOKEN_KIND_NUMBER:
-    return lex_number_length(buf, buf_len, token.source_offset);
-
   case TOKEN_KIND_PLUS:
   case TOKEN_KIND_STAR:
   case TOKEN_KIND_LEFT_PAREN:
@@ -2582,13 +2589,20 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_NOT:
   case TOKEN_KIND_EQUAL:
     return 1;
-
-  case TOKEN_KIND_BUILTIN_PRINTLN:
-    return 7;
-
+  case TOKEN_KIND_KEYWORD_IF:
+    return 2;
   case TOKEN_KIND_KEYWORD_FUN:
   case TOKEN_KIND_KEYWORD_VAR:
     return 3;
+  case TOKEN_KIND_KEYWORD_TRUE:
+  case TOKEN_KIND_KEYWORD_ELSE:
+    return 4;
+  case TOKEN_KIND_KEYWORD_FALSE:
+  case TOKEN_KIND_BUILTIN_PRINTLN:
+    return 7;
+
+  case TOKEN_KIND_NUMBER:
+    return lex_number_length(buf, buf_len, token.source_offset);
 
   case TOKEN_KIND_IDENTIFIER:
     return lex_identifier_length(buf, buf_len, token.source_offset);
@@ -2606,6 +2620,7 @@ typedef enum {
   AST_KIND_BINARY,
   AST_KIND_VAR_DEFINITION,
   AST_KIND_VAR_REFERENCE,
+  AST_KIND_IF,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -2617,6 +2632,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
+    [AST_KIND_IF] = "IF",
     [AST_KIND_BINARY] = "BINARY",
 };
 
@@ -2935,6 +2951,7 @@ static string_t par_token_to_string(par_parser_t *parser, u32 token_i) {
 }
 
 static u32 par_parse_expression(par_parser_t *parser);
+static u32 par_parse_block(par_parser_t *parser);
 
 static u32 par_parse_builtin_println(par_parser_t *parser) {
   pg_assert(parser != NULL);
@@ -2955,6 +2972,47 @@ static u32 par_parse_builtin_println(par_parser_t *parser) {
 
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                    "expected right parenthesis");
+  return node_i;
+}
+
+static u32 par_parse_if_expression(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  const u32 main_token_i = parser->tokens_i - 1;
+
+  par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
+                   "expected left parenthesis following if");
+
+  const u32 condition_i = par_parse_expression(parser);
+
+  par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
+                   "expected right parenthesis following if condition");
+
+  par_ast_node_t node = {
+      .kind = AST_KIND_IF,
+      .main_token = main_token_i,
+      .lhs = condition_i,
+      .rhs = 0,
+  };
+  if (par_match_token(parser, TOKEN_KIND_LEFT_BRACE)) {
+    node.rhs = par_parse_block(parser);
+  } else {
+    node.rhs = par_parse_expression(parser);
+  }
+
+  // TODO: else.
+
+  if (par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)) {
+    pg_assert(0 && "todo");
+  }
+
+  pg_array_append(parser->nodes, node);
+  const u32 node_i = pg_array_last_index(parser->nodes);
+
   return node_i;
 }
 
@@ -3000,6 +3058,8 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
           parser->variables[variable_i].var_definition_node_i;
     }
     return pg_array_last_index(parser->nodes);
+  } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_IF)) {
+    return par_parse_if_expression(parser);
   }
 
   par_advance_token(parser);
@@ -3400,15 +3460,16 @@ static u32 ty_resolve_types(par_parser_t *parser,
     const par_type_t *const lhs_type = &parser->types[lhs->type_i];
 
     const par_type_t void_type = {.kind = TYPE_VOID};
+    const u32 return_type_i = ty_add_type(&parser->types, &void_type);
     const par_type_t println_type = {
         .kind = TYPE_METHOD,
         .v = {.method = {
                   .argument_count = 1,
-                  .return_type_i = ty_add_type(&parser->types, &void_type),
+                  .return_type_i = return_type_i,
                   .argument_types_i = ty_add_type(&parser->types, lhs_type),
               }}};
     pg_array_append(parser->types, println_type);
-    node->type_i = pg_array_last_index(parser->types);
+    node->type_i = return_type_i;
 
     string_t descriptor = string_reserve(64, arena);
     cf_fill_type_descriptor_string(
@@ -3440,8 +3501,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
 
-    if (node->main_token != 0 &&
-        !ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
+    if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ");
@@ -3464,12 +3524,13 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i = pg_array_last_index(parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
-    const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
+    const u32 type_lhs_i =
+        ty_resolve_types(parser, class_files, node->lhs, arena);
 
     const string_t type_literal_string =
         par_token_to_string(parser, node->main_token + 2);
     const string_t type_inferred_string =
-        ty_type_to_human_string(parser->types, lhs_i, arena);
+        ty_type_to_human_string(parser->types, type_lhs_i, arena);
 
     if (!string_eq(type_literal_string, type_inferred_string)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
@@ -3481,13 +3542,40 @@ static u32 ty_resolve_types(par_parser_t *parser,
       par_error(parser, token, error.value);
     }
 
-    return node->type_i = lhs_i;
+    return node->type_i = type_lhs_i;
   }
   case AST_KIND_VAR_REFERENCE: {
     pg_assert(node->lhs > 0);
     return node->type_i = parser->nodes[node->lhs].type_i;
-    break;
   }
+  case AST_KIND_IF: {
+    pg_assert(node->lhs > 0);
+    pg_assert(node->lhs < pg_array_len(parser->nodes));
+    pg_assert(node->rhs > 0);
+    pg_assert(node->rhs < pg_array_len(parser->nodes));
+
+    const u32 type_condition_i =
+        ty_resolve_types(parser, class_files, node->lhs, arena);
+
+    if (parser->types[type_condition_i].kind != TYPE_BOOL) {
+      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error,
+                            "incompatible types, expect Boolean, got: ");
+
+      const string_t type_inferred_string =
+          ty_type_to_human_string(parser->types, type_condition_i, arena);
+      string_append_string(&error, type_inferred_string);
+      par_error(parser, token, error.value);
+    }
+
+    const u32 type_then_i =
+        ty_resolve_types(parser, class_files, node->rhs, arena);
+    pg_assert(type_then_i > 0);
+
+    return node->type_i = type_then_i;
+  }
+
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
@@ -3755,6 +3843,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i);
     break;
+  }
+  case AST_KIND_IF: {
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->variables != NULL);
+    pg_assert(node->type_i > 0);
+    pg_assert(node->lhs > 0);
+    pg_assert(node->lhs < pg_array_len(parser->nodes));
+    pg_assert(node->rhs > 0);
+    pg_assert(node->rhs < pg_array_len(parser->nodes));
+
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    // TODO: jump
+    cg_generate_node(gen, parser, class_file, node->rhs, arena);
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
