@@ -3017,6 +3017,34 @@ static u32 par_parse_var_definition(par_parser_t *parser) {
                    "expected variable name (identifier)");
   const u32 name_token_i = parser->tokens_i - 1;
 
+  const u32 previous_var_i =
+      par_find_variable(parser, par_token_to_string(parser, name_token_i));
+  if (previous_var_i != (u32)-1) {
+    pg_assert(previous_var_i < pg_array_len(parser->variables));
+    const par_variable_t *const previous_var =
+        &parser->variables[previous_var_i];
+
+    pg_assert(previous_var->var_definition_node_i > 0);
+    pg_assert(previous_var->var_definition_node_i <
+              pg_array_len(parser->nodes));
+    const par_ast_node_t *const previous_var_node =
+        &parser->nodes[previous_var->var_definition_node_i];
+
+    const lex_token_t previous_var_name_token =
+        parser->lexer->tokens[previous_var_node->main_token];
+
+    u32 line = 0;
+    u32 column = 0;
+    string_t token_string = {0};
+    par_find_token_position(parser, previous_var_name_token, &line, &column,
+                            &token_string);
+    char error[256] = {0};
+    snprintf(error, 255, "variable shadowing, already declared at %u:%u", line,
+             column);
+    par_error(parser, parser->lexer->tokens[name_token_i], error);
+    return 0;
+  }
+
   par_expect_token(parser, TOKEN_KIND_COLON,
                    "expected colon between variable name and type");
 
