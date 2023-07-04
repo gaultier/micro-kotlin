@@ -2757,9 +2757,9 @@ static u32 par_declare_variable(par_parser_t *parser, string_t name) {
   pg_assert(pg_array_len(parser->variables) < UINT32_MAX);
 
   const par_variable_t variable = {
-                                         .name = name,
-                                         .scope_depth = parser->scope_depth,
-                                     };
+      .name = name,
+      .scope_depth = parser->scope_depth,
+  };
   pg_array_append(parser->variables, variable);
   return pg_array_last_index(parser->variables);
 }
@@ -2871,6 +2871,19 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
   return number;
 }
 
+static string_t par_token_to_string(par_parser_t *parser, u32 token_i) {
+  pg_assert(parser != NULL);
+  pg_assert(token_i < pg_array_len(parser->lexer->tokens));
+
+  const lex_token_t token = parser->lexer->tokens[token_i];
+
+  return (string_t){
+      .value = &parser->buf[token.source_offset],
+      .len = lex_find_token_length(parser->lexer, parser->buf, parser->buf_len,
+                                   token),
+  };
+}
+
 static u32 par_parse_expression(par_parser_t *parser);
 
 static u32 par_parse_builtin_println(par_parser_t *parser) {
@@ -2942,7 +2955,7 @@ static u32 par_parse_var_definition(par_parser_t *parser) {
 
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
                    "expected variable name (identifier)");
-  const u32 name_token = parser->tokens_i - 1;
+  const u32 name_token_i = parser->tokens_i - 1;
 
   par_expect_token(parser, TOKEN_KIND_COLON,
                    "expected colon between variable name and type");
@@ -2953,10 +2966,13 @@ static u32 par_parse_var_definition(par_parser_t *parser) {
 
   const par_ast_node_t node = {
       .kind = AST_KIND_VAR_DEFINITION,
-      .main_token = name_token,
+      .main_token = name_token_i,
       .lhs = par_parse_expression(parser),
   };
   pg_array_append(parser->nodes, node);
+
+  const string_t variable_name = par_token_to_string(parser, name_token_i);
+  par_declare_variable(parser, variable_name);
   return pg_array_last_index(parser->nodes);
 }
 
@@ -3359,15 +3375,9 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
   case AST_KIND_VAR_DEFINITION: {
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
-    const lex_token_t type_literal_token =
-        parser->lexer->tokens[node->main_token + 2];
 
-    const string_t type_literal_string = (string_t){
-        .value = &parser->buf[type_literal_token.source_offset],
-        .len = lex_find_token_length(parser->lexer, parser->buf,
-                                     parser->buf_len, type_literal_token),
-    };
-
+    const string_t type_literal_string =
+        par_token_to_string(parser, node->main_token + 2);
     const string_t type_inferred_string =
         ty_type_to_human_string(parser->types, lhs_i, arena);
 
