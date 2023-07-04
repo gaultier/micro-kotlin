@@ -2597,6 +2597,11 @@ typedef enum {
 } par_parser_state_t;
 
 typedef struct {
+  u32 scope_depth;
+  string_t name;
+} par_variable_t;
+
+typedef struct {
   char *buf;
   u32 buf_len;
   u32 tokens_i;
@@ -2605,7 +2610,23 @@ typedef struct {
   par_parser_state_t state;
   par_type_t *types;
   u32 current_function_i;
+  par_variable_t *variables;
+  u32 scope_depth;
 } par_parser_t;
+
+static void par_begin_scope(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->scope_depth < UINT32_MAX);
+
+  parser->scope_depth += 1;
+}
+
+static void par_end_scope(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->scope_depth > 0);
+
+  parser->scope_depth -= 1;
+}
 
 static void ut_fwrite_indent(FILE *file, u16 indent) {
   for (u16 i = 0; i < indent; i++) {
@@ -2726,6 +2747,21 @@ static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   return parser->tokens_i == pg_array_len(parser->lexer->tokens);
+}
+
+static u32 par_declare_variable(par_parser_t *parser, string_t name) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->scope_depth > 0);
+  pg_assert(parser->variables != NULL);
+
+  pg_assert(pg_array_len(parser->variables) < UINT32_MAX);
+
+  const par_variable_t variable = {
+                                         .name = name,
+                                         .scope_depth = parser->scope_depth,
+                                     };
+  pg_array_append(parser->variables, variable);
+  return pg_array_last_index(parser->variables);
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
@@ -3030,11 +3066,14 @@ static u32 par_parse_block(par_parser_t *parser) {
   // Empty block.
   if (par_match_token(parser, TOKEN_KIND_RIGHT_BRACE))
     return 0;
+
   if (par_is_at_end(parser)) {
     par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
                      "expected right curly brace after the arguments");
     return 0;
   }
+
+  par_begin_scope(parser);
 
   const par_ast_node_t root = {
       .kind = AST_KIND_BINARY,
@@ -3042,6 +3081,8 @@ static u32 par_parse_block(par_parser_t *parser) {
       .rhs = par_parse_block(parser),
   };
   pg_array_append(parser->nodes, root);
+
+  par_end_scope(parser);
   return pg_array_last_index(parser->nodes);
 }
 
