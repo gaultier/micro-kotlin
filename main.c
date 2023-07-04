@@ -56,7 +56,8 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(class_files, 32768, &arena);
     {
       LOG("'arena before reading class files'=%lu", arena.current_offset);
-      char *const class_path = "/home/pg/scratch/java-module/java.base/java"; // FIXME
+      char *const class_path =
+          "/home/pg/scratch/java-module/java.base/java"; // FIXME
       cf_read_class_files(class_path, strlen(class_path), &class_files, &arena);
       LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
           arena.current_offset);
