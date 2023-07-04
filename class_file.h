@@ -633,6 +633,8 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE);
   cf_code_array_push_u8(code, var_i);
+
+  frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
 static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -2809,7 +2811,7 @@ static u32 par_find_variable(const par_parser_t *parser, string_t name) {
       return (u32)i;
   }
 
-  return 0;
+  return -1;
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
@@ -2990,7 +2992,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
 
     const string_t variable_name = par_token_to_string(parser, node.main_token);
     const u32 variable_i = par_find_variable(parser, variable_name);
-    if (variable_i == 0) {
+    if (variable_i == (u32)-1) {
       par_error(parser, parser->lexer->tokens[node.main_token],
                 "unknown reference to variable");
     }
@@ -3292,8 +3294,6 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 8,
                         arena);
   pg_array_init_reserve(parser->variables, 256, arena);
-  const par_variable_t dummy_variable = {0};
-  pg_array_append(parser->variables, dummy_variable);
 
   parser->tokens_i = 1; // Skip the dummy token.
 
@@ -3646,8 +3646,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     };
     pg_array_init_reserve(method.attributes, 8, arena);
 
-    cf_attribute_code_t code = {.max_locals =
-                                    main_type.v.method.argument_count};
+    cf_attribute_code_t code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
     cf_frame_t frame = {0};
@@ -3664,6 +3663,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_asm_return(&code.code);
 
     gen->code->max_stack = gen->frame->max_stack;
+    gen->code->max_locals = gen->frame->max_locals; // TODO: method argument count.
+
     cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
@@ -3718,7 +3719,10 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->variables != NULL);
     pg_assert(node->type_i > 0);
 
-    const u32 var_i = cf_find_variable(gen->frame, node->rhs);
+    pg_assert(node->lhs > 0);
+    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION);
+    const u32 var_i = cf_find_variable(gen->frame, node->lhs);
+    pg_assert(var_i != (u32)-1);
 
     cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i);
     break;
