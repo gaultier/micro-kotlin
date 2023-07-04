@@ -621,6 +621,24 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
+static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_ISTORE);
+  cf_code_array_push_u8(code, var_i);
+}
+
+static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_ILOAD);
+  cf_code_array_push_u8(code, var_i);
+}
+
 static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
