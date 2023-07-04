@@ -354,7 +354,10 @@ typedef enum {
   BYTECODE_ISTORE = 0x36,
   BYTECODE_IADD = 0x60,
   BYTECODE_IMUL = 0x68,
+  BYTECODE_IFEQ = 0x99,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
+  BYTECODE_IMPDEP1 = 0xfe,
+  BYTECODE_IMPDEP2 = 0xff,
 } cf_op_kind_t;
 
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
@@ -624,6 +627,16 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
     break;
   }
   }
+}
+
+static void cf_asm_ifeq(u8 **code, cf_frame_t *frame) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_IFEQ);
+  cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
+  cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
 }
 
 static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -3854,8 +3867,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
     cg_generate_node(gen, parser, class_file, node->lhs, arena);
-    // TODO: jump
+    cf_asm_ifeq(&gen->code->code, gen->frame);
+    const u16 jump_to_else_code_i = pg_array_len(gen->code->code) - 2;
+
     cg_generate_node(gen, parser, class_file, node->rhs, arena);
+    const u16 else_code_i = pg_array_len(gen->code->code);
+    const u16 else_jump_offset = 1 /* start counting offset from the `if_` opcode */ + else_code_i - jump_to_else_code_i;
+
+    // Patch jump location.
+    gen->code->code[jump_to_else_code_i + 0] =
+        (u8)((u16)else_jump_offset & 0xff00) >> 8;
+    gen->code->code[jump_to_else_code_i + 1] =
+        (u8)((u16)else_jump_offset & 0x00ff) >> 0;
+
     break;
   }
   case AST_KIND_MAX:
