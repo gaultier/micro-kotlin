@@ -358,9 +358,16 @@ typedef enum {
 static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
 
 typedef struct {
+  u32 scope_depth;
+  string_t name;
+  u32 var_definition_node_i;
+} par_variable_t;
+
+typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
+  par_variable_t *variables;
 } cf_frame_t;
 
 struct par_type_t;
@@ -510,6 +517,11 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   pg_assert(index <= array->len + 1);
   array->len += 1;
   return index;
+}
+
+static void cf_frame_init(cf_frame_t *frame, arena_t *arena) {
+  pg_assert(frame != NULL);
+  pg_array_init_reserve(frame->variables, 32, arena);
 }
 
 static const cf_constant_t *
@@ -2597,11 +2609,6 @@ typedef enum {
 } par_parser_state_t;
 
 typedef struct {
-  u32 scope_depth;
-  string_t name;
-} par_variable_t;
-
-typedef struct {
   char *buf;
   u32 buf_len;
   u32 tokens_i;
@@ -2749,7 +2756,8 @@ static bool par_is_at_end(const par_parser_t *parser) {
   return parser->tokens_i == pg_array_len(parser->lexer->tokens);
 }
 
-static u32 par_declare_variable(par_parser_t *parser, string_t name) {
+static u32 par_declare_variable(par_parser_t *parser, string_t name,
+                                u32 node_i) {
   pg_assert(parser != NULL);
   pg_assert(parser->scope_depth > 0);
   pg_assert(parser->variables != NULL);
@@ -2759,9 +2767,24 @@ static u32 par_declare_variable(par_parser_t *parser, string_t name) {
   const par_variable_t variable = {
       .name = name,
       .scope_depth = parser->scope_depth,
+      .var_definition_node_i = node_i,
   };
   pg_array_append(parser->variables, variable);
   return pg_array_last_index(parser->variables);
+}
+
+static u32 par_find_variable(const par_parser_t *parser, string_t name) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->scope_depth > 0);
+  pg_assert(parser->variables != NULL);
+
+  for (i64 i = pg_array_len(parser->variables) - 1; i >= 0; i--) {
+    const par_variable_t *const variable = &parser->variables[i];
+    if (string_eq(name, variable->name))
+      return (u32)i;
+  }
+
+  return 0;
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
@@ -2934,11 +2957,20 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
   } else if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN)) {
     return par_parse_builtin_println(parser);
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    const par_ast_node_t node = {
+    par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
         .main_token = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node);
+
+    const string_t variable_name = par_token_to_string(parser, node.main_token);
+    const u32 variable_i = par_find_variable(parser, variable_name);
+    if (variable_i == 0) {
+      par_error(parser, parser->lexer->tokens[node.main_token],
+                "unknown reference to variable");
+    }
+
+    node.lhs = parser->variables[variable_i].var_definition_node_i;
     return pg_array_last_index(parser->nodes);
   }
 
@@ -2972,7 +3004,8 @@ static u32 par_parse_var_definition(par_parser_t *parser) {
   pg_array_append(parser->nodes, node);
 
   const string_t variable_name = par_token_to_string(parser, name_token_i);
-  par_declare_variable(parser, variable_name);
+  par_declare_variable(parser, variable_name,
+                       pg_array_last_index(parser->nodes));
   return pg_array_last_index(parser->nodes);
 }
 
@@ -3232,11 +3265,14 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
   pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 8,
                         arena);
+  pg_array_init_reserve(parser->variables, 256, arena);
+  const par_variable_t dummy_variable = {0};
+  pg_array_append(parser->variables, dummy_variable);
 
   parser->tokens_i = 1; // Skip the dummy token.
 
-  const par_ast_node_t dummy = {0};
-  pg_array_append(parser->nodes, dummy);
+  const par_ast_node_t dummy_node = {0};
+  pg_array_append(parser->nodes, dummy_node);
 
   const u32 root_i = par_parse_declarations(parser);
 
@@ -3394,8 +3430,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i = lhs_i;
   }
   case AST_KIND_VAR_REFERENCE: {
-    pg_assert(0 && "todo");
-    return node->type_i;
+    return parser->nodes[node->lhs].type_i;
     break;
   }
   case AST_KIND_MAX:
@@ -3576,6 +3611,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
     cf_frame_t frame = {0};
+    cf_frame_init(&frame, arena);
     gen->frame = &frame;
 
     // `lhs` is the arguments, `rhs` is the body.
@@ -3620,10 +3656,21 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     }
     break;
   }
-  case AST_KIND_VAR_DEFINITION:
-    pg_assert(0 && "todo");
-  case AST_KIND_VAR_REFERENCE:
-    pg_assert(0 && "todo");
+  case AST_KIND_VAR_DEFINITION: {
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->variables != NULL);
+    pg_assert(node->type_i > 0);
+
+    // TODO: set variable in a local slot
+    break;
+  }
+  case AST_KIND_VAR_REFERENCE: {
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->variables != NULL);
+    pg_assert(node->type_i > 0);
+
+    // TODO: load
+  }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
