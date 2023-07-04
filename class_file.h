@@ -2995,7 +2995,8 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
                 "unknown reference to variable");
     }
 
-    node.lhs = parser->variables[variable_i].var_definition_node_i;
+    pg_array_last(parser->nodes)->lhs =
+        parser->variables[variable_i].var_definition_node_i;
     return pg_array_last_index(parser->nodes);
   }
 
@@ -3455,7 +3456,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i = lhs_i;
   }
   case AST_KIND_VAR_REFERENCE: {
-    return parser->nodes[node->lhs].type_i;
+    pg_assert(node->lhs > 0);
+    return node->type_i = parser->nodes[node->lhs].type_i;
     break;
   }
   case AST_KIND_MAX:
@@ -3470,6 +3472,19 @@ typedef struct {
   u16 out_field_ref_i;
   const cf_class_file_t *class_files;
 } cg_generator_t;
+
+static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
+  pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
+
+  for (i64 i = pg_array_len(frame->variables) - 1; i >= 0; i--) {
+    const cf_variable_t *const variable = &frame->variables[i];
+    if (variable->node_i == node_i)
+      return (u32)i;
+  }
+
+  return 0;
+}
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
                              cf_class_file_t *class_file, u32 node_i,
@@ -3703,7 +3718,10 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->variables != NULL);
     pg_assert(node->type_i > 0);
 
-    // TODO: load
+    const u32 var_i = cf_find_variable(gen->frame, node->rhs);
+
+    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i);
+    break;
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
