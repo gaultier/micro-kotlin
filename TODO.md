@@ -21,6 +21,7 @@
 [ ] Grouping
 [ ] Casts
 [x] Control flow: If
+[ ] Logical operators (and, or)
 [ ] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
@@ -34,6 +35,7 @@ Sugar (nice to have):
 [ ] Generate exceptions table
 [ ] Generate multi-threading stuff (volatile, synchronized, etc)
 [ ] Out-of-order declarations
+[ ] Bit operators
 
 ## Approach for reading external class files to know what fields/methods are available
 
