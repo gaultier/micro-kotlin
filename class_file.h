@@ -366,10 +366,15 @@ typedef struct {
 } par_variable_t;
 
 typedef struct {
+  u32 node_i;
+  u32 type_i;
+} cf_variable_t;
+
+typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
-  par_variable_t *variables;
+  cf_variable_t *variables;
 } cf_frame_t;
 
 struct par_type_t;
@@ -3681,7 +3686,16 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->variables != NULL);
     pg_assert(node->type_i > 0);
 
-    // TODO: store variable in a local slot
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+
+    const cf_variable_t variable = {
+        .node_i = node_i,
+        .type_i = node->type_i,
+    };
+    pg_array_append(gen->frame->variables, variable);
+
+    cf_asm_store_variable_int(&gen->code->code, gen->frame,
+                              pg_array_last_index(gen->frame->variables));
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
