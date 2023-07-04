@@ -3469,7 +3469,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
                   .argument_types_i = ty_add_type(&parser->types, lhs_type),
               }}};
     pg_array_append(parser->types, println_type);
-    node->type_i = return_type_i;
+    node->type_i = pg_array_last_index(parser->types);
 
     string_t descriptor = string_reserve(64, arena);
     cf_fill_type_descriptor_string(
@@ -3491,7 +3491,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
       par_error(parser, token, error.value);
     }
 
-    return node->type_i;
+    return return_type_i;
   }
   case AST_KIND_NUM:
     pg_array_append(parser->types,
@@ -3856,6 +3856,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cg_generate_node(gen, parser, class_file, node->lhs, arena);
     // TODO: jump
     cg_generate_node(gen, parser, class_file, node->rhs, arena);
+    break;
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
