@@ -49,6 +49,8 @@ int main(int argc, char *argv[]) {
       par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
       arena.current_offset = arena_offset_before;
     }
+    if (parser.state != PARSER_STATE_OK)
+      return 1;
 
     cf_class_file_t *class_files = NULL;
     pg_array_init_reserve(class_files, 32768, &arena);
