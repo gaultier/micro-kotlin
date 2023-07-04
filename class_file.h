@@ -2995,10 +2995,10 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     if (variable_i == (u32)-1) {
       par_error(parser, parser->lexer->tokens[node.main_token],
                 "unknown reference to variable");
+    } else {
+      pg_array_last(parser->nodes)->lhs =
+          parser->variables[variable_i].var_definition_node_i;
     }
-
-    pg_array_last(parser->nodes)->lhs =
-        parser->variables[variable_i].var_definition_node_i;
     return pg_array_last_index(parser->nodes);
   }
 
@@ -3663,7 +3663,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_asm_return(&code.code);
 
     gen->code->max_stack = gen->frame->max_stack;
-    gen->code->max_locals = gen->frame->max_locals; // TODO: method argument count.
+    gen->code->max_locals =
+        gen->frame->max_locals; // TODO: method argument count.
 
     cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
