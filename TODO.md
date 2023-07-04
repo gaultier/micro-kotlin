@@ -2,9 +2,9 @@
 [x] Generate type descriptors as strings
 [x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
 [x] Semantic opcode generation functions
-[.] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
+[x] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
 [.] Call functions generically (no builtin) from the same class file
-[ ] Call functions generically (no builtin) from other class files
+[.] Call functions generically (no builtin) from other class files
 [x] Define functions
 [ ] Generate stack map tables
 [ ] Use latest jvm version
@@ -12,15 +12,20 @@
 [x] Log memory used in arena
 [x] Write non-trivial program with the API (opcode generation functions)
 [x] Compute class file name
-[ ] Naive register (e.g. locals) allocation
-[.] Type checking, no inference
-[ ] Variables
+[x] Naive register (e.g. locals) allocation
+[x] Type checking, no inference
+[x] Local variables
 [ ] Function definition
 [ ] Field access
 [ ] String
 [ ] Grouping
 [ ] Casts
-[ ] Control flow
+[x] Control flow: If
+[ ] Control flow: While
+[ ] Control flow: Continue
+[ ] Control flow: Break
+[ ] Control flow: For (?)
+[ ] Recursion (mutual recursion?)
 
 Sugar (nice to have):
 
@@ -28,6 +33,7 @@ Sugar (nice to have):
 [ ] Generate full debug information
 [ ] Generate exceptions table
 [ ] Generate multi-threading stuff (volatile, synchronized, etc)
+[ ] Out-of-order declarations
 
 ## Approach for reading external class files to know what fields/methods are available
 
