@@ -451,7 +451,9 @@ static u16 smp_offset_delta_from_last(const cf_stack_map_frame_t *smp_frames,
   if (pg_array_len(smp_frames) == 0)
     return current_offset;
 
-  return current_offset - pg_array_last(smp_frames)->offset_absolute;
+  const u16 last_offset = pg_array_last(smp_frames)->offset_absolute;
+  pg_assert(last_offset <= current_offset);
+  return 1 + current_offset - last_offset;
   // TODO: check off by one errors.
 }
 
@@ -465,6 +467,7 @@ static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
       smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta <= 63);
   pg_assert(offset_delta > 0);
+  pg_assert(offset_delta <= current_offset);
 
   const cf_stack_map_frame_t smp_frame = {
       .kind = offset_delta,
@@ -485,6 +488,7 @@ static void smp_add_chop_frame(cf_frame_t *frame, u8 chopped_locals_count,
   const u16 offset_delta =
       smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
+  pg_assert(offset_delta <= current_offset);
 
   const cf_stack_map_frame_t smp_frame = {
       .kind = 251 - chopped_locals_count,
@@ -509,6 +513,7 @@ static void smp_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
   const u16 offset_delta =
       smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
+  pg_assert(offset_delta <= current_offset);
 
   const cf_stack_map_frame_t smp_frame = {
       .kind = 251 + added_locals_count,
@@ -764,7 +769,7 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, var_i);
 
   frame->current_stack -= 1;
-  smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, pg_array_len(*code));
+  // smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, pg_array_len(*code));
 }
 
 static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -776,8 +781,6 @@ static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, var_i);
 
   frame->current_stack += 1;
-
-  frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
 static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
@@ -808,8 +811,8 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cf_frame_t *frame) {
   cf_code_array_push_u8(code, BYTECODE_LDC_W);
   cf_code_array_push_u16(code, constant_i);
 
-  frame->current_stack += 1;
   pg_assert(frame->current_stack < UINT16_MAX);
+  frame->current_stack += 1;
   frame->max_stack = pg_max(frame->max_stack, frame->current_stack);
 }
 
@@ -2021,7 +2024,7 @@ static void cf_write_stack_map_frame(FILE *file,
 
   if (0 <= smp_frame->kind && smp_frame->kind <= 63) // same_frame
   {
-    pg_assert(0 && "todo");
+    file_write_u8(file, smp_frame->kind);
   } else if (64 <= smp_frame->kind &&
              smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
     pg_assert(0 && "todo");
@@ -3862,15 +3865,16 @@ static void cg_end_scope(cf_frame_t *frame, const u8 *code) {
 
   for (i64 i = pg_array_len(frame->variables) - 1; i >= 0; i--) {
     const cf_variable_t *const variable = &frame->variables[i];
-    if (variable->scope_depth < frame->current_scope_depth)
+    if (variable->scope_depth < frame->current_scope_depth) {
+      PG_ARRAY_HEADER(frame->variables)->len =
+          i + 1; // Drop all variables in the current scope.
       break;
+    }
     pg_assert(variable->scope_depth == frame->current_scope_depth);
 
-    const u16 current_offset = pg_array_len(code);
-    const u16 offset_delta =
-        smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
-    smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT /* FIXME */,
-                       offset_delta);
+    //    const u16 current_offset = pg_array_len(code);
+    // smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT /* FIXME */,
+    // current_offset);
   }
 
   frame->current_scope_depth -= 1;
@@ -4041,6 +4045,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = &code;
     cf_frame_t frame = {0};
     cf_frame_init(&frame, arena);
+    const cf_variable_t this = {0}; // FIXME
+    pg_array_append(frame.variables, this);
+    frame.max_locals = pg_array_len(frame.variables);
     gen->frame = &frame;
 
     // `lhs` is the arguments, `rhs` is the body.
@@ -4053,8 +4060,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cf_asm_return(&code.code);
 
     gen->code->max_stack = gen->frame->max_stack;
-    gen->code->max_locals =
-        gen->frame->max_locals + main_type.v.method.argument_count;
+    gen->code->max_locals = gen->frame->max_locals;
 
     cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
@@ -4116,6 +4122,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .scope_depth = gen->frame->current_scope_depth,
     };
     pg_array_append(gen->frame->variables, variable);
+    gen->frame->max_locals =
+        pg_max(gen->frame->max_locals, pg_array_len(gen->frame->variables));
 
     cf_asm_store_variable_int(&gen->code->code, gen->frame,
                               pg_array_last_index(gen->frame->variables));
@@ -4147,13 +4155,14 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
                      arena); // Condition.
 
     cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
-    // To be patched in a bit.
+
+    //  To be patched in a bit.
     const u16 jump_to_else_location_i = pg_array_len(gen->code->code) - 2;
-    u16 jump_to_else_target_location_i = pg_array_len(gen->code->code);
 
     const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
 
     u16 jump_to_after_else_i = (u16)-1;
+    u16 jump_to_else_target_location_i = (u16)-1;
     if (rhs->kind == AST_KIND_BINARY &&
         parser->lexer->tokens[rhs->main_token].kind ==
             TOKEN_KIND_KEYWORD_ELSE) {
@@ -4172,6 +4181,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, node->rhs, arena); // Then
       cg_end_scope(gen->frame, gen->code->code);
+      jump_to_else_target_location_i = pg_array_len(gen->code->code);
     }
 
     const u16 after_else_location_i = pg_array_len(gen->code->code);
@@ -4200,6 +4210,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       gen->code->code[jump_to_after_else_i + 1] =
           (u8)((u16)jump_to_after_else_offset & 0x00ff) >> 0;
     }
+    smp_add_same_frame(gen->frame, pg_array_len(gen->code->code));
 
     break;
   }
