@@ -392,7 +392,7 @@ typedef struct {
   u8 offset_delta;
   u16 offset_absolute;
   cf_verification_info_t
-      verification_info; // TODO: it's actually: `cf_verification_info_t[3]`.
+      verification_info; // TODO: it's actually: `cf_verification_info_t[]`.
 } cf_stack_map_frame_t;
 
 typedef struct {
@@ -1214,12 +1214,14 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
     } else if (247 <= smp_frame.kind &&
                smp_frame.kind <=
                    247) { // same_locals_1_stack_item_frame_extended
-      pg_assert(0 && "todo");
+      smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
+      cf_buf_read_stack_map_table_attribute_verification_infos(
+          buf, buf_len, current, 1);
     } else if (248 <= smp_frame.kind && smp_frame.kind <= 250) { // chop_frame
-      pg_assert(0 && "todo");
+      smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
     } else if (251 <= smp_frame.kind &&
                smp_frame.kind <= 251) { // same_frame_extended
-      pg_assert(0 && "todo");
+      smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
     } else if (252 <= smp_frame.kind && smp_frame.kind <= 254) { // append_frame
       smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       const u16 verification_info_count = smp_frame.kind - 251;
@@ -1227,7 +1229,13 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
           buf, buf_len, current, verification_info_count);
     } else if (255 <= smp_frame.kind &&
                smp_frame.kind <= 255) { // full_frame_attribute
-      pg_assert(0 && "todo");
+      smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
+      const u16 locals_count = buf_read_be_u16(buf, buf_len, current);
+      cf_buf_read_stack_map_table_attribute_verification_infos(
+          buf, buf_len, current, locals_count);
+      const u16 stack_items_count = buf_read_be_u16(buf, buf_len, current);
+      cf_buf_read_stack_map_table_attribute_verification_infos(
+          buf, buf_len, current, stack_items_count);
     }
     pg_array_append(smp_frames, smp_frame);
   }
