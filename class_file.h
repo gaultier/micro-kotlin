@@ -4239,6 +4239,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cg_generate_node(gen, parser, class_file, node->lhs,
                      arena); // Condition.
 
+    const u16 jump_conditionally_opcode_location = pg_array_len(gen->code->code);
     cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
 
     //  To be patched in a bit.
@@ -4273,9 +4274,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     // Patch first jump.
     {
-      const u16 jump_to_else_offset =
-          1 /* start counting offset from the jump opcode */ +
-          jump_to_else_target_location_i - jump_to_else_location_i;
+      const u16 jump_to_else_offset =  jump_to_else_target_location_i -
+                                      jump_conditionally_opcode_location;
 
       // Patch jump location.
       gen->code->code[jump_to_else_location_i + 0] =
