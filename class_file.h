@@ -390,6 +390,7 @@ typedef enum {
 typedef struct {
   u8 kind;
   u8 offset_delta;
+  u16 offset_absolute;
   cf_verification_info_t
       verification_info; // TODO: it's actually: `cf_verification_info_t[3]`.
 } cf_stack_map_frame_t;
@@ -444,33 +445,52 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-static void smp_add_same_frame(cf_frame_t *frame, cf_stack_map_frame_t **frames,
-                               u8 offset_delta) {
+static u16 smp_offset_delta_from_last(const cf_stack_map_frame_t *smp_frames,
+                                      u16 current_offset) {
+  pg_assert(smp_frames != NULL);
+  if (pg_array_len(smp_frames) == 0)
+    return current_offset;
+
+  return current_offset - pg_array_last(smp_frames)->offset_absolute;
+  // TODO: check off by one errors.
+}
+
+static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
 
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(frame->current_stack == 0);
+
+  const u16 offset_delta =
+      smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta <= 63);
   pg_assert(offset_delta > 0);
 
-  const cf_stack_map_frame_t smp_frame = {.kind = offset_delta};
+  const cf_stack_map_frame_t smp_frame = {
+      .kind = offset_delta,
+      .offset_absolute = current_offset,
+  };
   pg_array_append(frame->stack_map_frames, smp_frame);
 }
 
 static void smp_add_chop_frame(cf_frame_t *frame, u8 chopped_locals_count,
                                cf_verification_info_t verification_info,
-                               u8 offset_delta) {
+                               u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(chopped_locals_count > 0);
   pg_assert(chopped_locals_count <= 3);
   pg_assert(frame->current_stack == 0);
+
+  const u16 offset_delta =
+      smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
 
   const cf_stack_map_frame_t smp_frame = {
       .kind = 251 - chopped_locals_count,
       .verification_info = verification_info,
       .offset_delta = offset_delta,
+      .offset_absolute = current_offset,
   };
   pg_assert(smp_frame.kind >= 248);
   pg_assert(smp_frame.kind <= 250);
@@ -479,18 +499,22 @@ static void smp_add_chop_frame(cf_frame_t *frame, u8 chopped_locals_count,
 
 static void smp_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
                                  cf_verification_info_t verification_info,
-                                 u8 offset_delta) {
+                                 u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(added_locals_count > 0);
   pg_assert(added_locals_count <= 3);
   pg_assert(frame->current_stack == 0);
+
+  const u16 offset_delta =
+      smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
 
   const cf_stack_map_frame_t smp_frame = {
       .kind = 251 + added_locals_count,
       .verification_info = verification_info,
       .offset_delta = offset_delta,
+      .offset_absolute = current_offset,
   };
   pg_assert(smp_frame.kind >= 252);
   pg_assert(smp_frame.kind <= 254);
@@ -740,7 +764,7 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, var_i);
 
   frame->current_stack -= 1;
-  smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, 2);
+  smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, pg_array_len(*code));
 }
 
 static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -2008,7 +2032,8 @@ static void cf_write_stack_map_frame(FILE *file,
                  247) { // same_locals_1_stack_item_frame_extended
     pg_assert(0 && "todo");
   } else if (248 <= smp_frame->kind && smp_frame->kind <= 250) { // chop_frame
-    pg_assert(0 && "todo");
+    file_write_u8(file, smp_frame->kind);
+    file_write_be_u16(file, smp_frame->offset_delta);
   } else if (251 <= smp_frame->kind &&
              smp_frame->kind <= 251) { // same_frame_extended
     pg_assert(0 && "todo");
@@ -3830,13 +3855,25 @@ static void cg_begin_scope(cf_frame_t *frame) {
   frame->current_scope_depth += 1;
 }
 
-static void cg_end_scope(cf_frame_t *frame) {
+static void cg_end_scope(cf_frame_t *frame, const u8 *code) {
   pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
   pg_assert(frame->current_scope_depth > 0);
 
-  frame->current_scope_depth -= 1;
+  for (i64 i = pg_array_len(frame->variables) - 1; i >= 0; i--) {
+    const cf_variable_t *const variable = &frame->variables[i];
+    if (variable->scope_depth < frame->current_scope_depth)
+      break;
+    pg_assert(variable->scope_depth == frame->current_scope_depth);
 
-  // TODO: stack map table frames to chop variables.
+    const u16 current_offset = pg_array_len(code);
+    const u16 offset_delta =
+        smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
+    smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT /* FIXME */,
+                       offset_delta);
+  }
+
+  frame->current_scope_depth -= 1;
 }
 
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4122,7 +4159,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
             TOKEN_KIND_KEYWORD_ELSE) {
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
-      cg_end_scope(gen->frame);
+      cg_end_scope(gen->frame, gen->code->code);
 
       cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
@@ -4130,7 +4167,11 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
-      cg_end_scope(gen->frame);
+      cg_end_scope(gen->frame, gen->code->code);
+    } else {
+      cg_begin_scope(gen->frame);
+      cg_generate_node(gen, parser, class_file, node->rhs, arena); // Then
+      cg_end_scope(gen->frame, gen->code->code);
     }
 
     const u16 after_else_location_i = pg_array_len(gen->code->code);
