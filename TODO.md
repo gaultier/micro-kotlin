@@ -6,8 +6,8 @@
 [.] Call functions generically (no builtin) from the same class file
 [.] Call functions generically (no builtin) from other class files
 [x] Define functions
-[ ] Generate stack map tables
-[ ] Use latest jvm version
+[x] Generate stack map tables
+[x] Use latest jvm version
 [x] Makefile/build.sh
 [x] Log memory used in arena
 [x] Write non-trivial program with the API (opcode generation functions)
@@ -28,7 +28,7 @@
 [ ] Control flow: For (?)
 [ ] Recursion (mutual recursion?)
 
-Sugar (nice to have):
+Later, nice to have:
 
 [ ] Generate line tables
 [ ] Generate full debug information
@@ -36,6 +36,11 @@ Sugar (nice to have):
 [ ] Generate multi-threading stuff (volatile, synchronized, etc)
 [ ] Out-of-order declarations
 [ ] Bit operators
+[ ] Interfaces
+
+Probably much later/never:
+
+[ ] ...
 
 ## Approach for reading external class files to know what fields/methods are available
 
