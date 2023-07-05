@@ -452,9 +452,8 @@ static u16 smp_offset_delta_from_last(const cf_stack_map_frame_t *smp_frames,
     return current_offset;
 
   const u16 last_offset = pg_array_last(smp_frames)->offset_absolute;
-  pg_assert(last_offset <= current_offset);
-  return 1 + current_offset - last_offset;
-  // TODO: check off by one errors.
+  pg_assert(last_offset < current_offset);
+  return current_offset - last_offset - 1;
 }
 
 static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
@@ -832,8 +831,9 @@ static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
   cf_code_array_push_u16(code, method_ref_i);
 
   // FIXME: long, double takes 2 spots on the stack!
-  pg_assert(frame->current_stack >= method_type->argument_count);
-  frame->current_stack -= method_type->argument_count;
+  const u16 pop_size = 1 /* objectref */ + method_type->argument_count;
+  pg_assert(frame->current_stack >= pop_size);
+  frame->current_stack -= pop_size;
 }
 
 static void cf_asm_get_static(u8 **code, u16 field_i, cf_frame_t *frame) {
