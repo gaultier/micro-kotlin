@@ -2048,7 +2048,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
     for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
       const cf_attribute_t *const child_attribute = &code->attributes[i];
-      size += cf_compute_attribute_size(child_attribute);
+      size += sizeof(u16)+sizeof(u32) + cf_compute_attribute_size(child_attribute);
     }
     return size;
   }
@@ -2165,6 +2165,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     fwrite(code->code, pg_array_len(code->code), sizeof(u8), file);
 
     file_write_be_u16(file, pg_array_len(code->exceptions));
+    pg_assert(pg_array_len(code->exceptions) == 0 && "todo");
 
     cf_write_attributes(file, code->attributes);
 
@@ -2268,7 +2269,8 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_assert(arena != NULL);
 
   pg_array_init_reserve(code->code, 64, arena);
-  pg_array_init_reserve(code->attributes, 1024, arena);
+  pg_array_init_reserve(code->attributes, 4, arena);
+  pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
 static void cf_method_init(cf_method_t *method, arena_t *arena) {
@@ -4147,18 +4149,18 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals = gen->frame->max_locals;
 
-    cf_attribute_t attribute_code = {
-        .kind = ATTRIBUTE_KIND_CODE,
-        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
-        .v = {.code = code}};
-    pg_array_append(method.attributes, attribute_code);
-
-    cf_attribute_t attribute_stack_map_frames = {
+    const cf_attribute_t attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = cf_add_constant_cstring(&class_file->constant_pool,
                                         "StackMapTable"),
         .v = {.stack_map_table = gen->frame->stack_map_frames}};
-    pg_array_append(method.attributes, attribute_stack_map_frames);
+    pg_array_append(code.attributes, attribute_stack_map_frames);
+
+    const cf_attribute_t attribute_code = {
+        .kind = ATTRIBUTE_KIND_CODE,
+        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
+        .v = {.code = code}};
+    pg_array_append(method.attributes, attribute_code);
 
     pg_array_append(class_file->methods, method);
 
@@ -4239,7 +4241,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     cg_generate_node(gen, parser, class_file, node->lhs,
                      arena); // Condition.
 
-    const u16 jump_conditionally_opcode_location = pg_array_len(gen->code->code);
+    const u16 jump_conditionally_opcode_location =
+        pg_array_len(gen->code->code);
     cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
 
     //  To be patched in a bit.
@@ -4274,8 +4277,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     // Patch first jump.
     {
-      const u16 jump_to_else_offset =  jump_to_else_target_location_i -
-                                      jump_conditionally_opcode_location;
+      const u16 jump_to_else_offset =
+          jump_to_else_target_location_i - jump_conditionally_opcode_location;
 
       // Patch jump location.
       gen->code->code[jump_to_else_location_i + 0] =
