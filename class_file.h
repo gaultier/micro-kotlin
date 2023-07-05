@@ -2122,7 +2122,7 @@ static void cf_write(const cf_class_file_t *class_file, FILE *file) {
   fwrite(&cf_MAGIC_NUMBER, sizeof(cf_MAGIC_NUMBER), 1, file);
 
   file_write_be_u16(file, class_file->minor_version);
-  file_write_be_u16(file, class_file->major_version);
+  file_write_be_u16(file, 44+class_file->major_version);
   cf_write_constant_pool(class_file, file);
   file_write_be_u16(file, class_file->access_flags);
   file_write_be_u16(file, class_file->this_class);
