@@ -354,9 +354,10 @@ typedef enum {
   BYTECODE_ISTORE = 0x36,
   BYTECODE_IADD = 0x60,
   BYTECODE_IMUL = 0x68,
+  BYTECODE_IXOR = 0x82,
   BYTECODE_IFEQ = 0x99,
-  BYTECODE_GOTO = 0xa7,
   BYTECODE_IFNE = 0x9a,
+  BYTECODE_GOTO = 0xa7,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
   BYTECODE_IMPDEP1 = 0xfe,
   BYTECODE_IMPDEP2 = 0xff,
@@ -793,6 +794,16 @@ static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
   pg_assert(frame->current_stack >= 2);
 
   cf_code_array_push_u8(code, BYTECODE_IADD);
+
+  frame->current_stack -= 1;
+}
+
+static void cf_asm_ixor(u8 **code, cf_frame_t *frame) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_stack >= 2);
+
+  cf_code_array_push_u8(code, BYTECODE_IXOR);
 
   frame->current_stack -= 1;
 }
@@ -2485,6 +2496,12 @@ typedef enum {
   TOKEN_KIND_DOT,
   TOKEN_KIND_COLON,
   TOKEN_KIND_NOT,
+  TOKEN_KIND_EQUAL_EQUAL,
+  TOKEN_KIND_NOT_EQUAL,
+  TOKEN_KIND_LE,
+  TOKEN_KIND_LT,
+  TOKEN_KIND_GE,
+  TOKEN_KIND_GT,
 } lex_token_kind_t;
 
 typedef struct {
@@ -2527,6 +2544,17 @@ static u8 lex_peek(const char *buf, u32 buf_len, const char *const *current) {
   pg_assert(*current != NULL);
 
   return lex_is_at_end(buf, buf_len, current) ? 0 : **current;
+}
+
+static u8 lex_peek_next(const char *buf, u32 buf_len,
+                        const char *const *current) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  const char *const next = *current + 1;
+  return lex_is_at_end(buf, buf_len, &next) ? 0 : *next;
 }
 
 static u8 lex_advance(const char *buf, u32 buf_len, const char **current) {
@@ -2789,12 +2817,22 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       break;
     }
     case '!': {
-      const lex_token_t token = {
-          .kind = TOKEN_KIND_NOT,
-          .source_offset = lex_get_current_offset(buf, buf_len, current),
-      };
-      pg_array_append(lexer->tokens, token);
-      lex_advance(buf, buf_len, current);
+      if (lex_peek_next(buf, buf_len, current) == '=') {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_NOT_EQUAL,
+            .source_offset = lex_get_current_offset(buf, buf_len, current),
+        };
+        pg_array_append(lexer->tokens, token);
+        lex_advance(buf, buf_len, current);
+        lex_advance(buf, buf_len, current);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_NOT,
+            .source_offset = lex_get_current_offset(buf, buf_len, current),
+        };
+        pg_array_append(lexer->tokens, token);
+        lex_advance(buf, buf_len, current);
+      }
       break;
     }
     case '{': {
@@ -2900,8 +2938,14 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_COLON:
   case TOKEN_KIND_NOT:
   case TOKEN_KIND_EQUAL:
+  case TOKEN_KIND_LT:
+  case TOKEN_KIND_GT:
     return 1;
   case TOKEN_KIND_KEYWORD_IF:
+  case TOKEN_KIND_NOT_EQUAL:
+  case TOKEN_KIND_LE:
+  case TOKEN_KIND_GE:
+  case TOKEN_KIND_EQUAL_EQUAL:
     return 2;
   case TOKEN_KIND_KEYWORD_FUN:
   case TOKEN_KIND_KEYWORD_VAR:
@@ -2931,6 +2975,7 @@ typedef enum {
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
   AST_KIND_BINARY,
+  AST_KIND_UNARY,
   AST_KIND_VAR_DEFINITION,
   AST_KIND_VAR_REFERENCE,
   AST_KIND_IF,
@@ -2948,6 +2993,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
     [AST_KIND_IF] = "IF",
     [AST_KIND_BINARY] = "BINARY",
+    [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_LIST] = "LIST",
 };
 
@@ -3491,7 +3537,13 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   if (par_match_token(parser, TOKEN_KIND_NOT)) {
-    pg_assert(0 && "todo");
+    const par_ast_node_t node = {
+        .kind = AST_KIND_UNARY,
+        .lhs = par_parse_postfix_unary_expression(parser),
+        .main_token = parser->tokens_i - 1,
+    };
+    pg_array_append(parser->nodes, node);
+    return pg_array_last_index(parser->nodes);
   }
 
   return par_parse_postfix_unary_expression(parser);
@@ -3825,6 +3877,9 @@ static u32 ty_resolve_types(par_parser_t *parser,
     pg_array_append(parser->types,
                     (par_type_t){.kind = TYPE_INT}); // TODO: something smarter.
     return node->type_i = pg_array_last_index(parser->types);
+  case AST_KIND_UNARY:
+    return node->type_i =
+               ty_resolve_types(parser, class_files, node->lhs, arena);
   case AST_KIND_BINARY: {
     pg_assert(node->main_token > 0);
 
@@ -3947,7 +4002,7 @@ static void cg_begin_scope(cf_frame_t *frame) {
   frame->current_scope_depth += 1;
 }
 
-static void cg_end_scope(cf_frame_t *frame, const u8 *code) {
+static void cg_end_scope(cf_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(frame->current_scope_depth > 0);
@@ -4171,6 +4226,40 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     gen->frame = NULL;
     break;
   }
+  case AST_KIND_UNARY: {
+    pg_assert(node->lhs < pg_array_len(parser->nodes));
+
+    const lex_token_t token = parser->lexer->tokens[node->main_token];
+
+    u8 opcode = 0;
+    switch (token.kind) {
+    case TOKEN_KIND_NOT:
+      opcode = BYTECODE_IFNE;
+      break;
+    default:
+      pg_assert(0 && "todo");
+    }
+
+      pg_assert(0 && "todo");
+#if 0
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    const u16 jump_conditionally_opcode_location =
+        pg_array_len(gen->code->code);
+    cf_asm_jump_conditionally(&gen->code->code, gen->frame, opcode);
+    smp_add_same_frame(gen->frame, jump_conditionally_opcode_location);
+
+    const u16 jump_target = pg_array_len(gen->code->code);
+    const u16 jump_to_else_offset =
+        jump_target - jump_conditionally_opcode_location;
+
+    // Patch jump location.
+    gen->code->code[jump_conditionally_opcode_location + 0] =
+        (u8)((u16)jump_to_else_offset & 0xff00) >> 8;
+    gen->code->code[jump_conditionally_opcode_location + 1] =
+        (u8)((u16)jump_to_else_offset & 0x00ff) >> 0;
+#endif
+    break;
+  }
   case AST_KIND_BINARY: {
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
@@ -4259,7 +4348,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
             TOKEN_KIND_KEYWORD_ELSE) {
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
-      cg_end_scope(gen->frame, gen->code->code);
+      cg_end_scope(gen->frame);
 
       cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
@@ -4268,12 +4357,12 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
-      cg_end_scope(gen->frame, gen->code->code);
+      cg_end_scope(gen->frame);
       smp_add_same_frame(gen->frame, pg_array_len(gen->code->code));
     } else {
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, node->rhs, arena); // Then
-      cg_end_scope(gen->frame, gen->code->code);
+      cg_end_scope(gen->frame);
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
 
       smp_add_same_frame(gen->frame, jump_to_else_target_location_i);
