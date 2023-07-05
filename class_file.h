@@ -442,8 +442,8 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-static void smp_add_same_frame( cf_frame_t *frame,cf_stack_map_frame_t **frames, u8 offset_delta
-                               ) {
+static void smp_add_same_frame(cf_frame_t *frame, cf_stack_map_frame_t **frames,
+                               u8 offset_delta) {
 
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
@@ -704,12 +704,23 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
-static void cf_asm_jump(u8 **code, cf_frame_t *frame, u8 jump_opcode) {
+static void cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
+                                      u8 jump_opcode) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
 
   cf_code_array_push_u8(code, jump_opcode);
+  cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
+  cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
+}
+
+static void cf_asm_jump(u8 **code, cf_frame_t *frame) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->variables != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_GOTO);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
 }
@@ -722,6 +733,7 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, BYTECODE_ISTORE);
   cf_code_array_push_u8(code, var_i);
 
+  smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, 2);
   frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
@@ -732,6 +744,8 @@ static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
 
   cf_code_array_push_u8(code, BYTECODE_ILOAD);
   cf_code_array_push_u8(code, var_i);
+
+  smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT, 2);
 }
 
 static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
@@ -877,6 +891,8 @@ struct cf_attribute_t {
 
     cf_line_number_table_entry_t
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
+
+    cf_stack_map_frame_t *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
   } v;
 };
 
@@ -1925,6 +1941,35 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
 static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes);
 
+static void cf_write_stack_map_frame(FILE *file,
+                                     const cf_stack_map_frame_t *smp_frame) {
+  pg_assert(file != NULL);
+  pg_assert(smp_frame != NULL);
+
+  if (0 <= smp_frame->kind && smp_frame->kind <= 63) // same_frame
+  {
+    pg_assert(0 && "todo");
+  } else if (64 <= smp_frame->kind &&
+             smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
+    pg_assert(0 && "todo");
+  } else if (128 <= smp_frame->kind && smp_frame->kind <= 246) { // reserved
+    pg_assert(0 && "unreachable");
+  } else if (247 <= smp_frame->kind &&
+             smp_frame->kind <=
+                 247) { // same_locals_1_stack_item_frame_extended
+    pg_assert(0 && "todo");
+  } else if (248 <= smp_frame->kind && smp_frame->kind <= 250) { // chop_frame
+    pg_assert(0 && "todo");
+  } else if (251 <= smp_frame->kind &&
+             smp_frame->kind <= 251) { // same_frame_extended
+    pg_assert(0 && "todo");
+  } else if (252 <= smp_frame->kind && smp_frame->kind <= 254) { // append_frame
+    pg_assert(0 && "todo");
+  } else if (255 <= smp_frame->kind && smp_frame->kind <= 255) { // full_frame
+    pg_assert(0 && "todo");
+  }
+}
+
 static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   pg_assert(file != NULL);
   pg_assert(attribute != NULL);
@@ -1965,7 +2010,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_32(file, size);
 
-    for (u64 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
+    for (u16 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
          i++) {
       cf_line_number_table_entry_t line_number_table =
           attribute->v.line_number_table_entries[i];
@@ -1976,7 +2021,15 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     break;
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
-    pg_assert(0 && "unimplemented");
+    pg_assert(attribute->v.stack_map_table != NULL);
+    const u16 count = pg_array_len(attribute->v.stack_map_table);
+    file_write_be_16(file, count);
+
+    for (u16 i = 0; i < pg_array_len(attribute->v.stack_map_table); i++) {
+      const cf_stack_map_frame_t *const stack_map_frame =
+          &attribute->v.stack_map_table[i];
+      cf_write_stack_map_frame(file, stack_map_frame);
+    }
     break;
   }
   default:
@@ -2653,7 +2706,8 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     }
   }
   // Ensure the line table has at least 2 items: line_table=[0]=0,
-  // line_table[last]=buf_len, for easier logic later to find token positions.
+  // line_table[last]=buf_len, for easier logic later to find token
+  // positions.
   pg_array_append(lexer->line_table, buf_len);
 }
 
@@ -3954,8 +4008,9 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    cg_generate_node(gen, parser, class_file, node->lhs, arena); // Condition.
-    cf_asm_jump(&gen->code->code, gen->frame, BYTECODE_IFEQ);
+    cg_generate_node(gen, parser, class_file, node->lhs,
+                     arena); // Condition.
+    cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
     // To be patched in a bit.
     const u16 jump_to_else_location_i = pg_array_len(gen->code->code) - 2;
     u16 jump_to_else_target_location_i = pg_array_len(gen->code->code);
@@ -3967,7 +4022,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         parser->lexer->tokens[rhs->main_token].kind ==
             TOKEN_KIND_KEYWORD_ELSE) {
       cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
-      cf_asm_jump(&gen->code->code, gen->frame, BYTECODE_GOTO);
+      cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
 
