@@ -486,7 +486,7 @@ static void smp_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
   pg_assert(offset_delta > 0);
 
   const cf_stack_map_frame_t smp_frame = {
-      .kind = 251 - added_locals_count,
+      .kind = 251 + added_locals_count,
       .verification_info = verification_info,
       .offset_delta = offset_delta,
   };
@@ -709,10 +709,13 @@ static void cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
+  pg_assert(frame->current_stack > 0);
 
   cf_code_array_push_u8(code, jump_opcode);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
+
+  frame->current_stack -= 1;
 }
 
 static void cf_asm_jump(u8 **code, cf_frame_t *frame) {
@@ -729,12 +732,13 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
+  pg_assert(frame->current_stack > 0);
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE);
   cf_code_array_push_u8(code, var_i);
 
+  frame->current_stack -= 1;
   smp_add_append_frame(frame, 1, VERIFICATION_INFO_INT, 2);
-  frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
 static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -745,7 +749,11 @@ static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, BYTECODE_ILOAD);
   cf_code_array_push_u8(code, var_i);
 
+  frame->current_stack += 1;
+
   smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT, 2);
+
+  frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
 static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
@@ -3942,9 +3950,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
         .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
         .v = {.code = code}};
     pg_array_append(method.attributes, attribute_code);
+
+    cf_attribute_t attribute_stack_map_frames = {
+        .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
+        .name = cf_add_constant_cstring(&class_file->constant_pool,
+                                        "StackMapTable"),
+        .v = {.stack_map_table = gen->frame->stack_map_frames}};
+    pg_array_append(method.attributes, attribute_stack_map_frames);
+
     pg_array_append(class_file->methods, method);
 
+    // TODO: cf_frame_deinit(gen->frame)
     gen->code = NULL;
+    gen->frame = NULL;
     break;
   }
   case AST_KIND_BINARY: {
