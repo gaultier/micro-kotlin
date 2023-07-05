@@ -397,6 +397,7 @@ typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
+  u16 current_scope;
   cf_variable_t *variables;
   cf_stack_map_frame_t *stack_map_frames;
 } cf_frame_t;
@@ -2122,7 +2123,7 @@ static void cf_write(const cf_class_file_t *class_file, FILE *file) {
   fwrite(&cf_MAGIC_NUMBER, sizeof(cf_MAGIC_NUMBER), 1, file);
 
   file_write_be_u16(file, class_file->minor_version);
-  file_write_be_u16(file, 44+class_file->major_version);
+  file_write_be_u16(file, 44 + class_file->major_version);
   cf_write_constant_pool(class_file, file);
   file_write_be_u16(file, class_file->access_flags);
   file_write_be_u16(file, class_file->this_class);
@@ -4087,8 +4088,11 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
+    const u16 original_scope = gen->frame->current_scope;
+
     cg_generate_node(gen, parser, class_file, node->lhs,
                      arena); // Condition.
+
     cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
     // To be patched in a bit.
     const u16 jump_to_else_location_i = pg_array_len(gen->code->code) - 2;
@@ -4100,13 +4104,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (rhs->kind == AST_KIND_BINARY &&
         parser->lexer->tokens[rhs->main_token].kind ==
             TOKEN_KIND_KEYWORD_ELSE) {
+      gen->frame->current_scope += 1;
       cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
+      gen->frame->current_scope -= 1;
+
       cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
 
+      gen->frame->current_scope += 1;
       cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
+      gen->frame->current_scope -= 1;
     }
+    pg_assert(gen->frame -> current_scope == original_scope);
 
     const u16 after_else_location_i = pg_array_len(gen->code->code);
 
