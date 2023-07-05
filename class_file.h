@@ -920,6 +920,7 @@ struct cf_method_t {
 
 const u32 cf_MAGIC_NUMBER = 0xbebafeca;
 const u16 cf_MAJOR_VERSION_6 = 50;
+const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
 struct cf_class_file_t {
@@ -939,7 +940,11 @@ struct cf_class_file_t {
 };
 typedef struct cf_class_file_t cf_class_file_t;
 
-static void file_write_be_16(FILE *file, u16 x) {
+static void file_write_u8(FILE *file, u8 x) {
+  pg_assert(file != NULL);
+  fwrite(&x, sizeof(x), 1, file);
+}
+static void file_write_be_u16(FILE *file, u16 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[2] = {
@@ -949,7 +954,7 @@ static void file_write_be_16(FILE *file, u16 x) {
   fwrite(x_be, sizeof(x_be), 1, file);
 }
 
-static void file_write_be_32(FILE *file, u32 x) {
+static void file_write_be_u32(FILE *file, u32 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[4] = {
@@ -1816,13 +1821,13 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   case CONSTANT_POOL_KIND_UTF8: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
     const string_t *const s = &constant->v.s;
-    file_write_be_16(file, s->len);
+    file_write_be_u16(file, s->len);
     fwrite(s->value, sizeof(u8), s->len, file);
     break;
   }
   case CONSTANT_POOL_KIND_INT:
     fwrite(&constant->kind, sizeof(u8), 1, file);
-    file_write_be_32(file, constant->v.number);
+    file_write_be_u32(file, constant->v.number);
     break;
   case CONSTANT_POOL_KIND_FLOAT:
     pg_assert(0 && "unimplemented");
@@ -1835,19 +1840,19 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     break;
   case CONSTANT_POOL_KIND_CLASS_INFO:
     fwrite(&constant->kind, sizeof(u8), 1, file);
-    file_write_be_16(file, constant->v.class_name);
+    file_write_be_u16(file, constant->v.class_name);
     break;
   case CONSTANT_POOL_KIND_STRING:
     fwrite(&constant->kind, sizeof(u8), 1, file);
-    file_write_be_16(file, constant->v.string_utf8_i);
+    file_write_be_u16(file, constant->v.string_utf8_i);
     break;
   case CONSTANT_POOL_KIND_FIELD_REF: {
     fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const cf_constant_field_ref_t *const field_ref = &constant->v.field_ref;
 
-    file_write_be_16(file, field_ref->name);
-    file_write_be_16(file, field_ref->type_descriptor);
+    file_write_be_u16(file, field_ref->name);
+    file_write_be_u16(file, field_ref->type_descriptor);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
@@ -1855,8 +1860,8 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
 
     const cf_constant_method_ref_t *const method_ref = &constant->v.method_ref;
 
-    file_write_be_16(file, method_ref->class);
-    file_write_be_16(file, method_ref->name_and_type);
+    file_write_be_u16(file, method_ref->class);
+    file_write_be_u16(file, method_ref->name_and_type);
     break;
   }
   case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF:
@@ -1868,8 +1873,8 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     const cf_constant_name_and_type_t *const name_and_type =
         &constant->v.name_and_type;
 
-    file_write_be_16(file, name_and_type->name);
-    file_write_be_16(file, name_and_type->type_descriptor);
+    file_write_be_u16(file, name_and_type->name);
+    file_write_be_u16(file, name_and_type->type_descriptor);
     break;
   }
   case CONSTANT_POOL_KIND_INVOKE_DYNAMIC:
@@ -1886,7 +1891,7 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
   pg_assert(file != NULL);
 
   const u16 len = class_file->constant_pool.len + 1;
-  file_write_be_16(file, len);
+  file_write_be_u16(file, len);
 
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
     pg_assert(class_file->constant_pool.values != NULL);
@@ -1900,7 +1905,7 @@ static void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  file_write_be_16(file, class_file->interfaces_count);
+  file_write_be_u16(file, class_file->interfaces_count);
 
   pg_assert(class_file->interfaces_count == 0 && "unimplemented");
 }
@@ -1909,7 +1914,7 @@ static void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  file_write_be_16(file, class_file->fields_count);
+  file_write_be_u16(file, class_file->fields_count);
 
   pg_assert(class_file->fields_count == 0 && "unimplemented");
 }
@@ -1930,7 +1935,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                sizeof(u16) // attributes length
         ;
 
-    for (uint64_t i = 0; i < pg_array_len(code->attributes); i++) {
+    for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
       const cf_attribute_t *const child_attribute = &code->attributes[i];
       size += cf_compute_attribute_size(child_attribute);
     }
@@ -1941,8 +1946,44 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
            pg_array_len(attribute->v.line_number_table_entries) *
                sizeof(cf_line_number_table_entry_t);
   }
-  case ATTRIBUTE_KIND_STACK_MAP_TABLE:
-    pg_assert(0 && "unimplemented");
+  case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
+    const cf_stack_map_frame_t *const smp_frames = attribute->v.stack_map_table;
+    pg_assert(smp_frames != NULL);
+
+    u32 size = sizeof(u16) /* count */;
+    for (u16 i = 0; i < pg_array_len(smp_frames); i++) {
+      const cf_stack_map_frame_t *const smp_frame = &smp_frames[i];
+
+      if (0 <= smp_frame->kind && smp_frame->kind <= 63) // same_frame
+      {
+        size += sizeof(u8);
+      } else if (64 <= smp_frame->kind &&
+                 smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
+        pg_assert(0 && "todo");
+      } else if (128 <= smp_frame->kind && smp_frame->kind <= 246) { // reserved
+        pg_assert(0 && "unreachable");
+      } else if (247 <= smp_frame->kind &&
+                 smp_frame->kind <=
+                     247) { // same_locals_1_stack_item_frame_extended
+        pg_assert(0 && "todo");
+      } else if (248 <= smp_frame->kind &&
+                 smp_frame->kind <= 250) { // chop_frame
+        size += sizeof(u8) + sizeof(u16);
+      } else if (251 <= smp_frame->kind &&
+                 smp_frame->kind <= 251) { // same_frame_extended
+        pg_assert(0 && "todo");
+      } else if (252 <= smp_frame->kind &&
+                 smp_frame->kind <= 254) { // append_frame
+        pg_assert(smp_frame->kind == 252 && "todo");
+        size += sizeof(u8) + sizeof(u16) + sizeof(u8);
+      } else if (255 <= smp_frame->kind &&
+                 smp_frame->kind <= 255) { // full_frame
+        pg_assert(0 && "todo");
+      }
+    }
+
+    return size;
+  }
   }
   pg_assert(0 && "unreachable");
 }
@@ -1972,7 +2013,9 @@ static void cf_write_stack_map_frame(FILE *file,
              smp_frame->kind <= 251) { // same_frame_extended
     pg_assert(0 && "todo");
   } else if (252 <= smp_frame->kind && smp_frame->kind <= 254) { // append_frame
-    pg_assert(0 && "todo");
+    file_write_u8(file, smp_frame->kind);
+    file_write_be_u16(file, smp_frame->offset_delta);
+    file_write_u8(file, smp_frame->verification_info);
   } else if (255 <= smp_frame->kind && smp_frame->kind <= 255) { // full_frame
     pg_assert(0 && "todo");
   }
@@ -1982,33 +2025,33 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   pg_assert(file != NULL);
   pg_assert(attribute != NULL);
 
-  file_write_be_16(file, attribute->name);
+  file_write_be_u16(file, attribute->name);
 
   switch (attribute->kind) {
   case ATTRIBUTE_KIND_SOURCE_FILE: {
     const u32 size = cf_compute_attribute_size(attribute);
-    file_write_be_32(file, size);
+    file_write_be_u32(file, size);
 
     const cf_attribute_source_file_t *const source_file =
         &attribute->v.source_file;
-    file_write_be_16(file, source_file->source_file);
+    file_write_be_u16(file, source_file->source_file);
 
     break;
   }
   case ATTRIBUTE_KIND_CODE: {
     const u32 size = cf_compute_attribute_size(attribute);
-    file_write_be_32(file, size);
+    file_write_be_u32(file, size);
 
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    file_write_be_16(file, code->max_stack);
+    file_write_be_u16(file, code->max_stack);
 
-    file_write_be_16(file, code->max_locals);
+    file_write_be_u16(file, code->max_locals);
 
-    file_write_be_32(file, pg_array_len(code->code));
+    file_write_be_u32(file, pg_array_len(code->code));
     fwrite(code->code, pg_array_len(code->code), sizeof(u8), file);
 
-    file_write_be_16(file, pg_array_len(code->exceptions));
+    file_write_be_u16(file, pg_array_len(code->exceptions));
 
     cf_write_attributes(file, code->attributes);
 
@@ -2016,22 +2059,25 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   }
   case ATTRIBUTE_KIND_LINE_NUMBER_TABLE: {
     const u32 size = cf_compute_attribute_size(attribute);
-    file_write_be_32(file, size);
+    file_write_be_u32(file, size);
 
     for (u16 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
          i++) {
       cf_line_number_table_entry_t line_number_table =
           attribute->v.line_number_table_entries[i];
-      file_write_be_16(file, line_number_table.start_pc);
-      file_write_be_16(file, line_number_table.line_number);
+      file_write_be_u16(file, line_number_table.start_pc);
+      file_write_be_u16(file, line_number_table.line_number);
     }
 
     break;
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
+    const u32 size = cf_compute_attribute_size(attribute);
+    file_write_be_u32(file, size);
+
     pg_assert(attribute->v.stack_map_table != NULL);
     const u16 count = pg_array_len(attribute->v.stack_map_table);
-    file_write_be_16(file, count);
+    file_write_be_u16(file, count);
 
     for (u16 i = 0; i < pg_array_len(attribute->v.stack_map_table); i++) {
       const cf_stack_map_frame_t *const stack_map_frame =
@@ -2046,18 +2092,18 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 }
 
 static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes) {
-  file_write_be_16(file, pg_array_len(attributes));
+  file_write_be_u16(file, pg_array_len(attributes));
 
-  for (uint64_t i = 0; i < pg_array_len(attributes); i++) {
+  for (u64 i = 0; i < pg_array_len(attributes); i++) {
     const cf_attribute_t *const attribute = &attributes[i];
     cf_write_attribute(file, attribute);
   }
 }
 
 static void cf_write_method(FILE *file, const cf_method_t *method) {
-  file_write_be_16(file, method->access_flags);
-  file_write_be_16(file, method->name);
-  file_write_be_16(file, method->descriptor);
+  file_write_be_u16(file, method->access_flags);
+  file_write_be_u16(file, method->name);
+  file_write_be_u16(file, method->descriptor);
 
   cf_write_attributes(file, method->attributes);
 }
@@ -2066,9 +2112,9 @@ static void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  file_write_be_16(file, pg_array_len(class_file->methods));
+  file_write_be_u16(file, pg_array_len(class_file->methods));
 
-  for (uint64_t i = 0; i < pg_array_len(class_file->methods); i++) {
+  for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
     cf_write_method(file, method);
   }
@@ -2077,12 +2123,12 @@ static void cf_write_methods(const cf_class_file_t *class_file, FILE *file) {
 static void cf_write(const cf_class_file_t *class_file, FILE *file) {
   fwrite(&cf_MAGIC_NUMBER, sizeof(cf_MAGIC_NUMBER), 1, file);
 
-  file_write_be_16(file, class_file->minor_version);
-  file_write_be_16(file, class_file->major_version);
+  file_write_be_u16(file, class_file->minor_version);
+  file_write_be_u16(file, class_file->major_version);
   cf_write_constant_pool(class_file, file);
-  file_write_be_16(file, class_file->access_flags);
-  file_write_be_16(file, class_file->this_class);
-  file_write_be_16(file, class_file->super_class);
+  file_write_be_u16(file, class_file->access_flags);
+  file_write_be_u16(file, class_file->this_class);
+  file_write_be_u16(file, class_file->super_class);
 
   cf_write_interfaces(class_file, file);
   cf_write_fields(class_file, file);

@@ -76,7 +76,7 @@ int main(int argc, char *argv[]) {
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
         .minor_version = cf_MINOR_VERSION,
-        .major_version = cf_MAJOR_VERSION_6,
+        .major_version = cf_MAJOR_VERSION_7,
         .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
     };
     cf_init(&class_file, &arena);
