@@ -375,11 +375,30 @@ typedef struct {
   u32 type_i;
 } cf_variable_t;
 
+typedef enum {
+  VERIFICATION_INFO_TOP = 0,
+  VERIFICATION_INFO_INT = 1,
+  VERIFICATION_INFO_FLOAT = 2,
+  VERIFICATION_INFO_DOUBLE = 3,
+  VERIFICATION_INFO_LONG = 4,
+  VERIFICATION_INFO_NULL = 6,
+  VERIFICATION_INFO_OBJECT = 7,
+  VERIFICATION_INFO_UNINITIALIZED = 8,
+} cf_verification_info_t;
+
+typedef struct {
+  u8 kind;
+  u8 offset_delta;
+  cf_verification_info_t
+      verification_info; // TODO: it's actually: `cf_verification_info_t[3]`.
+} cf_stack_map_frame_t;
+
 typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
   cf_variable_t *variables;
+  cf_stack_map_frame_t *stack_map_frames;
 } cf_frame_t;
 
 struct par_type_t;
@@ -422,6 +441,64 @@ typedef struct {
   u16 handler_pc;
   u16 catch_type;
 } cf_exception_t;
+
+static void smp_add_same_frame(cf_stack_map_frame_t **frames, u8 offset_delta,
+                               const cf_frame_t *frame) {
+
+  pg_assert(frames != NULL);
+  pg_assert(*frames != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_stack == 0);
+  pg_assert(offset_delta <= 63);
+  pg_assert(offset_delta > 0);
+
+  const cf_stack_map_frame_t smp_frame = {.kind = offset_delta};
+  pg_array_append(*frames, smp_frame);
+}
+
+static void smp_add_chop_frame(cf_stack_map_frame_t **frames,
+                               u8 chopped_locals_count,
+                               cf_verification_info_t verification_info,
+                               u8 offset_delta, const cf_frame_t *frame) {
+  pg_assert(frames != NULL);
+  pg_assert(*frames != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(chopped_locals_count > 0);
+  pg_assert(chopped_locals_count <= 3);
+  pg_assert(frame->current_stack == 0);
+  pg_assert(offset_delta > 0);
+
+  const cf_stack_map_frame_t smp_frame = {
+      .kind = 251 - chopped_locals_count,
+      .verification_info = verification_info,
+      .offset_delta = offset_delta,
+  };
+  pg_assert(smp_frame.kind >= 248);
+  pg_assert(smp_frame.kind <= 250);
+  pg_array_append(*frames, smp_frame);
+}
+
+static void smp_add_append_frame(cf_stack_map_frame_t **frames,
+                                 u8 added_locals_count,
+                                 cf_verification_info_t verification_info,
+                                 u8 offset_delta, const cf_frame_t *frame) {
+  pg_assert(frames != NULL);
+  pg_assert(*frames != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(added_locals_count > 0);
+  pg_assert(added_locals_count <= 3);
+  pg_assert(frame->current_stack == 0);
+  pg_assert(offset_delta > 0);
+
+  const cf_stack_map_frame_t smp_frame = {
+      .kind = 251 - added_locals_count,
+      .verification_info = verification_info,
+      .offset_delta = offset_delta,
+  };
+  pg_assert(smp_frame.kind >= 252);
+  pg_assert(smp_frame.kind <= 254);
+  pg_array_append(*frames, smp_frame);
+}
 
 static void cf_code_array_push_u8(u8 **array, u8 x) {
   pg_array_append(*array, x);
@@ -534,6 +611,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
 static void cf_frame_init(cf_frame_t *frame, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_array_init_reserve(frame->variables, 32, arena);
+  pg_array_init_reserve(frame->stack_map_frames, 64, arena);
 }
 
 static const cf_constant_t *
