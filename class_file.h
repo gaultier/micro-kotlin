@@ -373,6 +373,7 @@ typedef struct {
 typedef struct {
   u32 node_i;
   u32 type_i;
+  u16 scope_depth;
 } cf_variable_t;
 
 typedef enum {
@@ -397,7 +398,7 @@ typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
-  u16 current_scope;
+  u16 current_scope_depth;
   cf_variable_t *variables;
   cf_stack_map_frame_t *stack_map_frames;
 } cf_frame_t;
@@ -3822,6 +3823,22 @@ static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
   return 0;
 }
 
+static void cg_begin_scope(cf_frame_t *frame) {
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_scope_depth < UINT16_MAX);
+
+  frame->current_scope_depth += 1;
+}
+
+static void cg_end_scope(cf_frame_t *frame) {
+  pg_assert(frame != NULL);
+  pg_assert(frame->current_scope_depth > 0);
+
+  frame->current_scope_depth -= 1;
+
+  // TODO: stack map table frames to chop variables.
+}
+
 static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
                              cf_class_file_t *class_file, u32 node_i,
                              arena_t *arena) {
@@ -4059,6 +4076,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
+        .scope_depth = gen->frame->current_scope_depth,
     };
     pg_array_append(gen->frame->variables, variable);
 
@@ -4088,8 +4106,6 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    const u16 original_scope = gen->frame->current_scope;
-
     cg_generate_node(gen, parser, class_file, node->lhs,
                      arena); // Condition.
 
@@ -4104,19 +4120,18 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (rhs->kind == AST_KIND_BINARY &&
         parser->lexer->tokens[rhs->main_token].kind ==
             TOKEN_KIND_KEYWORD_ELSE) {
-      gen->frame->current_scope += 1;
+      cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
-      gen->frame->current_scope -= 1;
+      cg_end_scope(gen->frame);
 
       cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
 
-      gen->frame->current_scope += 1;
+      cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
-      gen->frame->current_scope -= 1;
+      cg_end_scope(gen->frame);
     }
-    pg_assert(gen->frame -> current_scope == original_scope);
 
     const u16 after_else_location_i = pg_array_len(gen->code->code);
 
