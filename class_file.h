@@ -751,8 +751,6 @@ static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
 
   frame->current_stack += 1;
 
-  smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT, 2);
-
   frame->max_locals = pg_max(frame->max_locals, pg_array_len(frame->variables));
 }
 
@@ -2817,6 +2815,7 @@ typedef enum {
   AST_KIND_VAR_DEFINITION,
   AST_KIND_VAR_REFERENCE,
   AST_KIND_IF,
+  AST_KIND_LIST,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -2830,6 +2829,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
     [AST_KIND_IF] = "IF",
     [AST_KIND_BINARY] = "BINARY",
+    [AST_KIND_LIST] = "LIST",
 };
 
 typedef struct {
@@ -3450,7 +3450,7 @@ static u32 par_parse_block(par_parser_t *parser) {
   par_begin_scope(parser);
 
   const par_ast_node_t root = {
-      .kind = AST_KIND_BINARY,
+      .kind = AST_KIND_LIST,
       .lhs = par_parse_statement(parser),
       .rhs = par_parse_block(parser),
   };
@@ -3472,7 +3472,7 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
     return 0;
 
   const par_ast_node_t node = {
-      .kind = AST_KIND_BINARY,
+      .kind = AST_KIND_LIST,
   };
   pg_array_append(parser->nodes, node);
   u32 last_node_i = pg_array_last_index(parser->nodes);
@@ -3480,7 +3480,7 @@ static u32 par_parse_function_arguments(par_parser_t *parser) {
 
   do {
     const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
+        .kind = AST_KIND_LIST,
         .lhs = par_parse_expression(parser),
     };
     pg_array_append(parser->nodes, node);
@@ -3573,7 +3573,7 @@ static u32 par_parse_declarations(par_parser_t *parser) {
   pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
 
   const par_ast_node_t node = {
-      .kind = AST_KIND_BINARY,
+      .kind = AST_KIND_LIST,
       .lhs = par_parse_declaration(parser),
       .rhs = par_is_at_end(parser) ? 0 : par_parse_declarations(parser),
   };
@@ -3707,6 +3707,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
                     (par_type_t){.kind = TYPE_INT}); // TODO: something smarter.
     return node->type_i = pg_array_last_index(parser->types);
   case AST_KIND_BINARY: {
+    pg_assert(node->main_token > 0);
+
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
 
@@ -3723,6 +3725,14 @@ static u32 ty_resolve_types(par_parser_t *parser,
     }
 
     return node->type_i;
+  }
+  case AST_KIND_LIST: {
+    ty_resolve_types(parser, class_files, node->lhs, arena);
+    ty_resolve_types(parser, class_files, node->rhs, arena);
+
+    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID});
+
+    return node->type_i = pg_array_last_index(parser->types);
   }
   case AST_KIND_FUNCTION_DEFINITION:
     ty_resolve_types(parser, class_files, node->lhs, arena);
@@ -4031,6 +4041,11 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     default:
       pg_assert(0 && "todo");
     }
+    break;
+  }
+  case AST_KIND_LIST: {
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_generate_node(gen, parser, class_file, node->rhs, arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
