@@ -2048,7 +2048,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
     for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
       const cf_attribute_t *const child_attribute = &code->attributes[i];
-      size += sizeof(u16)+sizeof(u32) + cf_compute_attribute_size(child_attribute);
+      size += sizeof(u16) + sizeof(u32) +
+              cf_compute_attribute_size(child_attribute);
     }
     return size;
   }
@@ -2909,6 +2910,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_KEYWORD_ELSE:
     return 4;
   case TOKEN_KIND_KEYWORD_FALSE:
+    return 5;
   case TOKEN_KIND_BUILTIN_PRINTLN:
     return 7;
 
@@ -4262,15 +4264,19 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       cf_asm_jump(&gen->code->code, gen->frame);
       jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
+      smp_add_same_frame(gen->frame, jump_to_else_target_location_i);
 
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
       cg_end_scope(gen->frame, gen->code->code);
+      smp_add_same_frame(gen->frame, pg_array_len(gen->code->code));
     } else {
       cg_begin_scope(gen->frame);
       cg_generate_node(gen, parser, class_file, node->rhs, arena); // Then
       cg_end_scope(gen->frame, gen->code->code);
       jump_to_else_target_location_i = pg_array_len(gen->code->code);
+
+      smp_add_same_frame(gen->frame, jump_to_else_target_location_i);
     }
 
     const u16 after_else_location_i = pg_array_len(gen->code->code);
@@ -4298,7 +4304,6 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       gen->code->code[jump_to_after_else_i + 1] =
           (u8)((u16)jump_to_after_else_offset & 0x00ff) >> 0;
     }
-    smp_add_same_frame(gen->frame, pg_array_len(gen->code->code));
 
     break;
   }
