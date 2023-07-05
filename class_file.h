@@ -472,6 +472,7 @@ static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
   const cf_stack_map_frame_t smp_frame = {
       .kind = offset_delta,
       .offset_absolute = current_offset,
+      .offset_delta = offset_delta,
   };
   pg_array_append(frame->stack_map_frames, smp_frame);
   LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
@@ -1203,6 +1204,7 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
 
     if (0 <= smp_frame.kind && smp_frame.kind <= 63) // same_frame
     {
+      smp_frame.offset_delta = smp_frame.kind;
     } else if (64 <= smp_frame.kind &&
                smp_frame.kind <= 127) { // same_locals_1_stack_item_frame
       smp_frame.offset_delta = smp_frame.kind - 64;
@@ -1215,8 +1217,8 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
                smp_frame.kind <=
                    247) { // same_locals_1_stack_item_frame_extended
       smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
-      cf_buf_read_stack_map_table_attribute_verification_infos(
-          buf, buf_len, current, 1);
+      cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
+                                                               current, 1);
     } else if (248 <= smp_frame.kind && smp_frame.kind <= 250) { // chop_frame
       smp_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
     } else if (251 <= smp_frame.kind &&
