@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     };
     cf_init(&class_file, &arena);
 
-    cg_generate(&parser, &class_file, class_files, root_i, &arena);
+    cg_emit(&parser, &class_file, class_files, root_i, &arena);
 
     FILE *file = fopen(class_file.file_path.value, "w");
     pg_assert(file != NULL);

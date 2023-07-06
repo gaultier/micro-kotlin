@@ -4030,9 +4030,9 @@ static void cg_end_scope(cf_frame_t *frame) {
   frame->current_scope_depth -= 1;
 }
 
-static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
-                             cf_class_file_t *class_file, u32 node_i,
-                             arena_t *arena) {
+static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                         cf_class_file_t *class_file, u32 node_i,
+                         arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4088,7 +4088,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame);
 
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
     const par_type_t *const type = &parser->types[node->type_i];
     pg_assert(type->kind == TYPE_METHOD);
@@ -4205,7 +4205,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     if (node->lhs > 0)
       pg_assert(0 && "todo");
 
-    cg_generate_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
     cf_asm_return(&code.code);
 
@@ -4248,7 +4248,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_assert(0 && "todo");
 #if 0
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
     const u16 jump_conditionally_opcode_location =
         pg_array_len(gen->code->code);
     cf_asm_jump_conditionally(&gen->code->code, gen->frame, opcode);
@@ -4270,8 +4270,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
-    cg_generate_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
     const lex_token_t token = parser->lexer->tokens[node->main_token];
     switch (token.kind) {
@@ -4289,8 +4289,8 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_LIST: {
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
-    cg_generate_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->rhs, arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
@@ -4298,7 +4298,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->variables != NULL);
     pg_assert(node->type_i > 0);
 
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
     const cf_variable_t variable = {
         .node_i = node_i,
@@ -4336,7 +4336,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
     // Condition.
-    cg_generate_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
     const u16 jump_conditionally_from_i =
         cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
@@ -4349,13 +4349,13 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
 
     // Emit `then` branch.
     cg_begin_scope(gen->frame);
-    cg_generate_node(gen, parser, class_file, then_node_i, arena);
+    cg_emit_node(gen, parser, class_file, then_node_i, arena);
     cg_end_scope(gen->frame);
     const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
     if (has_else_branch) { // Emit `else` branch.
       cg_begin_scope(gen->frame);
-      cg_generate_node(gen, parser, class_file, rhs->rhs, arena);
+      cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
       cg_end_scope(gen->frame);
     }
     const u16 jump_to_i = pg_array_len(gen->code->code);
@@ -4369,7 +4369,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       gen->code->code[jump_conditionally_from_i + 1] =
           (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-      smp_add_same_frame(gen->frame, jump_from_i +2);
+      smp_add_same_frame(gen->frame, jump_from_i + 2);
     }
     // Patch second, unconditional, jump.
     {
@@ -4408,10 +4408,9 @@ static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
 
 // static void ty_add_method_type(par_type_t ** types, )
 
-static void cg_generate_synthetic_class(cg_generator_t *gen,
-                                        par_parser_t *parser,
-                                        cf_class_file_t *class_file,
-                                        arena_t *arena) {
+static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
+                                    cf_class_file_t *class_file,
+                                    arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4483,9 +4482,9 @@ static void cg_generate_synthetic_class(cg_generator_t *gen,
   }
 }
 
-static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
-                        const cf_class_file_t *class_files, u32 root_i,
-                        arena_t *arena) {
+static void cg_emit(par_parser_t *parser, cf_class_file_t *class_file,
+                    const cf_class_file_t *class_files, u32 root_i,
+                    arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4496,10 +4495,10 @@ static void cg_generate(par_parser_t *parser, cf_class_file_t *class_file,
   pg_assert(arena != NULL);
 
   cg_generator_t gen = {.class_files = class_files};
-  cg_generate_synthetic_class(&gen, parser, class_file, arena);
+  cg_emit_synthetic_class(&gen, parser, class_file, arena);
 
   if (pg_array_len(parser->nodes) == 1)
     return;
 
-  cg_generate_node(&gen, parser, class_file, root_i, arena);
+  cg_emit_node(&gen, parser, class_file, root_i, arena);
 }
