@@ -4335,7 +4335,21 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    // Condition.
+    // clang-format off
+    //                 <condition expression>
+    //      x     ---- jump_conditionally (IFEQ,  etc)
+    //      x     |    jump_conditionally_offset1 <----- jump_conditionally_from_i
+    //      x     |    jump_conditionally_offset2
+    //      x     |    <then branch>
+    //  +   x  ...|... jump
+    //  +   x  .  |    jump_offset1 <------------------- jump_from_i
+    //  +   x  .  |    jump_offset2
+    //  +   x  .  |--> <else branch> <--- stack map frame same for this location
+    //  +      ......> ...           <--- stack map frame same for this location
+    //
+    // clang-format on
+
+    // Emit condition.
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
     const u16 jump_conditionally_from_i =
