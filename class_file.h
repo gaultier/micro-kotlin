@@ -464,7 +464,6 @@ static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
 
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
-  pg_assert(frame->current_stack == 0);
 
   const u16 offset_delta =
       smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
@@ -558,15 +557,22 @@ smp_add_same_locals_1_stack_item_frame(cf_frame_t *frame,
   pg_array_append(frame->stack_map_frames, smp_frame);
 }
 
-static void smp_add_frame(cf_frame_t *frame, u16 current_offset) {
+static void smp_add_frame(cf_frame_t *frame, u16 current_offset,
+                          const cf_frame_t *before, const cf_frame_t *after) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
+  pg_assert(before != NULL);
+  pg_assert(after != NULL);
+  pg_assert(after->current_stack >= before->current_stack);
 
   // FIXME: Compare with the state in the previous smp_frame
+  const cf_frame_t diff = {
+      .current_stack = after->current_stack - before->current_stack,
+  };
 
-  if (frame->current_stack == 0) {
+  if (diff.current_stack == 0) {
     smp_add_same_frame(frame, current_offset);
-  } else if (frame->current_stack == 1) {
+  } else if (diff.current_stack == 1) {
     smp_add_same_locals_1_stack_item_frame(
         frame, VERIFICATION_INFO_INT /* FIXME */, current_offset);
 
@@ -4168,30 +4174,34 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(rhs->kind == AST_KIND_BINARY);
 
   // Emit `then` branch.
-  const u16 stack_before_then_else = gen->frame->current_stack;
-  u16 stack_after_then = 0;
-  {
-    cg_begin_scope(gen->frame);
-    cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-    cg_end_scope(gen->frame);
-    stack_after_then = gen->frame->current_stack;
-  }
+  const cf_frame_t frame_before_then_else = {
+      .current_stack = gen->frame->current_stack,
+      // TODO: clone more
+  };
+  cg_begin_scope(gen->frame);
+  cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
+  cg_end_scope(gen->frame);
+  const cf_frame_t frame_after_then = {
+      .current_stack = gen->frame->current_stack,
+      // TODO: clone more
+  };
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
   // Emit `else` branch.
-  gen->frame->current_stack = stack_before_then_else;
-  u16 stack_after_else = 0;
-  {
-    cg_begin_scope(gen->frame);
-    cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-    cg_end_scope(gen->frame);
-    // Add a nop to ensure the `<else branch>` has at least one instruction, so
-    // that the corresponding, second, stack map frame can be unconditionally
-    // emitted with an offset delta >= 1.
-    cf_asm_nop(&gen->code->code);
-    stack_after_else = gen->frame->current_stack;
-  }
-  pg_assert(stack_after_then == stack_after_else);
+  // Restore the frame as if the `then` branch never executed.
+  gen->frame->current_stack = frame_before_then_else.current_stack;
+  cg_begin_scope(gen->frame);
+  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
+  cg_end_scope(gen->frame);
+  // Add a nop to ensure the `<else branch>` has at least one instruction, so
+  // that the corresponding, second, stack map frame can be unconditionally
+  // emitted with an offset delta >= 1.
+  cf_asm_nop(&gen->code->code);
+  const cf_frame_t frame_after_else = {
+      .current_stack = gen->frame->current_stack,
+      // TODO: clone more
+  };
+  pg_assert(frame_after_then.current_stack == frame_after_else.current_stack);
 
   const u16 jump_to_i = pg_array_len(gen->code->code);
 
@@ -4203,7 +4213,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    smp_add_frame(gen->frame, jump_from_i + 2);
+    smp_add_frame(gen->frame, jump_from_i + 2, &frame_before_then_else,
+                  &frame_before_then_else);
   }
   // Patch second, unconditional, jump.
   {
@@ -4211,7 +4222,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
     gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    smp_add_frame(gen->frame, jump_to_i);
+    smp_add_frame(gen->frame, jump_to_i, &frame_before_then_else,
+                  &frame_after_else);
   }
 }
 
