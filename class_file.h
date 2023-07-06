@@ -3202,8 +3202,10 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
       parser->lexer->file_path.value, line, column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
-  par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
+  if (node->kind != AST_KIND_BOOL) {
+    par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
+    par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
+  }
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -4060,21 +4062,19 @@ static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
   return 0;
 }
 
-static u16 cg_begin_scope(cf_frame_t *frame) {
+static void cg_begin_scope(cf_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->current_scope_depth < UINT16_MAX);
 
   frame->current_scope_depth += 1;
-  return frame->current_stack;
 }
 
-static void cg_end_scope(cf_frame_t *frame, u16 stack_before_scope) {
+static void cg_end_scope(cf_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(frame->current_scope_depth > 0);
 
   frame->current_scope_depth -= 1;
-  frame->current_stack = stack_before_scope;
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4131,23 +4131,31 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(rhs->kind == AST_KIND_BINARY);
 
   // Emit `then` branch.
+  const u16 stack_before_then_else = gen->frame->current_stack;
+  u16 stack_after_then = 0;
   {
-  const u16 stack_before_scope = cg_begin_scope(gen->frame);
-  cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  cg_end_scope(gen->frame, stack_before_scope);
+    cg_begin_scope(gen->frame);
+    cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
+    cg_end_scope(gen->frame);
+    stack_after_then = gen->frame->current_stack;
   }
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
   // Emit `else` branch.
+  gen->frame->current_stack = stack_before_then_else;
+  u16 stack_after_else = 0;
   {
-  const u16 stack_before_scope = cg_begin_scope(gen->frame);
-  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-  cg_end_scope(gen->frame, stack_before_scope);
-  // Add a nop to ensure the `<else branch>` has at least one instruction, so
-  // that the corresponding, second, stack map frame can be unconditionally
-  // emitted with an offset delta >= 1.
-  cf_asm_nop(&gen->code->code);
+    cg_begin_scope(gen->frame);
+    cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
+    cg_end_scope(gen->frame);
+    // Add a nop to ensure the `<else branch>` has at least one instruction, so
+    // that the corresponding, second, stack map frame can be unconditionally
+    // emitted with an offset delta >= 1.
+    cf_asm_nop(&gen->code->code);
+    stack_after_else = gen->frame->current_stack;
   }
+  pg_assert(stack_after_then == stack_after_else);
+
   const u16 jump_to_i = pg_array_len(gen->code->code);
 
   // Patch first, conditional, jump.
@@ -4373,6 +4381,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_UNARY: {
     pg_assert(node->lhs < pg_array_len(parser->nodes));
 
+    const u16 stack_before = gen->frame->current_stack;
+
     const par_ast_node_t true_node = {
         .kind = AST_KIND_BOOL,
         .lhs = true,
@@ -4411,6 +4421,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_node(gen, parser, class_file, pg_array_last_index(parser->nodes),
                  arena);
+
+    const u16 stack_after = gen->frame->current_stack;
+    pg_assert(stack_after == stack_before + 1); // TODO: Is it always +1?
     break;
   }
   case AST_KIND_BINARY: {
