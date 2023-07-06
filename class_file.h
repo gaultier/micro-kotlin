@@ -122,15 +122,17 @@ typedef struct pg_array_header_t {
 // FIXME
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
-    if (pg_array_len(x) >= pg_array_cap(x)) {                                  \
-      const u64 new_cap = pg_array_cap(x) * 2;                                 \
-      pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(            \
+    pg_assert(pg_array_len(x) <= -pg_array_cap(x));                            \
+    if (pg_array_len(x) == pg_array_cap(x)) {                                  \
+      void **pg__array_ = (void **)&(x);                                       \
+      const u64 new_cap = 8 + pg_array_cap(x) * 2;                             \
+      pg_array_header_t *const pg__ah = (pg_array_header_t *)arena_alloc(      \
           arena, 1,                                                            \
           sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)new_cap));          \
-      memmove(pg__ah, x,                                                       \
-              sizeof(pg_array_header_t) +                                      \
-                  sizeof(*(x)) * ((u64)pg_array_cap(x)));                      \
-      x = (void *)pg__ah;                                                      \
+      memcpy(pg__ah, (x),                                                      \
+             sizeof(pg_array_header_t) +                                       \
+                 sizeof(*(x)) * ((u64)pg_array_cap(x)));                       \
+      *pg__array_ = (void *)(pg__ah + 1);                                      \
       PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
     }                                                                          \
     (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
@@ -625,6 +627,9 @@ static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
   case TYPE_BOOL:
   case TYPE_INT:
     return TYPE_INT;
+  case TYPE_ARRAY_REFERENCE:
+  case TYPE_INSTANCE_REFERENCE:
+    return kind;
   default:
     return kind;
   }
@@ -983,8 +988,12 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_assert(pg_array_len(frame->stack) > 0);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(pg_array_len(frame->locals) >
+            var_i); // FIXME: variable size. Also do we need to expand the local
+                    // variable array automatically?
+
+    pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                  frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE, arena);
   cf_code_array_push_u8(code, var_i, arena);
@@ -999,6 +1008,8 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_assert(frame->locals != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
+  pg_assert(var_i < pg_array_len(frame->locals)); // FIXME: local variable size
+  pg_assert(pg_array_len(frame->locals) > 0);
 
   cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
   cf_code_array_push_u8(code, var_i, arena);
@@ -3874,7 +3885,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const u32 expression_node = par_parse_prefix_unary_expression(parser,arena);
+  const u32 expression_node = par_parse_prefix_unary_expression(parser, arena);
   if (!par_match_token(parser, TOKEN_KIND_STAR))
     return expression_node;
 
@@ -3882,7 +3893,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
       .main_token = parser->tokens_i - 1,
-      .rhs = par_parse_multiplicative_expression(parser,arena),
+      .rhs = par_parse_multiplicative_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
   return pg_array_last_index(parser->nodes);
@@ -3904,7 +3915,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
       .main_token = parser->tokens_i - 1,
-      .rhs = par_parse_additive_expression(parser,arena),
+      .rhs = par_parse_additive_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
   return pg_array_last_index(parser->nodes);
@@ -4599,7 +4610,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = &code;
     cg_frame_t frame = {0};
     cg_frame_init(&frame, arena);
-    const cf_variable_t arg0 = {0}; // FIXME
+    const cf_variable_t arg0 = {.type_i = main_argument_types_i};
     pg_array_append(frame.locals, arg0, arena);
     frame.max_locals = pg_array_len(frame.locals);
     gen->frame = &frame;
