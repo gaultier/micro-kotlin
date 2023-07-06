@@ -241,6 +241,7 @@ static void string_drop_after_last_incl(string_t *s, char c) {
     return; // Nothing to do.
 
   s->len = last_c - s->value;
+  s->value[s->len] = 0;
 }
 
 static bool string_eq(string_t a, string_t b) {
@@ -277,6 +278,7 @@ static void string_append_char(string_t *s, char c) {
 
   s->value[s->len] = c;
   s->len += 1;
+  s->value[s->len] = 0;
 
   pg_assert(s->value != NULL);
   pg_assert(s->len <= s->cap);
@@ -343,6 +345,7 @@ static bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
 // ------------------------ Class file code
 
 typedef enum {
+  BYTECODE_NOP = 0x00,
   BYTECODE_ALOAD_0 = 0x2a,
   BYTECODE_INVOKE_SPECIAL = 0xb7,
   BYTECODE_RETURN = 0xb1,
@@ -466,7 +469,7 @@ static void smp_add_same_frame(cf_frame_t *frame, u16 current_offset) {
   const u16 offset_delta =
       smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta <= 63);
-  pg_assert(offset_delta > 0);
+  pg_assert(offset_delta >= 0);
   pg_assert(offset_delta <= current_offset);
 
   const cf_stack_map_frame_t smp_frame = {
@@ -792,6 +795,12 @@ static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, var_i);
 
   frame->current_stack += 1;
+}
+
+static void cf_asm_nop(u8 **code) {
+  pg_assert(code != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_NOP);
 }
 
 static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
@@ -3373,28 +3382,34 @@ static u32 par_parse_if_expression(par_parser_t *parser) {
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                    "expected right parenthesis following if condition");
 
-  par_ast_node_t node = {
+  // clang-format off
+  //
+  //               IF 
+  //              /  \
+  //    condition     BINARY
+  //                 /      \
+  //             then        else
+  //
+  // clang-format on
+
+  const par_ast_node_t binary_node = {
+      .kind = AST_KIND_BINARY,
+      .main_token = parser->tokens_i - 1,
+      .lhs = par_parse_block_expression(parser), // Then
+      .rhs = par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)
+                 ? par_parse_block_expression(parser)
+                 : 0,
+  };
+  pg_array_append(parser->nodes, binary_node);
+
+  const par_ast_node_t if_node = {
       .kind = AST_KIND_IF,
       .main_token = main_token_i,
       .lhs = condition_i,
-      .rhs = par_parse_block_expression(parser), // Then
+      .rhs = pg_array_last_index(parser->nodes),
   };
-
-  if (par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)) {
-    const par_ast_node_t else_node = {
-        .kind = AST_KIND_BINARY,
-        .main_token = parser->tokens_i - 1,
-        .lhs = node.rhs,                           // Then
-        .rhs = par_parse_block_expression(parser), // Else
-    };
-    pg_array_append(parser->nodes, else_node);
-    node.rhs = pg_array_last_index(parser->nodes);
-  }
-
-  pg_array_append(parser->nodes, node);
-  const u32 node_i = pg_array_last_index(parser->nodes);
-
-  return node_i;
+  pg_array_append(parser->nodes, if_node);
+  return pg_array_last_index(parser->nodes);
 }
 
 static u32 par_parse_primary_expression(par_parser_t *parser) {
@@ -4355,25 +4370,21 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 jump_conditionally_from_i =
         cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
 
+    pg_assert(node->rhs > 0);
     const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
-    const bool has_else_branch =
-        rhs->kind == AST_KIND_BINARY &&
-        parser->lexer->tokens[rhs->main_token].kind == TOKEN_KIND_KEYWORD_ELSE;
-    const u16 then_node_i = has_else_branch ? rhs->lhs : node->rhs;
+    pg_assert(rhs->kind == AST_KIND_BINARY);
 
     // Emit `then` branch.
     cg_begin_scope(gen->frame);
-    cg_emit_node(gen, parser, class_file, then_node_i, arena);
+    cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
     cg_end_scope(gen->frame);
     const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
-    // TODO: Find a way to always emit this `else` branch safely and remove
-    // this check.
-    if (has_else_branch) { // Emit `else` branch.
-      cg_begin_scope(gen->frame);
-      cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-      cg_end_scope(gen->frame);
-    }
+    // Emit `else` branch.
+    cg_begin_scope(gen->frame);
+    cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
+    cg_end_scope(gen->frame);
+    cf_asm_nop(&gen->code->code);
     const u16 jump_to_i = pg_array_len(gen->code->code);
 
     // Patch first, conditional, jump.
@@ -4390,9 +4401,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     // Patch second, unconditional, jump.
     {
       const u16 jump_offset = (jump_to_i) - (jump_from_i - 1);
-      if (!has_else_branch)
-        pg_assert(jump_offset == 3);
-
       gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
       gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
 
