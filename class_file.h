@@ -608,6 +608,25 @@ static u16 cf_type_kind_stack_size(cf_type_kind_t kind) {
   }
 }
 
+static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
+  switch (kind) {
+  case TYPE_ANY:
+  case TYPE_METHOD:
+  case TYPE_CONSTRUCTOR:
+  case TYPE_VOID:
+    pg_assert(0 && "unreachable");
+  case TYPE_BYTE:
+  case TYPE_CHAR:
+  case TYPE_FLOAT:
+  case TYPE_SHORT:
+  case TYPE_BOOL:
+  case TYPE_INT:
+    return TYPE_INT;
+  default:
+    return kind;
+  }
+}
+
 static u16 cg_compute_stack_size(const cf_type_kind_t *stack) {
   pg_assert(stack != NULL);
 
@@ -919,7 +938,7 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(pg_array_len(frame->stack) > 0);
-  pg_assert(*pg_array_last(frame->stack) == TYPE_INT);
+  pg_assert(*pg_array_last(frame->stack) == TYPE_BOOL);
 
   cf_code_array_push_u8(code, jump_opcode);
   const u16 jump_from_i = pg_array_len(*code);
@@ -949,7 +968,8 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(pg_array_len(frame->stack) > 0);
-  pg_assert(*pg_array_last(frame->stack) == TYPE_INT);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE);
   cf_code_array_push_u8(code, var_i);
@@ -4319,7 +4339,6 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_frame_clone(&frame_before_then_else, gen->frame, arena);
 
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  const u16 stack_length_after_then = pg_array_len(gen->frame->stack);
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
   // Save a clone of the frame after the `then` branch executed so that we can
@@ -4336,8 +4355,10 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // that the corresponding, second, stack map frame can be unconditionally
   // emitted with an offset delta >= 1.
   cf_asm_nop(&gen->code->code);
-  const u16 stack_length_after_else = pg_array_len(gen->frame->stack);
-  pg_assert(stack_length_after_then == stack_length_after_else);
+  pg_assert(pg_array_len(frame_after_then.stack) ==
+            pg_array_len(gen->frame->stack));
+ gen->frame->max_stack=pg_max (frame_after_then.max_stack , gen->frame->max_stack);
+ gen->frame->max_locals=pg_max (frame_after_then.max_locals , gen->frame->max_locals);
 
   const u16 jump_to_i = pg_array_len(gen->code->code);
 
