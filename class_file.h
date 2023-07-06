@@ -4047,6 +4047,95 @@ static void cg_end_scope(cf_frame_t *frame) {
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                          cf_class_file_t *class_file, u32 node_i,
+                         arena_t *arena);
+
+static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
+                                 cf_class_file_t *class_file, u32 node_i,
+                                 arena_t *arena) {
+  // clang-format off
+  //
+  //               IF 
+  //              /  \
+  //    condition     BINARY
+  //                 /      \
+  //             then        else
+  //
+  //                 <condition expression>
+  //      x     ---- jump_conditionally (IFEQ,  etc)
+  //      x     |    jump_conditionally_offset1 <----- jump_conditionally_from_i
+  //      x     |    jump_conditionally_offset2
+  //      x     |    <then branch>
+  //  +   x  ...|... jump
+  //  +   x  .  |    jump_offset1 <------------------- jump_from_i
+  //  +   x  .  |    jump_offset2
+  //  +   x  .  |--> <else branch> <--- stack map frame same for this location
+  //  +      ......> ...           <--- stack map frame same for this location
+  //
+  // clang-format on
+
+  pg_assert(gen != NULL);
+  pg_assert(parser != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(arena != NULL);
+  pg_assert(node_i < pg_array_len(parser->nodes));
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->variables != NULL);
+
+  const par_ast_node_t *const node = &parser->nodes[node_i];
+  pg_assert(node->type_i > 0);
+  pg_assert(node->lhs > 0);
+  pg_assert(node->lhs < pg_array_len(parser->nodes));
+  pg_assert(node->rhs > 0);
+  pg_assert(node->rhs < pg_array_len(parser->nodes));
+
+  // Emit condition.
+  cg_emit_node(gen, parser, class_file, node->lhs, arena);
+
+  const u16 jump_conditionally_from_i =
+      cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
+
+  pg_assert(node->rhs > 0);
+  const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
+  pg_assert(rhs->kind == AST_KIND_BINARY);
+
+  // Emit `then` branch.
+  cg_begin_scope(gen->frame);
+  cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
+  cg_end_scope(gen->frame);
+  const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
+
+  // Emit `else` branch.
+  cg_begin_scope(gen->frame);
+  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
+  cg_end_scope(gen->frame);
+  // Add a nop to ensure the `<else branch>` has at least one instruction, so
+  // that the corresponding, second, stack map frame can be unconditionally
+  // emitted with an offset delta >= 1.
+  cf_asm_nop(&gen->code->code);
+  const u16 jump_to_i = pg_array_len(gen->code->code);
+
+  // Patch first, conditional, jump.
+  {
+    const u16 jump_offset = (jump_from_i + 2) - (jump_conditionally_from_i - 1);
+    gen->code->code[jump_conditionally_from_i + 0] =
+        (u8)((u16)jump_offset & 0xff00) >> 8;
+    gen->code->code[jump_conditionally_from_i + 1] =
+        (u8)((u16)jump_offset & 0x00ff) >> 0;
+
+    smp_add_same_frame(gen->frame, jump_from_i + 2);
+  }
+  // Patch second, unconditional, jump.
+  {
+    const u16 jump_offset = (jump_to_i) - (jump_from_i - 1);
+    gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
+    gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
+
+    smp_add_same_frame(gen->frame, jump_to_i);
+  }
+}
+
+static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                         cf_class_file_t *class_file, u32 node_i,
                          arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
@@ -4342,74 +4431,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_IF: {
-    pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->variables != NULL);
-    pg_assert(node->type_i > 0);
-    pg_assert(node->lhs > 0);
-    pg_assert(node->lhs < pg_array_len(parser->nodes));
-    pg_assert(node->rhs > 0);
-    pg_assert(node->rhs < pg_array_len(parser->nodes));
-
-    // clang-format off
-    //                 <condition expression>
-    //      x     ---- jump_conditionally (IFEQ,  etc)
-    //      x     |    jump_conditionally_offset1 <----- jump_conditionally_from_i
-    //      x     |    jump_conditionally_offset2
-    //      x     |    <then branch>
-    //  +   x  ...|... jump
-    //  +   x  .  |    jump_offset1 <------------------- jump_from_i
-    //  +   x  .  |    jump_offset2
-    //  +   x  .  |--> <else branch> <--- stack map frame same for this location
-    //  +      ......> ...           <--- stack map frame same for this location
-    //
-    // clang-format on
-
-    // Emit condition.
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-
-    const u16 jump_conditionally_from_i =
-        cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
-
-    pg_assert(node->rhs > 0);
-    const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
-    pg_assert(rhs->kind == AST_KIND_BINARY);
-
-    // Emit `then` branch.
-    cg_begin_scope(gen->frame);
-    cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-    cg_end_scope(gen->frame);
-    const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
-
-    // Emit `else` branch.
-    cg_begin_scope(gen->frame);
-    cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-    cg_end_scope(gen->frame);
-    // Add a nop to ensure the `<else branch>` has at least one instruction, so
-    // that the corresponding, second, stack map frame can be unconditionally
-    // emitted with an offset delta >= 1.
-    cf_asm_nop(&gen->code->code);
-    const u16 jump_to_i = pg_array_len(gen->code->code);
-
-    // Patch first, conditional, jump.
-    {
-      const u16 jump_offset =
-          (jump_from_i + 2) - (jump_conditionally_from_i - 1);
-      gen->code->code[jump_conditionally_from_i + 0] =
-          (u8)((u16)jump_offset & 0xff00) >> 8;
-      gen->code->code[jump_conditionally_from_i + 1] =
-          (u8)((u16)jump_offset & 0x00ff) >> 0;
-
-      smp_add_same_frame(gen->frame, jump_from_i + 2);
-    }
-    // Patch second, unconditional, jump.
-    {
-      const u16 jump_offset = (jump_to_i) - (jump_from_i - 1);
-      gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
-      gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
-
-      smp_add_same_frame(gen->frame, jump_to_i);
-    }
-
+    cg_emit_if_then_else(gen, parser, class_file, node_i, arena);
     break;
   }
   case AST_KIND_MAX:
