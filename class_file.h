@@ -749,14 +749,18 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
   pg_array_init_reserve(dst->variables, pg_array_len(src->variables), arena);
   memcpy(dst->variables, src->variables,
          sizeof(cf_variable_t) * pg_array_len(src->variables));
+  PG_ARRAY_HEADER(dst->variables)->len=pg_array_len(src->variables);
 
   pg_array_init_reserve(dst->stack, pg_array_len(src->stack), arena);
   memcpy(dst->stack, src->stack,
          sizeof(cf_verification_info_t) * pg_array_len(src->stack));
+  PG_ARRAY_HEADER(dst->stack)->len=pg_array_len(src->stack);
 
-  pg_array_init_reserve(dst->stack_map_frames, pg_array_len(src->stack_map_frames), arena);
+  pg_array_init_reserve(dst->stack_map_frames,
+                        pg_array_len(src->stack_map_frames), arena);
   memcpy(dst->stack_map_frames, src->stack_map_frames,
          sizeof(cf_stack_map_frame_t) * pg_array_len(src->stack_map_frames));
+  PG_ARRAY_HEADER(dst->stack_map_frames)->len=pg_array_len(src->stack_map_frames);
 
   pg_assert(dst->stack != NULL);
   pg_assert(dst->variables != NULL);
