@@ -377,7 +377,6 @@ typedef struct {
 typedef struct {
   u32 node_i;
   u32 type_i;
-  u16 scope_depth;
 } cf_variable_t;
 
 typedef enum {
@@ -403,10 +402,9 @@ typedef struct {
   u16 current_stack;
   u16 max_stack;
   u16 max_locals;
-  u16 current_scope_depth;
   cf_variable_t *variables;
   cf_stack_map_frame_t *stack_map_frames;
-} cf_frame_t;
+} cg_frame_t;
 
 struct par_type_t;
 
@@ -449,8 +447,9 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-static u16 stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
-                                      u16 current_offset) {
+static u16
+stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
+                                 u16 current_offset) {
   pg_assert(stack_map_frames != NULL);
   if (pg_array_len(stack_map_frames) == 0)
     return current_offset;
@@ -460,7 +459,7 @@ static u16 stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_ma
   return current_offset - last_offset - 1;
 }
 
-static void stack_map_add_same_frame(cf_frame_t *frame, u16 current_offset) {
+static void stack_map_add_same_frame(cg_frame_t *frame, u16 current_offset) {
 
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
@@ -479,13 +478,13 @@ static void stack_map_add_same_frame(cf_frame_t *frame, u16 current_offset) {
   pg_array_append(frame->stack_map_frames, stack_map_frame);
   LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
       "offset_absolute=%u len=%lu",
-      current_offset, offset_delta, stack_map_frame.kind, stack_map_frame.offset_absolute,
-      pg_array_len(frame->stack_map_frames));
+      current_offset, offset_delta, stack_map_frame.kind,
+      stack_map_frame.offset_absolute, pg_array_len(frame->stack_map_frames));
 }
 
-static void stack_map_add_chop_frame(cf_frame_t *frame, u8 chopped_locals_count,
-                               cf_verification_info_t verification_info,
-                               u16 current_offset) {
+static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
+                                     cf_verification_info_t verification_info,
+                                     u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(chopped_locals_count > 0);
@@ -508,9 +507,9 @@ static void stack_map_add_chop_frame(cf_frame_t *frame, u8 chopped_locals_count,
   pg_array_append(frame->stack_map_frames, stack_map_frame);
 }
 
-static void stack_map_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
-                                 cf_verification_info_t verification_info,
-                                 u16 current_offset) {
+static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
+                                       cf_verification_info_t verification_info,
+                                       u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(added_locals_count > 0);
@@ -533,10 +532,9 @@ static void stack_map_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
   pg_array_append(frame->stack_map_frames, stack_map_frame);
 }
 
-static void
-stack_map_add_same_locals_1_stack_item_frame(cf_frame_t *frame,
-                                       cf_verification_info_t verification_info,
-                                       u16 current_offset) {
+static void stack_map_add_same_locals_1_stack_item_frame(
+    cg_frame_t *frame, cf_verification_info_t verification_info,
+    u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(frame->current_stack == 1);
@@ -557,8 +555,9 @@ stack_map_add_same_locals_1_stack_item_frame(cf_frame_t *frame,
   pg_array_append(frame->stack_map_frames, stack_map_frame);
 }
 
-static void stack_map_add_frame(cf_frame_t *frame, u16 current_offset,
-                          const cf_frame_t *before, const cf_frame_t *after) {
+static void stack_map_add_frame(cg_frame_t *frame, u16 current_offset,
+                                const cg_frame_t *before,
+                                const cg_frame_t *after) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(before != NULL);
@@ -566,7 +565,7 @@ static void stack_map_add_frame(cf_frame_t *frame, u16 current_offset,
   pg_assert(after->current_stack >= before->current_stack);
 
   // FIXME: Compare with the state in the previous stack_map_frame
-  const cf_frame_t diff = {
+  const cg_frame_t diff = {
       .current_stack = after->current_stack - before->current_stack,
   };
 
@@ -689,10 +688,29 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   return index;
 }
 
-static void cf_frame_init(cf_frame_t *frame, arena_t *arena) {
+static void cg_frame_init(cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
   pg_array_init_reserve(frame->variables, 32, arena);
   pg_array_init_reserve(frame->stack_map_frames, 64, arena);
+}
+
+static void cg_frame_clone(cg_frame_t *src, cg_frame_t *dst, arena_t *arena) {
+  pg_assert(src != NULL);
+  pg_assert(dst != NULL);
+  pg_assert(arena != NULL);
+
+  dst->current_stack = src->current_stack;
+  dst->max_stack = src->max_stack;
+  dst->max_locals = src->max_locals;
+  dst->stack_map_frames = NULL;
+
+  pg_array_init_reserve(dst->variables, pg_array_len(src->variables), arena);
+  memcpy(dst->variables, src->variables,
+         sizeof(cf_variable_t) * pg_array_len(src->variables));
+
+  // Do not clone stack map frames.
 }
 
 static const cf_constant_t *
@@ -790,7 +808,7 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
-static u16 cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
+static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
                                      u8 jump_opcode) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
@@ -807,7 +825,7 @@ static u16 cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
   return jump_from_i;
 }
 
-static u16 cf_asm_jump(u8 **code, cf_frame_t *frame) {
+static u16 cf_asm_jump(u8 **code, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
@@ -820,7 +838,7 @@ static u16 cf_asm_jump(u8 **code, cf_frame_t *frame) {
   return from_location;
 }
 
-static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
+static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
@@ -830,10 +848,11 @@ static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
   cf_code_array_push_u8(code, var_i);
 
   frame->current_stack -= 1;
-  // stack_map_add_append_frame(frame, 1, VERIFICATION_INFO_INT, pg_array_len(*code));
+  // stack_map_add_append_frame(frame, 1, VERIFICATION_INFO_INT,
+  // pg_array_len(*code));
 }
 
-static void cf_asm_load_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
+static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
@@ -850,7 +869,7 @@ static void cf_asm_nop(u8 **code) {
   cf_code_array_push_u8(code, BYTECODE_NOP);
 }
 
-static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
+static void cf_asm_iadd(u8 **code, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
@@ -860,7 +879,7 @@ static void cf_asm_iadd(u8 **code, cf_frame_t *frame) {
   frame->current_stack -= 1;
 }
 
-static void cf_asm_ixor(u8 **code, cf_frame_t *frame) {
+static void cf_asm_ixor(u8 **code, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
@@ -870,7 +889,7 @@ static void cf_asm_ixor(u8 **code, cf_frame_t *frame) {
   frame->current_stack -= 1;
 }
 
-static void cf_asm_imul(u8 **code, cf_frame_t *frame) {
+static void cf_asm_imul(u8 **code, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->current_stack >= 2);
@@ -880,7 +899,7 @@ static void cf_asm_imul(u8 **code, cf_frame_t *frame) {
   frame->current_stack -= 1;
 }
 
-static void cf_asm_load_constant(u8 **code, u16 constant_i, cf_frame_t *frame) {
+static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -894,7 +913,7 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cf_frame_t *frame) {
 }
 
 static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
-                                  cf_frame_t *frame,
+                                  cg_frame_t *frame,
                                   const par_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -909,7 +928,7 @@ static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
   frame->current_stack -= pop_size;
 }
 
-static void cf_asm_get_static(u8 **code, u16 field_i, cf_frame_t *frame) {
+static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(frame != NULL);
@@ -929,7 +948,7 @@ static void cf_asm_return(u8 **code) {
 }
 
 static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
-                                  cf_frame_t *frame,
+                                  cg_frame_t *frame,
                                   const par_type_method_t *method_type) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
@@ -945,7 +964,7 @@ static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
 
 static void
 cf_asm_call_superclass_constructor(u8 **code, u16 super_class_constructor_i,
-                                   cf_frame_t *frame,
+                                   cg_frame_t *frame,
                                    const par_type_t *constructor_type) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
@@ -1284,7 +1303,8 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
 
-    } else if (128 <= stack_map_frame.kind && stack_map_frame.kind <= 246) { // reserved
+    } else if (128 <= stack_map_frame.kind &&
+               stack_map_frame.kind <= 246) { // reserved
       pg_assert(0 && "unreachable");
     } else if (247 <= stack_map_frame.kind &&
                stack_map_frame.kind <=
@@ -1292,12 +1312,14 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
-    } else if (248 <= stack_map_frame.kind && stack_map_frame.kind <= 250) { // chop_frame
+    } else if (248 <= stack_map_frame.kind &&
+               stack_map_frame.kind <= 250) { // chop_frame
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
     } else if (251 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 251) { // same_frame_extended
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
-    } else if (252 <= stack_map_frame.kind && stack_map_frame.kind <= 254) { // append_frame
+    } else if (252 <= stack_map_frame.kind &&
+               stack_map_frame.kind <= 254) { // append_frame
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       const u16 verification_info_count = stack_map_frame.kind - 251;
       cf_buf_read_stack_map_table_attribute_verification_infos(
@@ -2103,8 +2125,8 @@ static void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file->fields_count == 0 && "unimplemented");
 }
 
-static u32
-cf_compute_verification_infos_size(const cf_stack_map_frame_t *stack_map_frame) {
+static u32 cf_compute_verification_infos_size(
+    const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
 
   if (0 <= stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
@@ -2119,20 +2141,24 @@ cf_compute_verification_infos_size(const cf_stack_map_frame_t *stack_map_frame) 
       return size + sizeof(u16);
     else
       pg_assert(0 && "unreachable");
-  } else if (128 <= stack_map_frame->kind && stack_map_frame->kind <= 246) { // reserved
+  } else if (128 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
   } else if (247 <= stack_map_frame->kind &&
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
     pg_assert(0 && "todo");
-  } else if (248 <= stack_map_frame->kind && stack_map_frame->kind <= 250) { // chop_frame
+  } else if (248 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 250) { // chop_frame
     pg_assert(0 && "todo");
   } else if (251 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 251) { // same_frame_extended
     pg_assert(0 && "todo");
-  } else if (252 <= stack_map_frame->kind && stack_map_frame->kind <= 254) { // append_frame
+  } else if (252 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 254) { // append_frame
     pg_assert(stack_map_frame->kind == 252 && "todo");
-  } else if (255 <= stack_map_frame->kind && stack_map_frame->kind <= 255) { // full_frame
+  } else if (255 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 255) { // full_frame
     pg_assert(0 && "todo");
   }
   pg_assert(0 && "unreachable");
@@ -2167,21 +2193,26 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                sizeof(cf_line_number_table_entry_t);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
-    const cf_stack_map_frame_t *const stack_map_frames = attribute->v.stack_map_table;
+    const cf_stack_map_frame_t *const stack_map_frames =
+        attribute->v.stack_map_table;
     pg_assert(stack_map_frames != NULL);
 
     u32 size = sizeof(u16) /* count */;
     for (u16 i = 0; i < pg_array_len(stack_map_frames); i++) {
       const cf_stack_map_frame_t *const stack_map_frame = &stack_map_frames[i];
 
-      if (0 <= stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
+      if (0 <= stack_map_frame->kind &&
+          stack_map_frame->kind <= 63) // same_frame
       {
         size += sizeof(u8);
       } else if (64 <= stack_map_frame->kind &&
-                 stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
-        size += sizeof(u8) + cf_compute_verification_infos_size(stack_map_frame);
+                 stack_map_frame->kind <=
+                     127) { // same_locals_1_stack_item_frame
+        size +=
+            sizeof(u8) + cf_compute_verification_infos_size(stack_map_frame);
 
-      } else if (128 <= stack_map_frame->kind && stack_map_frame->kind <= 246) { // reserved
+      } else if (128 <= stack_map_frame->kind &&
+                 stack_map_frame->kind <= 246) { // reserved
         pg_assert(0 && "unreachable");
       } else if (247 <= stack_map_frame->kind &&
                  stack_map_frame->kind <=
@@ -2211,9 +2242,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
 static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes);
 
-static void
-cf_write_stack_map_table_attribute(FILE *file,
-                                   const cf_stack_map_frame_t *stack_map_frame) {
+static void cf_write_stack_map_table_attribute(
+    FILE *file, const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(file != NULL);
   pg_assert(stack_map_frame != NULL);
 
@@ -2224,23 +2254,27 @@ cf_write_stack_map_table_attribute(FILE *file,
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     file_write_u8(file, stack_map_frame->kind);
     file_write_u8(file, stack_map_frame->verification_info);
-  } else if (128 <= stack_map_frame->kind && stack_map_frame->kind <= 246) { // reserved
+  } else if (128 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
   } else if (247 <= stack_map_frame->kind &&
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
     pg_assert(0 && "todo");
-  } else if (248 <= stack_map_frame->kind && stack_map_frame->kind <= 250) { // chop_frame
+  } else if (248 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 250) { // chop_frame
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
   } else if (251 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 251) { // same_frame_extended
     pg_assert(0 && "todo");
-  } else if (252 <= stack_map_frame->kind && stack_map_frame->kind <= 254) { // append_frame
+  } else if (252 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 254) { // append_frame
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
     file_write_u8(file, stack_map_frame->verification_info);
-  } else if (255 <= stack_map_frame->kind && stack_map_frame->kind <= 255) { // full_frame
+  } else if (255 <= stack_map_frame->kind &&
+             stack_map_frame->kind <= 255) { // full_frame
     pg_assert(0 && "todo");
   }
 }
@@ -4087,12 +4121,12 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
 typedef struct {
   cf_attribute_code_t *code;
-  cf_frame_t *frame;
+  cg_frame_t *frame;
   u16 out_field_ref_i;
   const cf_class_file_t *class_files;
 } cg_generator_t;
 
-static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
+static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
 
@@ -4103,21 +4137,6 @@ static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
   }
 
   return 0;
-}
-
-static void cg_begin_scope(cf_frame_t *frame) {
-  pg_assert(frame != NULL);
-  pg_assert(frame->current_scope_depth < UINT16_MAX);
-
-  frame->current_scope_depth += 1;
-}
-
-static void cg_end_scope(cf_frame_t *frame) {
-  pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
-  pg_assert(frame->current_scope_depth > 0);
-
-  frame->current_scope_depth -= 1;
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4174,33 +4193,23 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(rhs->kind == AST_KIND_BINARY);
 
   // Emit `then` branch.
-  const cf_frame_t frame_before_then_else = {
-      .current_stack = gen->frame->current_stack,
-      // TODO: clone more
-  };
-  cg_begin_scope(gen->frame);
+  cg_frame_t frame_before_then_else = {0};
+  cg_frame_clone(gen->frame, &frame_before_then_else, arena);
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  cg_end_scope(gen->frame);
-  const cf_frame_t frame_after_then = {
-      .current_stack = gen->frame->current_stack,
-      // TODO: clone more
-  };
+  cg_frame_t frame_after_then = {0};
+  cg_frame_clone(gen->frame, &frame_after_then, arena);
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
   // Emit `else` branch.
   // Restore the frame as if the `then` branch never executed.
   gen->frame->current_stack = frame_before_then_else.current_stack;
-  cg_begin_scope(gen->frame);
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-  cg_end_scope(gen->frame);
   // Add a nop to ensure the `<else branch>` has at least one instruction, so
   // that the corresponding, second, stack map frame can be unconditionally
   // emitted with an offset delta >= 1.
   cf_asm_nop(&gen->code->code);
-  const cf_frame_t frame_after_else = {
-      .current_stack = gen->frame->current_stack,
-      // TODO: clone more
-  };
+  cg_frame_t frame_after_else = {0};
+  cg_frame_clone(gen->frame, &frame_after_else, arena);
   pg_assert(frame_after_then.current_stack == frame_after_else.current_stack);
 
   const u16 jump_to_i = pg_array_len(gen->code->code);
@@ -4214,7 +4223,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
     stack_map_add_frame(gen->frame, jump_from_i + 2, &frame_before_then_else,
-                  &frame_before_then_else);
+                        &frame_before_then_else);
   }
   // Patch second, unconditional, jump.
   {
@@ -4223,8 +4232,9 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
 
     stack_map_add_frame(gen->frame, jump_to_i, &frame_before_then_else,
-                  &frame_after_else);
+                        &frame_after_else);
   }
+  // TODO: Delete cloned frames.
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4388,8 +4398,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cf_attribute_code_t code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
-    cf_frame_t frame = {0};
-    cf_frame_init(&frame, arena);
+    cg_frame_t frame = {0};
+    cg_frame_init(&frame, arena);
     const cf_variable_t arg0 = {0}; // FIXME
     pg_array_append(frame.variables, arg0);
     frame.max_locals = pg_array_len(frame.variables);
@@ -4422,7 +4432,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_array_append(class_file->methods, method);
 
-    // TODO: cf_frame_deinit(gen->frame)
+    // TODO: cg_frame_deinit(gen->frame)
     gen->code = NULL;
     gen->frame = NULL;
     break;
@@ -4512,7 +4522,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
-        .scope_depth = gen->frame->current_scope_depth,
     };
     pg_array_append(gen->frame->variables, variable);
     gen->frame->max_locals =
