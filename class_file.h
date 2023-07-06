@@ -567,8 +567,8 @@ static void smp_add_frame(cf_frame_t *frame, u16 current_offset) {
   if (frame->current_stack == 0) {
     smp_add_same_frame(frame, current_offset);
   } else if (frame->current_stack == 1) {
-    smp_add_same_locals_1_stack_item_frame(frame, current_offset,
-                                           VERIFICATION_INFO_INT /* FIXME */);
+    smp_add_same_locals_1_stack_item_frame(frame, VERIFICATION_INFO_INT /* FIXME */,
+                                           current_offset);
 
   } else {
     pg_assert(0 && "todo");
