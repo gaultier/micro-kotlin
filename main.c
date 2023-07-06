@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(lexer.line_table, estimated_capacity, &arena);
 
     const char *current = buf;
-    lex_lex(&lexer, buf, buf_len, &current);
+    lex_lex(&lexer, buf, buf_len, &current, &arena);
 
     par_parser_t parser = {
         .buf = buf,
