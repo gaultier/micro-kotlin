@@ -4384,6 +4384,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_begin_scope(gen->frame);
     cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
     cg_end_scope(gen->frame);
+    // Add a nop to ensure the `<else branch>` has at least one instruction, so
+    // that the corresponding, second, stack map frame can be unconditionally
+    // emitted with an offset delta >= 1.
     cf_asm_nop(&gen->code->code);
     const u16 jump_to_i = pg_array_len(gen->code->code);
 
