@@ -534,6 +534,47 @@ static void smp_add_append_frame(cf_frame_t *frame, u8 added_locals_count,
   pg_array_append(frame->stack_map_frames, smp_frame);
 }
 
+static void
+smp_add_same_locals_1_stack_item_frame(cf_frame_t *frame,
+                                       cf_verification_info_t verification_info,
+                                       u16 current_offset) {
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack_map_frames != NULL);
+  pg_assert(frame->current_stack == 1);
+
+  const u16 offset_delta =
+      smp_offset_delta_from_last(frame->stack_map_frames, current_offset);
+  pg_assert(offset_delta > 0);
+  pg_assert(offset_delta <= current_offset);
+
+  const cf_stack_map_frame_t smp_frame = {
+      .kind = offset_delta + 64,
+      .verification_info = verification_info,
+      .offset_delta = offset_delta,
+      .offset_absolute = current_offset,
+  };
+  pg_assert(smp_frame.kind >= 64);
+  pg_assert(smp_frame.kind <= 127);
+  pg_array_append(frame->stack_map_frames, smp_frame);
+}
+
+static void smp_add_frame(cf_frame_t *frame, u16 current_offset) {
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack_map_frames != NULL);
+
+  // FIXME: Compare with the state in the previous smp_frame
+
+  if (frame->current_stack == 0) {
+    smp_add_same_frame(frame, current_offset);
+  } else if (frame->current_stack == 1) {
+    smp_add_same_locals_1_stack_item_frame(frame, current_offset,
+                                           VERIFICATION_INFO_INT /* FIXME */);
+
+  } else {
+    pg_assert(0 && "todo");
+  }
+}
+
 static void cf_code_array_push_u8(u8 **array, u8 x) {
   pg_array_append(*array, x);
 }
@@ -3429,9 +3470,12 @@ static u32 par_parse_primary_expression(par_parser_t *parser) {
     return pg_array_last_index(parser->nodes);
   } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE) ||
              par_match_token(parser, TOKEN_KIND_KEYWORD_TRUE)) {
+    const lex_token_t token = parser->lexer->tokens[parser->tokens_i - 1];
+    const bool is_true = parser->buf[token.source_offset] == 't';
     const par_ast_node_t node = {
         .kind = AST_KIND_BOOL,
         .main_token = parser->tokens_i - 1,
+        .lhs = is_true,
     };
     pg_array_append(parser->nodes, node);
     return pg_array_last_index(parser->nodes);
@@ -4016,33 +4060,21 @@ static u32 cf_find_variable(const cf_frame_t *frame, u32 node_i) {
   return 0;
 }
 
-static void cg_begin_scope(cf_frame_t *frame) {
+static u16 cg_begin_scope(cf_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->current_scope_depth < UINT16_MAX);
 
   frame->current_scope_depth += 1;
+  return frame->current_stack;
 }
 
-static void cg_end_scope(cf_frame_t *frame) {
+static void cg_end_scope(cf_frame_t *frame, u16 stack_before_scope) {
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(frame->current_scope_depth > 0);
 
-  for (i64 i = pg_array_len(frame->variables) - 1; i >= 0; i--) {
-    const cf_variable_t *const variable = &frame->variables[i];
-    if (variable->scope_depth < frame->current_scope_depth) {
-      PG_ARRAY_HEADER(frame->variables)->len =
-          i + 1; // Drop all variables in the current scope.
-      break;
-    }
-    pg_assert(variable->scope_depth == frame->current_scope_depth);
-
-    //    const u16 current_offset = pg_array_len(code);
-    // smp_add_chop_frame(frame, 1, VERIFICATION_INFO_INT /* FIXME */,
-    // current_offset);
-  }
-
   frame->current_scope_depth -= 1;
+  frame->current_stack = stack_before_scope;
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4099,19 +4131,23 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(rhs->kind == AST_KIND_BINARY);
 
   // Emit `then` branch.
-  cg_begin_scope(gen->frame);
+  {
+  const u16 stack_before_scope = cg_begin_scope(gen->frame);
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  cg_end_scope(gen->frame);
+  cg_end_scope(gen->frame, stack_before_scope);
+  }
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
   // Emit `else` branch.
-  cg_begin_scope(gen->frame);
+  {
+  const u16 stack_before_scope = cg_begin_scope(gen->frame);
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-  cg_end_scope(gen->frame);
+  cg_end_scope(gen->frame, stack_before_scope);
   // Add a nop to ensure the `<else branch>` has at least one instruction, so
   // that the corresponding, second, stack map frame can be unconditionally
   // emitted with an offset delta >= 1.
   cf_asm_nop(&gen->code->code);
+  }
   const u16 jump_to_i = pg_array_len(gen->code->code);
 
   // Patch first, conditional, jump.
@@ -4122,7 +4158,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    smp_add_same_frame(gen->frame, jump_from_i + 2);
+    smp_add_frame(gen->frame, jump_from_i + 2);
   }
   // Patch second, unconditional, jump.
   {
@@ -4130,7 +4166,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
     gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    smp_add_same_frame(gen->frame, jump_to_i);
+    smp_add_frame(gen->frame, jump_to_i);
   }
 }
 
@@ -4157,10 +4193,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     return;
   case AST_KIND_BOOL: {
     pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
-    const lex_token_t token = parser->lexer->tokens[node->main_token];
-    const bool is_true = parser->buf[token.source_offset] == 't';
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
-                                    .v = {.number = is_true}};
+                                    .v = {.number = node->lhs}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant);
 
@@ -4339,35 +4373,44 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_UNARY: {
     pg_assert(node->lhs < pg_array_len(parser->nodes));
 
+    const par_ast_node_t true_node = {
+        .kind = AST_KIND_BOOL,
+        .lhs = true,
+    };
+    pg_array_append(parser->nodes, true_node);
+    const u32 true_node_i = pg_array_last_index(parser->nodes);
+
+    const par_ast_node_t false_node = {
+        .kind = AST_KIND_BOOL,
+        .lhs = false,
+    };
+    pg_array_append(parser->nodes, false_node);
+    const u32 false_node_i = pg_array_last_index(parser->nodes);
+
+    const par_ast_node_t binary_node = {
+        .kind = AST_KIND_BINARY,
+        .rhs = true_node_i,
+        .lhs = false_node_i,
+        .main_token = node->main_token,
+    };
     const lex_token_t token = parser->lexer->tokens[node->main_token];
-
-    u8 opcode = 0;
-    switch (token.kind) {
-    case TOKEN_KIND_NOT:
-      opcode = BYTECODE_IFNE;
-      break;
-    default:
+    const bool is_not = token.kind == TOKEN_KIND_NOT;
+    if (!is_not)
       pg_assert(0 && "todo");
-    }
 
-    pg_assert(0 && "todo");
-#if 0
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    const u16 jump_conditionally_opcode_location =
-        pg_array_len(gen->code->code);
-    cf_asm_jump_conditionally(&gen->code->code, gen->frame, opcode);
-    smp_add_same_frame(gen->frame, jump_conditionally_opcode_location);
+    pg_array_append(parser->nodes, binary_node);
 
-    const u16 jump_target = pg_array_len(gen->code->code);
-    const u16 jump_to_else_offset =
-        jump_target - jump_conditionally_opcode_location;
+    const par_ast_node_t if_node = {
+        .kind = AST_KIND_IF,
+        .lhs = node->lhs,
+        .rhs = pg_array_last_index(parser->nodes),
+    };
+    pg_array_append(parser->nodes, if_node);
+    ty_resolve_types(parser, class_file, pg_array_last_index(parser->nodes),
+                     arena);
 
-    // Patch jump location.
-    gen->code->code[jump_conditionally_opcode_location + 0] =
-        (u8)((u16)jump_to_else_offset & 0xff00) >> 8;
-    gen->code->code[jump_conditionally_opcode_location + 1] =
-        (u8)((u16)jump_to_else_offset & 0x00ff) >> 0;
-#endif
+    cg_emit_node(gen, parser, class_file, pg_array_last_index(parser->nodes),
+                 arena);
     break;
   }
   case AST_KIND_BINARY: {
