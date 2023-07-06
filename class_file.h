@@ -431,7 +431,7 @@ typedef enum cf_type_kind_t cf_type_kind_t;
 typedef struct {
   u16 max_stack;
   u16 max_locals;
-  cf_variable_t *variables;
+  cf_variable_t *locals;
   cf_type_kind_t *stack;
   cf_stack_map_frame_t *stack_map_frames;
 } cg_frame_t;
@@ -530,6 +530,7 @@ static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(added_locals_count > 0);
   pg_assert(added_locals_count <= 3);
+  pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) == 0);
 
   const u16 offset_delta =
@@ -553,6 +554,7 @@ static void stack_map_add_same_locals_1_stack_item_frame(
     u16 current_offset) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
+  pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) == 1);
 
   const u16 offset_delta =
@@ -629,6 +631,7 @@ static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
 
 static u16 cg_compute_stack_size(const cf_type_kind_t *stack) {
   pg_assert(stack != NULL);
+  pg_assert(pg_array_len(stack) <= UINT16_MAX);
 
   u16 size = 0;
   for (u16 i = 0; i < pg_array_len(stack); i++) {
@@ -670,7 +673,9 @@ static void stack_map_add_frame(cg_frame_t *frame, u16 current_offset,
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(before != NULL);
   pg_assert(after != NULL);
+  pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(after->stack) >= pg_array_len(before->stack));
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   const u16 diff_stack =
       pg_array_len(after->stack) - pg_array_len(before->stack);
@@ -798,7 +803,7 @@ static void cg_frame_init(cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  pg_array_init_reserve(frame->variables, 32, arena);
+  pg_array_init_reserve(frame->locals, 32, arena);
   pg_array_init_reserve(frame->stack, 256, arena);
   pg_array_init_reserve(frame->stack_map_frames, 64, arena);
 }
@@ -807,7 +812,8 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
                            arena_t *arena) {
   pg_assert(src != NULL);
   pg_assert(src->stack != NULL);
-  pg_assert(src->variables != NULL);
+  pg_assert(pg_array_len(src->stack) <= UINT16_MAX);
+  pg_assert(src->locals != NULL);
   pg_assert(src->stack_map_frames != NULL);
   pg_assert(dst != NULL);
   pg_assert(arena != NULL);
@@ -815,10 +821,10 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
   dst->max_stack = src->max_stack;
   dst->max_locals = src->max_locals;
 
-  pg_array_init_reserve(dst->variables, pg_array_len(src->variables), arena);
-  memcpy(dst->variables, src->variables,
-         sizeof(cf_variable_t) * pg_array_len(src->variables));
-  PG_ARRAY_HEADER(dst->variables)->len = pg_array_len(src->variables);
+  pg_array_init_reserve(dst->locals, pg_array_len(src->locals), arena);
+  memcpy(dst->locals, src->locals,
+         sizeof(cf_variable_t) * pg_array_len(src->locals));
+  PG_ARRAY_HEADER(dst->locals)->len = pg_array_len(src->locals);
 
   pg_array_init_reserve(dst->stack, pg_array_len(src->stack), arena);
   memcpy(dst->stack, src->stack,
@@ -833,7 +839,7 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
       pg_array_len(src->stack_map_frames);
 
   pg_assert(dst->stack != NULL);
-  pg_assert(dst->variables != NULL);
+  pg_assert(dst->locals != NULL);
   pg_assert(dst->stack_map_frames != NULL);
 }
 
@@ -936,8 +942,10 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
                                      u8 jump_opcode) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) > 0);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
   pg_assert(*pg_array_last(frame->stack) == TYPE_BOOL);
 
   cf_code_array_push_u8(code, jump_opcode);
@@ -953,7 +961,9 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
 static u16 cf_asm_jump(u8 **code, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_GOTO);
   const u16 from_location = pg_array_len(*code);
@@ -966,8 +976,11 @@ static u16 cf_asm_jump(u8 **code, cg_frame_t *frame) {
 static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) > 0);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+
   pg_assert(cf_stack_type_dumbbed_down_for_jvm(
                 frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
 
@@ -980,7 +993,9 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
 static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_ILOAD);
   cf_code_array_push_u8(code, var_i);
@@ -999,6 +1014,7 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
 
@@ -1012,6 +1028,7 @@ static void cf_asm_ixor(u8 **code, cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
 
@@ -1025,6 +1042,7 @@ static void cf_asm_imul(u8 **code, cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
 
@@ -1039,6 +1057,7 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_LDC_W);
   cf_code_array_push_u16(code, constant_i);
@@ -1055,6 +1074,8 @@ static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_INVOKE_VIRTUAL);
   cf_code_array_push_u16(code, method_ref_i);
@@ -1070,6 +1091,8 @@ static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_GET_STATIC);
   cf_code_array_push_u16(code, field_i);
@@ -1092,6 +1115,8 @@ static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   cf_code_array_push_u8(code, BYTECODE_INVOKE_SPECIAL);
   cf_code_array_push_u16(code, method_ref_i);
@@ -4267,10 +4292,10 @@ typedef struct {
 
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   pg_assert(frame != NULL);
-  pg_assert(frame->variables != NULL);
+  pg_assert(frame->locals != NULL);
 
-  for (i64 i = pg_array_len(frame->variables) - 1; i >= 0; i--) {
-    const cf_variable_t *const variable = &frame->variables[i];
+  for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
+    const cf_variable_t *const variable = &frame->locals[i];
     if (variable->node_i == node_i)
       return (u32)i;
   }
@@ -4312,9 +4337,11 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(arena != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->variables != NULL);
+  pg_assert(gen->frame->locals != NULL);
   pg_assert(gen->frame->stack != NULL);
   pg_assert(gen->frame->stack_map_frames != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) > 0);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
   pg_assert(node->type_i > 0);
@@ -4357,8 +4384,10 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cf_asm_nop(&gen->code->code);
   pg_assert(pg_array_len(frame_after_then.stack) ==
             pg_array_len(gen->frame->stack));
- gen->frame->max_stack=pg_max (frame_after_then.max_stack , gen->frame->max_stack);
- gen->frame->max_locals=pg_max (frame_after_then.max_locals , gen->frame->max_locals);
+  gen->frame->max_stack =
+      pg_max(frame_after_then.max_stack, gen->frame->max_stack);
+  gen->frame->max_locals =
+      pg_max(frame_after_then.max_locals, gen->frame->max_locals);
 
   const u16 jump_to_i = pg_array_len(gen->code->code);
 
@@ -4554,8 +4583,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_frame_t frame = {0};
     cg_frame_init(&frame, arena);
     const cf_variable_t arg0 = {0}; // FIXME
-    pg_array_append(frame.variables, arg0);
-    frame.max_locals = pg_array_len(frame.variables);
+    pg_array_append(frame.locals, arg0);
+    frame.max_locals = pg_array_len(frame.locals);
     gen->frame = &frame;
 
     // `lhs` is the arguments, `rhs` is the body.
@@ -4590,6 +4619,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_UNARY: {
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->locals != NULL);
+    pg_assert(gen->frame->stack != NULL);
+    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
     pg_assert(node->lhs < pg_array_len(parser->nodes));
 
     const u16 stack_before = pg_array_len(gen->frame->stack);
@@ -4633,11 +4667,21 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, pg_array_last_index(parser->nodes),
                  arena);
 
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->locals != NULL);
+    pg_assert(gen->frame->stack != NULL);
+    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
     const u16 stack_after = pg_array_len(gen->frame->stack);
     pg_assert(stack_after == stack_before + 1); // TODO: Is it always +1?
     break;
   }
   case AST_KIND_BINARY: {
+    pg_assert(gen->frame != NULL);
+    pg_assert(gen->frame->locals != NULL);
+    pg_assert(gen->frame->stack != NULL);
+    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
@@ -4660,13 +4704,22 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_LIST: {
+    if (gen->code != NULL) {
+      pg_assert(gen->frame != NULL);
+      pg_assert(gen->frame->locals != NULL);
+      pg_assert(gen->frame->stack != NULL);
+      pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+    }
+
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
     pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->variables != NULL);
+    pg_assert(gen->frame->locals != NULL);
+    pg_assert(gen->frame->stack != NULL);
+    pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
     pg_assert(node->type_i > 0);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
@@ -4675,17 +4728,17 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .node_i = node_i,
         .type_i = node->type_i,
     };
-    pg_array_append(gen->frame->variables, variable);
+    pg_array_append(gen->frame->locals, variable);
     gen->frame->max_locals =
-        pg_max(gen->frame->max_locals, pg_array_len(gen->frame->variables));
+        pg_max(gen->frame->max_locals, pg_array_len(gen->frame->locals));
 
     cf_asm_store_variable_int(&gen->code->code, gen->frame,
-                              pg_array_last_index(gen->frame->variables));
+                              pg_array_last_index(gen->frame->locals));
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
     pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->variables != NULL);
+    pg_assert(gen->frame->locals != NULL);
     pg_assert(node->type_i > 0);
 
     pg_assert(node->lhs > 0);
