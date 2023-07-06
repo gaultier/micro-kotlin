@@ -740,28 +740,34 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
-static void cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
-                                      u8 jump_opcode) {
+static u16 cf_asm_jump_conditionally(u8 **code, cf_frame_t *frame,
+                                     u8 jump_opcode) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
   pg_assert(frame->current_stack > 0);
 
   cf_code_array_push_u8(code, jump_opcode);
+  const u16 jump_from_i = pg_array_len(*code);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
 
   frame->current_stack -= 1;
+
+  return jump_from_i;
 }
 
-static void cf_asm_jump(u8 **code, cf_frame_t *frame) {
+static u16 cf_asm_jump(u8 **code, cf_frame_t *frame) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->variables != NULL);
 
   cf_code_array_push_u8(code, BYTECODE_GOTO);
+  const u16 from_location = pg_array_len(*code);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2);
+
+  return from_location;
 }
 
 static void cf_asm_store_variable_int(u8 **code, cf_frame_t *frame, u8 var_i) {
@@ -4240,7 +4246,7 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
       pg_assert(0 && "todo");
     }
 
-      pg_assert(0 && "todo");
+    pg_assert(0 && "todo");
 #if 0
     cg_generate_node(gen, parser, class_file, node->lhs, arena);
     const u16 jump_conditionally_opcode_location =
@@ -4329,69 +4335,52 @@ static void cg_generate_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    cg_generate_node(gen, parser, class_file, node->lhs,
-                     arena); // Condition.
+    // Condition.
+    cg_generate_node(gen, parser, class_file, node->lhs, arena);
 
-    const u16 jump_conditionally_opcode_location =
-        pg_array_len(gen->code->code);
-    cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
-
-    //  To be patched in a bit.
-    const u16 jump_to_else_location_i = pg_array_len(gen->code->code) - 2;
+    const u16 jump_conditionally_from_i =
+        cf_asm_jump_conditionally(&gen->code->code, gen->frame, BYTECODE_IFEQ);
 
     const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
+    const bool has_else_branch =
+        rhs->kind == AST_KIND_BINARY &&
+        parser->lexer->tokens[rhs->main_token].kind == TOKEN_KIND_KEYWORD_ELSE;
+    const u16 then_node_i = has_else_branch ? rhs->lhs : node->rhs;
 
-    u16 jump_to_after_else_i = (u16)-1;
-    u16 jump_to_else_target_location_i = (u16)-1;
-    if (rhs->kind == AST_KIND_BINARY &&
-        parser->lexer->tokens[rhs->main_token].kind ==
-            TOKEN_KIND_KEYWORD_ELSE) {
+    // Emit `then` branch.
+    cg_begin_scope(gen->frame);
+    cg_generate_node(gen, parser, class_file, then_node_i, arena);
+    cg_end_scope(gen->frame);
+    const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
+
+    if (has_else_branch) { // Emit `else` branch.
       cg_begin_scope(gen->frame);
-      cg_generate_node(gen, parser, class_file, rhs->lhs, arena); // Then
+      cg_generate_node(gen, parser, class_file, rhs->rhs, arena);
       cg_end_scope(gen->frame);
-
-      cf_asm_jump(&gen->code->code, gen->frame);
-      jump_to_after_else_i = pg_array_len(gen->code->code) - 2;
-      jump_to_else_target_location_i = pg_array_len(gen->code->code);
-      smp_add_same_frame(gen->frame, jump_to_else_target_location_i);
-
-      cg_begin_scope(gen->frame);
-      cg_generate_node(gen, parser, class_file, rhs->rhs, arena); // Else
-      cg_end_scope(gen->frame);
-      smp_add_same_frame(gen->frame, pg_array_len(gen->code->code));
-    } else {
-      cg_begin_scope(gen->frame);
-      cg_generate_node(gen, parser, class_file, node->rhs, arena); // Then
-      cg_end_scope(gen->frame);
-      jump_to_else_target_location_i = pg_array_len(gen->code->code);
-
-      smp_add_same_frame(gen->frame, jump_to_else_target_location_i);
     }
+    const u16 jump_to_i = pg_array_len(gen->code->code);
 
-    const u16 after_else_location_i = pg_array_len(gen->code->code);
-
-    // Patch first jump.
+    // Patch first, conditional, jump.
     {
-      const u16 jump_to_else_offset =
-          jump_to_else_target_location_i - jump_conditionally_opcode_location;
+      const u16 jump_offset =
+          (jump_from_i + 2) - (jump_conditionally_from_i - 1);
+      gen->code->code[jump_conditionally_from_i + 0] =
+          (u8)((u16)jump_offset & 0xff00) >> 8;
+      gen->code->code[jump_conditionally_from_i + 1] =
+          (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-      // Patch jump location.
-      gen->code->code[jump_to_else_location_i + 0] =
-          (u8)((u16)jump_to_else_offset & 0xff00) >> 8;
-      gen->code->code[jump_to_else_location_i + 1] =
-          (u8)((u16)jump_to_else_offset & 0x00ff) >> 0;
+      smp_add_same_frame(gen->frame, jump_from_i +2);
     }
-    // Patch second jump.
-    if (jump_to_after_else_i != (u16)-1) {
-      const u16 jump_to_after_else_offset =
-          1 /* start counting offset from the jump opcode */ +
-          after_else_location_i - jump_to_after_else_i;
+    // Patch second, unconditional, jump.
+    {
+      const u16 jump_offset = (jump_to_i) - (jump_from_i - 1);
+      if (!has_else_branch)
+        pg_assert(jump_offset == 3);
 
-      // Patch jump location.
-      gen->code->code[jump_to_after_else_i + 0] =
-          (u8)((u16)jump_to_after_else_offset & 0xff00) >> 8;
-      gen->code->code[jump_to_after_else_i + 1] =
-          (u8)((u16)jump_to_after_else_offset & 0x00ff) >> 0;
+      gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
+      gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
+
+      smp_add_same_frame(gen->frame, jump_to_i);
     }
 
     break;
