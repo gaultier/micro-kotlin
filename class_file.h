@@ -4367,6 +4367,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_end_scope(gen->frame);
     const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame);
 
+    // TODO: Find a way to always emit this `else` branch safely and remove
+    // this check.
     if (has_else_branch) { // Emit `else` branch.
       cg_begin_scope(gen->frame);
       cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
