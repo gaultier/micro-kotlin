@@ -567,8 +567,8 @@ static void smp_add_frame(cf_frame_t *frame, u16 current_offset) {
   if (frame->current_stack == 0) {
     smp_add_same_frame(frame, current_offset);
   } else if (frame->current_stack == 1) {
-    smp_add_same_locals_1_stack_item_frame(frame, VERIFICATION_INFO_INT /* FIXME */,
-                                           current_offset);
+    smp_add_same_locals_1_stack_item_frame(
+        frame, VERIFICATION_INFO_INT /* FIXME */, current_offset);
 
   } else {
     pg_assert(0 && "todo");
@@ -2097,6 +2097,41 @@ static void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file->fields_count == 0 && "unimplemented");
 }
 
+static u32
+cf_compute_verification_infos_size(const cf_stack_map_frame_t *smp_frame) {
+  pg_assert(smp_frame != NULL);
+
+  if (0 <= smp_frame->kind && smp_frame->kind <= 63) // same_frame
+  {
+    return 0;
+  } else if (64 <= smp_frame->kind &&
+             smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
+    u32 size = sizeof(u8);
+    if (smp_frame->verification_info < 7)
+      return size;
+    else if (smp_frame->verification_info <= 8)
+      return size + sizeof(u16);
+    else
+      pg_assert(0 && "unreachable");
+  } else if (128 <= smp_frame->kind && smp_frame->kind <= 246) { // reserved
+    pg_assert(0 && "unreachable");
+  } else if (247 <= smp_frame->kind &&
+             smp_frame->kind <=
+                 247) { // same_locals_1_stack_item_frame_extended
+    pg_assert(0 && "todo");
+  } else if (248 <= smp_frame->kind && smp_frame->kind <= 250) { // chop_frame
+    pg_assert(0 && "todo");
+  } else if (251 <= smp_frame->kind &&
+             smp_frame->kind <= 251) { // same_frame_extended
+    pg_assert(0 && "todo");
+  } else if (252 <= smp_frame->kind && smp_frame->kind <= 254) { // append_frame
+    pg_assert(smp_frame->kind == 252 && "todo");
+  } else if (255 <= smp_frame->kind && smp_frame->kind <= 255) { // full_frame
+    pg_assert(0 && "todo");
+  }
+  pg_assert(0 && "unreachable");
+}
+
 static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   pg_assert(attribute != NULL);
 
@@ -2138,7 +2173,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
         size += sizeof(u8);
       } else if (64 <= smp_frame->kind &&
                  smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
-        pg_assert(0 && "todo");
+        size += sizeof(u8) + cf_compute_verification_infos_size(smp_frame);
+
       } else if (128 <= smp_frame->kind && smp_frame->kind <= 246) { // reserved
         pg_assert(0 && "unreachable");
       } else if (247 <= smp_frame->kind &&
@@ -2180,7 +2216,8 @@ cf_write_stack_map_table_attribute(FILE *file,
     file_write_u8(file, smp_frame->kind);
   } else if (64 <= smp_frame->kind &&
              smp_frame->kind <= 127) { // same_locals_1_stack_item_frame
-    pg_assert(0 && "todo");
+    file_write_u8(file, smp_frame->kind);
+    file_write_u8(file, smp_frame->verification_info);
   } else if (128 <= smp_frame->kind && smp_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
   } else if (247 <= smp_frame->kind &&
