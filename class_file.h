@@ -4234,7 +4234,6 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     stack_map_add_frame(gen->frame, jump_to_i, &frame_before_then_else,
                         &frame_after_else);
   }
-  // TODO: Delete cloned frames.
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -4432,7 +4431,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_array_append(class_file->methods, method);
 
-    // TODO: cg_frame_deinit(gen->frame)
     gen->code = NULL;
     gen->frame = NULL;
     break;
