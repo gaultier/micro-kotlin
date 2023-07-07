@@ -30,6 +30,21 @@
 
 // ----------- Utility macros
 
+// Check that __COUNTER__ is defined and that __COUNTER__ increases by 1
+// every time it is expanded. X + 1 == X + 0 is used in case X is defined to be
+// empty. If X is empty the expression becomes (+1 == +0).
+#if defined(__COUNTER__) && (__COUNTER__ + 1 == __COUNTER__ + 0)
+#define PG_PRIVATE_UNIQUE_ID __COUNTER__
+#else
+#define PG_PRIVATE_UNIQUE_ID __LINE__
+#endif
+
+// Helpers for generating unique variable names
+#define pg_private_name(n) pg_private_concat(n, PG_PRIVATE_UNIQUE_ID)
+#define pg_private_concat(a, b) pg_private_concat2(a, b)
+#define pg_private_concat2(a, b) a##b
+#define pg_pad(n) uint8_t pg_private_name(_padding)[n]
+
 #define pg_unused(x) (void)(x)
 
 #define pg_assert(condition)                                                   \
@@ -177,6 +192,7 @@ typedef struct pg_array_header_t {
 typedef struct {
   u16 cap;
   u16 len;
+  pg_pad(4);
   char *value;
 } string_t;
 
@@ -405,7 +421,7 @@ static bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
 
 // ------------------------ Class file code
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   BYTECODE_NOP = 0x00,
   BYTECODE_ALOAD_0 = 0x2a,
   BYTECODE_INVOKE_SPECIAL = 0xb7,
@@ -431,8 +447,8 @@ static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
 
 typedef struct {
   u32 scope_depth;
-  string_t name;
   u32 var_definition_node_i;
+  string_t name;
 } par_variable_t;
 
 typedef struct {
@@ -440,7 +456,7 @@ typedef struct {
   u32 type_i;
 } cf_variable_t;
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
   VERIFICATION_INFO_INT = 1,
   VERIFICATION_INFO_FLOAT = 2,
@@ -455,11 +471,12 @@ typedef struct {
   u8 kind;
   u8 offset_delta;
   u16 offset_absolute;
-  cf_verification_info_t
-      verification_info; // TODO: it's actually: `cf_verification_info_t[]`.
+  // TODO: it's actually: `cf_verification_info_t[]`.
+  cf_verification_info_t verification_info;
+  pg_pad(1);
 } cf_stack_map_frame_t;
 
-enum cf_type_kind_t {
+enum __attribute__((packed)) cf_type_kind_t {
   TYPE_ANY,
   TYPE_VOID,
   TYPE_BYTE,
@@ -480,6 +497,7 @@ typedef enum cf_type_kind_t cf_type_kind_t;
 typedef struct {
   u16 max_stack;
   u16 max_locals;
+  pg_pad(4);
   cf_variable_t *locals;
   cf_type_kind_t *stack;
   cf_stack_map_frame_t *stack_map_frames;
@@ -488,19 +506,21 @@ typedef struct {
 struct par_type_t;
 
 typedef struct {
-  u32 return_type_i;
-  u8 argument_count;
-  u32 argument_types_i;
   string_t descriptor;
+  u32 return_type_i;
+  u32 argument_types_i;
+  u8 argument_count;
+  pg_pad(7);
 } par_type_method_t;
 
 struct par_type_t {
-  cf_type_kind_t kind;
   union {
     string_t class_name;      // TYPE_INSTANCE_REFERENCE
     par_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
+  cf_type_kind_t kind;
+  pg_pad(7);
 };
 typedef struct par_type_t par_type_t;
 
@@ -532,7 +552,6 @@ static void stack_map_add_same_frame(cg_frame_t *frame, u16 current_offset,
   const u16 offset_delta =
       stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta <= 63);
-  pg_assert(offset_delta >= 0);
   pg_assert(offset_delta <= current_offset);
 
   const cf_stack_map_frame_t stack_map_frame = {
@@ -754,32 +773,13 @@ static void cf_code_array_push_u16(u8 **array, u16 x, arena_t *arena) {
   cf_code_array_push_u8(array, (u8)(x & 0x00ff), arena);
 }
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   CAF_ACC_PUBLIC = 0x0001,
   CAF_ACC_STATIC = 0x0008,
   CAF_ACC_SUPER = 0x0020,
 } cf_access_flags_t;
 
 typedef struct {
-  enum cp_info_kind_t {
-    CONSTANT_POOL_KIND_UTF8 = 1,
-    CONSTANT_POOL_KIND_INT = 3,
-    CONSTANT_POOL_KIND_FLOAT = 4,
-    CONSTANT_POOL_KIND_LONG = 5,
-    CONSTANT_POOL_KIND_DOUBLE = 6,
-    CONSTANT_POOL_KIND_CLASS_INFO = 7,
-    CONSTANT_POOL_KIND_STRING = 8,
-    CONSTANT_POOL_KIND_FIELD_REF = 9,
-    CONSTANT_POOL_KIND_METHOD_REF = 10,
-    CONSTANT_POOL_KIND_INTERFACE_METHOD_REF = 11,
-    CONSTANT_POOL_KIND_NAME_AND_TYPE = 12,
-    CONSTANT_POOL_KIND_METHOD_HANDLE = 15,
-    CONSTANT_POOL_KIND_METHOD_TYPE = 16,
-    CONSTANT_POOL_KIND_DYNAMIC = 17,
-    CONSTANT_POOL_KIND_INVOKE_DYNAMIC = 18,
-    CONSTANT_POOL_KIND_MODULE = 19,
-    CONSTANT_POOL_KIND_PACKAGE = 20,
-  } kind;
   union {
     u64 number;        // CONSTANT_POOL_KIND_INT
     string_t s;        // CONSTANT_POOL_KIND_UTF8
@@ -798,6 +798,26 @@ typedef struct {
       u16 type_descriptor;
     } field_ref; // CONSTANT_POOL_KIND_FIELD_REF
   } v;
+  enum __attribute__((packed)) cp_info_kind_t {
+    CONSTANT_POOL_KIND_UTF8 = 1,
+    CONSTANT_POOL_KIND_INT = 3,
+    CONSTANT_POOL_KIND_FLOAT = 4,
+    CONSTANT_POOL_KIND_LONG = 5,
+    CONSTANT_POOL_KIND_DOUBLE = 6,
+    CONSTANT_POOL_KIND_CLASS_INFO = 7,
+    CONSTANT_POOL_KIND_STRING = 8,
+    CONSTANT_POOL_KIND_FIELD_REF = 9,
+    CONSTANT_POOL_KIND_METHOD_REF = 10,
+    CONSTANT_POOL_KIND_INTERFACE_METHOD_REF = 11,
+    CONSTANT_POOL_KIND_NAME_AND_TYPE = 12,
+    CONSTANT_POOL_KIND_METHOD_HANDLE = 15,
+    CONSTANT_POOL_KIND_METHOD_TYPE = 16,
+    CONSTANT_POOL_KIND_DYNAMIC = 17,
+    CONSTANT_POOL_KIND_INVOKE_DYNAMIC = 18,
+    CONSTANT_POOL_KIND_MODULE = 19,
+    CONSTANT_POOL_KIND_PACKAGE = 20,
+  } kind;
+  pg_pad(7);
 } cf_constant_t;
 
 typedef struct cf_constant_method_ref_t cf_constant_method_ref_t;
@@ -1218,6 +1238,7 @@ typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
+  pg_pad(2);
   cf_attribute_t *attributes;
 } cf_field_t;
 
@@ -1231,19 +1252,11 @@ typedef struct {
 } cf_line_number_table_entry_t;
 
 struct cf_attribute_t {
-  enum cf_attribute_kind_t {
-    ATTRIBUTE_KIND_SOURCE_FILE,
-    ATTRIBUTE_KIND_CODE,
-    ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
-    ATTRIBUTE_KIND_STACK_MAP_TABLE,
-  } kind;
-
-  u16 name;
-
   union {
     struct cf_attribute_code_t {
       u16 max_stack;
       u16 max_locals;
+      pg_pad(4);
       u8 *code;
       cf_exception_t *exceptions;
       cf_attribute_t *attributes;
@@ -1258,6 +1271,14 @@ struct cf_attribute_t {
 
     cf_stack_map_frame_t *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
   } v;
+  u16 name;
+  enum __attribute__((packed)) cf_attribute_kind_t {
+    ATTRIBUTE_KIND_SOURCE_FILE,
+    ATTRIBUTE_KIND_CODE,
+    ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
+    ATTRIBUTE_KIND_STACK_MAP_TABLE,
+  } kind;
+  pg_pad(5);
 };
 
 typedef struct cf_attribute_line_number_table_t
@@ -1271,6 +1292,7 @@ struct cf_method_t {
   u16 access_flags;
   u16 name;
   u16 descriptor;
+  pg_pad(2);
   cf_attribute_t *attributes;
 };
 
@@ -1283,16 +1305,17 @@ struct cf_class_file_t {
   string_t file_path;
   u16 minor_version;
   u16 major_version;
-  cf_constant_array_t constant_pool;
   u16 access_flags;
   u16 this_class;
   u16 super_class;
   u16 interfaces_count;
-  u16 *interfaces;
   u16 fields_count;
+  pg_pad(2);
+  u16 *interfaces;
   cf_field_t *fields;
   cf_method_t *methods;
   cf_attribute_t *attributes;
+  cf_constant_array_t constant_pool;
 };
 typedef struct cf_class_file_t cf_class_file_t;
 
@@ -1504,17 +1527,13 @@ static void cf_buf_read_stack_map_table_attribute_verification_infos(
 
 static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
                                                   char **current,
-                                                  cf_class_file_t *class_file,
                                                   u32 attribute_len, u16 name_i,
                                                   cf_attribute_t **attributes,
                                                   arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(current != NULL);
-  pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
   pg_assert(arena != NULL);
-
-  pg_unused(class_file);
 
   const char *const current_start = *current;
 
@@ -1784,8 +1803,8 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
     cf_buf_read_code_attribute(buf, buf_len, current, class_file, size, name_i,
                                attributes, arena);
   } else if (string_eq_c(attribute_name, "StackMapTable")) {
-    cf_buf_read_stack_map_table_attribute(buf, buf_len, current, class_file,
-                                          size, name_i, attributes, arena);
+    cf_buf_read_stack_map_table_attribute(buf, buf_len, current, size, name_i,
+                                          attributes, arena);
   } else if (string_eq_c(attribute_name, "Exceptions")) {
     cf_buf_read_exceptions_attribute(buf, buf_len, current, class_file, size,
                                      attributes, arena);
@@ -2840,7 +2859,7 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
 
 // ---------------------------------- Lexer
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   TOKEN_KIND_NONE,
   TOKEN_KIND_NUMBER,
   TOKEN_KIND_PLUS,
@@ -2871,8 +2890,9 @@ typedef enum {
 } lex_token_kind_t;
 
 typedef struct {
-  lex_token_kind_t kind;
   u32 source_offset;
+  lex_token_kind_t kind;
+  pg_pad(3);
 } lex_token_t;
 
 typedef struct {
@@ -3334,7 +3354,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 
 // ------------------------------ Parser
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
   AST_KIND_NUM,
   AST_KIND_BOOL,
@@ -3364,14 +3384,15 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
 };
 
 typedef struct {
-  par_ast_node_kind_t kind;
-  u32 main_token;
+  u32 main_token_i;
   u32 lhs;
   u32 rhs;
   u32 type_i; // TODO: should it be separate?
+  par_ast_node_kind_t kind;
+  pg_pad(3);
 } par_ast_node_t;
 
-typedef enum {
+typedef enum __attribute__((packed)) {
   PARSER_STATE_OK,
   PARSER_STATE_ERROR,
   PARSER_STATE_PANIC,
@@ -3380,15 +3401,16 @@ typedef enum {
 
 typedef struct {
   char *buf;
-  u32 buf_len;
-  u32 tokens_i;
   lex_lexer_t *lexer;
+  par_variable_t *variables;
   par_ast_node_t *nodes;
-  par_parser_state_t state;
   par_type_t *types;
   u32 current_function_i;
-  par_variable_t *variables;
   u32 scope_depth;
+  u32 buf_len;
+  u32 tokens_i;
+  par_parser_state_t state;
+  pg_pad(7);
 } par_parser_t;
 
 static void par_begin_scope(par_parser_t *parser) {
@@ -3494,7 +3516,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
     return;
 
   const char *const kind_string = par_ast_node_kind_to_string[node->kind];
-  const lex_token_t token = parser->lexer->tokens[node->main_token];
+  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
   u32 line = 0;
   u32 column = 0;
   string_t token_string = {0};
@@ -3693,7 +3715,7 @@ static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
 
   par_ast_node_t node = {
       .kind = AST_KIND_BUILTIN_PRINTLN,
-      .main_token = parser->tokens_i - 2,
+      .main_token_i = parser->tokens_i - 2,
       .lhs = par_parse_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
@@ -3747,7 +3769,7 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
 
   const par_ast_node_t binary_node = {
       .kind = AST_KIND_BINARY,
-      .main_token = parser->tokens_i - 1,
+      .main_token_i = parser->tokens_i - 1,
       .lhs = par_parse_block_expression(parser, arena), // Then
       .rhs = par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)
                  ? par_parse_block_expression(parser, arena)
@@ -3757,7 +3779,7 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
 
   const par_ast_node_t if_node = {
       .kind = AST_KIND_IF,
-      .main_token = main_token_i,
+      .main_token_i = main_token_i,
       .lhs = condition_i,
       .rhs = pg_array_last_index(parser->nodes),
   };
@@ -3776,7 +3798,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
 
     const par_ast_node_t node = {
         .kind = AST_KIND_NUM,
-        .main_token = parser->tokens_i - 1,
+        .main_token_i = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node, arena);
     return pg_array_last_index(parser->nodes);
@@ -3786,7 +3808,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     const bool is_true = parser->buf[token.source_offset] == 't';
     const par_ast_node_t node = {
         .kind = AST_KIND_BOOL,
-        .main_token = parser->tokens_i - 1,
+        .main_token_i = parser->tokens_i - 1,
         .lhs = is_true,
     };
     pg_array_append(parser->nodes, node, arena);
@@ -3796,14 +3818,14 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
     par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
-        .main_token = parser->tokens_i - 1,
+        .main_token_i = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node, arena);
 
-    const string_t variable_name = par_token_to_string(parser, node.main_token);
+    const string_t variable_name = par_token_to_string(parser, node.main_token_i);
     const u32 variable_i = par_find_variable(parser, variable_name);
     if (variable_i == (u32)-1) {
-      par_error(parser, parser->lexer->tokens[node.main_token],
+      par_error(parser, parser->lexer->tokens[node.main_token_i],
                 "unknown reference to variable");
     } else {
       pg_array_last(parser->nodes)->lhs =
@@ -3843,7 +3865,7 @@ static u32 par_parse_var_definition(par_parser_t *parser, arena_t *arena) {
         &parser->nodes[previous_var->var_definition_node_i];
 
     const lex_token_t previous_var_name_token =
-        parser->lexer->tokens[previous_var_node->main_token];
+        parser->lexer->tokens[previous_var_node->main_token_i];
 
     u32 line = 0;
     u32 column = 0;
@@ -3866,7 +3888,7 @@ static u32 par_parse_var_definition(par_parser_t *parser, arena_t *arena) {
 
   const par_ast_node_t node = {
       .kind = AST_KIND_VAR_DEFINITION,
-      .main_token = name_token_i,
+      .main_token_i = name_token_i,
       .lhs = par_parse_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
@@ -3919,7 +3941,7 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
     const par_ast_node_t node = {
         .kind = AST_KIND_UNARY,
         .lhs = par_parse_postfix_unary_expression(parser, arena),
-        .main_token = parser->tokens_i - 1,
+        .main_token_i = parser->tokens_i - 1,
     };
     pg_array_append(parser->nodes, node, arena);
     return pg_array_last_index(parser->nodes);
@@ -3943,7 +3965,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
-      .main_token = parser->tokens_i - 1,
+      .main_token_i = parser->tokens_i - 1,
       .rhs = par_parse_multiplicative_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
@@ -3965,7 +3987,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
       .lhs = expression_node,
-      .main_token = parser->tokens_i - 1,
+      .main_token_i = parser->tokens_i - 1,
       .rhs = par_parse_additive_expression(parser, arena),
   };
   pg_array_append(parser->nodes, node, arena);
@@ -4058,7 +4080,7 @@ static u32 par_parse_function_definition(par_parser_t *parser, arena_t *arena) {
 
   const par_ast_node_t node = {
       .kind = AST_KIND_FUNCTION_DEFINITION,
-      .main_token = start_token,
+      .main_token_i = start_token,
   };
   pg_array_append(parser->nodes, node, arena);
   const u32 fn_i = parser->current_function_i =
@@ -4244,7 +4266,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     if (!cf_class_files_find_method_exactly(
             class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
             string_make_from_c_no_alloc("println"), descriptor)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -4267,13 +4289,13 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i =
                ty_resolve_types(parser, class_files, node->lhs, arena);
   case AST_KIND_BINARY: {
-    pg_assert(node->main_token > 0);
+    pg_assert(node->main_token_i > 0);
 
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
 
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -4307,12 +4329,12 @@ static u32 ty_resolve_types(par_parser_t *parser,
         ty_resolve_types(parser, class_files, node->lhs, arena);
 
     const string_t type_literal_string =
-        par_token_to_string(parser, node->main_token + 2);
+        par_token_to_string(parser, node->main_token_i + 2);
     const string_t type_inferred_string =
         ty_type_to_human_string(parser->types, type_lhs_i, arena);
 
     if (!string_eq(type_literal_string, type_inferred_string)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(&error, type_literal_string, arena);
@@ -4337,7 +4359,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
         ty_resolve_types(parser, class_files, node->lhs, arena);
 
     if (parser->types[type_condition_i].kind != TYPE_BOOL) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token];
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -4364,8 +4386,9 @@ static u32 ty_resolve_types(par_parser_t *parser,
 typedef struct {
   cf_attribute_code_t *code;
   cg_frame_t *frame;
-  u16 out_field_ref_i;
   const cf_class_file_t *class_files;
+  u16 out_field_ref_i;
+  pg_pad(6);
 } cg_generator_t;
 
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
@@ -4517,7 +4540,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_NONE:
     return;
   case AST_KIND_BOOL: {
-    pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
+    pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = node->lhs}};
     const u16 number_i =
@@ -4533,8 +4556,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_NUM: {
-    pg_assert(node->main_token < pg_array_len(parser->lexer->tokens));
-    const lex_token_t token = parser->lexer->tokens[node->main_token];
+    pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = par_number(parser, token)}};
@@ -4597,7 +4620,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
-    const u32 token_name_i = node->main_token;
+    const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i < pg_array_len(parser->lexer->tokens));
     const lex_token_t token_name = parser->lexer->tokens[token_name_i];
     pg_assert(token_name.kind == TOKEN_KIND_IDENTIFIER);
@@ -4732,9 +4755,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = AST_KIND_BINARY,
         .rhs = true_node_i,
         .lhs = false_node_i,
-        .main_token = node->main_token,
+        .main_token_i = node->main_token_i,
     };
-    const lex_token_t token = parser->lexer->tokens[node->main_token];
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     const bool is_not = token.kind == TOKEN_KIND_NOT;
     if (!is_not)
       pg_assert(0 && "todo");
@@ -4774,7 +4797,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
-    const lex_token_t token = parser->lexer->tokens[node->main_token];
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     switch (token.kind) {
     case TOKEN_KIND_NONE:
       break; // Nothing to do.

@@ -1,7 +1,9 @@
 .PHONY: test_debug test_release clean
 
+WARNINGS := -Wall -Wextra -Wpadded -Wunused
+
 main_debug: main.c class_file.h
-	$(CC) -DPG_WITH_LOG=1 -O0 -g3 -Wall -Wextra -std=c99 -fsanitize=address,undefined $< -o $@ 
+	$(CC) -DPG_WITH_LOG=1 -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined $< -o $@ 
 
 clean:
 	rm kotlin_corpus/*.class || true
@@ -16,5 +18,5 @@ test_release: main_release clean
 	(cd kotlin_corpus && for f in *.class; do echo $$f; java `basename -s .class $$f`;  done)
 
 main_release: main.c class_file.h
-	$(CC) -O2 -g3 -Wall -Wextra -std=c99 -march=native $< -o $@ -Wl,--gc-sections -fwhole-program
+	$(CC) -O2 -g3 $(WARNINGS) -std=c99 -march=native $< -o $@ -Wl,--gc-sections -fwhole-program
 

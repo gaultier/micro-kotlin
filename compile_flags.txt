@@ -1,5 +1,6 @@
 -Wall
 -Wextra
 -Wunused
+-Wpadded
 -std=c99
 -DPG_WITH_LOG=1
