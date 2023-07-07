@@ -382,10 +382,24 @@ static void string_append_char_if_not_exists(string_t *s, char c,
                                              arena_t *arena) {
   pg_assert(s != NULL);
 
-  if (s->len > 0 && s->value[0] != c) {
+  if (s->len > 0 && s->value[s->len-1] != c) {
     pg_assert(arena != NULL);
     string_append_char(s, c, arena);
   }
+}
+
+static void string_append_string_n(string_t *a, string_t b, u64 n,
+                                   arena_t *arena) {
+  pg_assert(a != NULL);
+  pg_assert(a->cap != 0);
+  pg_assert(a->len <= a->cap);
+  pg_assert(n <= b.len);
+
+  for (u64 i = 0; i < n; i++)
+    string_append_char(a, b.value[i], arena);
+
+  pg_assert(a->value != NULL);
+  pg_assert(a->len <= a->cap);
 }
 
 static void string_append_string(string_t *a, string_t b, arena_t *arena) {
@@ -393,11 +407,30 @@ static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
 
-  for (u64 i = 0; i < b.len; i++)
-    string_append_char(a, b.value[i], arena);
+  string_append_string_n(a, b, b.len, arena);
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
+}
+
+static void string_drop_n(string_t *a, u64 n) {
+  pg_assert(a != NULL);
+  pg_assert(a->cap != 0);
+  pg_assert(a->len <= a->cap);
+
+  while (a->len > 0 && n > 0) {
+    a->value[a->len - 1] = 0;
+    a->len -= 1;
+    n += 1;
+  }
+
+  pg_assert(a->value != NULL);
+  pg_assert(a->len <= a->cap);
+}
+
+static void string_clear(string_t *a) {
+  pg_assert(a != NULL);
+  a->len = 0;
 }
 
 static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
@@ -413,6 +446,24 @@ static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   pg_assert(a->len <= a->cap);
 }
 
+static void string_drop_file_component(string_t *path, arena_t *arena) {
+  pg_assert(path != NULL);
+  pg_assert(path->value != NULL);
+  pg_assert(path->len > 0);
+
+  char *const file = ut_memrchr(path->value, '/', path->len);
+  if (file == NULL) {
+    string_clear(path);
+    string_append_cstring(path, "./", arena);
+    return;
+  }
+
+  const u64 file_len = path->value + path->len - file;
+  string_drop_n(path, file_len);
+
+  if (path->len > 0)
+    pg_assert(path->value[path->len - 1] != '/');
+}
 // ------------------- Logs
 
 #ifdef PG_WITH_LOG
@@ -2727,7 +2778,7 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   string_capitalize_first(&last_path_component);
 
   string_t result = string_make(source_file_name, arena);
-  string_drop_after_last_incl(&result, '/');
+  string_drop_file_component(&result, arena);
   string_append_char_if_not_exists(&result, '/', arena);
   string_append_string(&result, last_path_component, arena);
   return result;
@@ -4922,7 +4973,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(var_i != (u32)-1);
 
     const cf_type_kind_t type_kind = parser->types[node->type_i].kind;
-    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, type_kind, arena);
+    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, type_kind,
+                             arena);
     break;
   }
   case AST_KIND_IF: {

@@ -4,7 +4,4 @@ fun main() {
   if (!a) {
     println(3)
   }
-  if (a) {
-    println(4)
-  }
 }
