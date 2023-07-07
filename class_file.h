@@ -180,11 +180,6 @@ typedef struct {
   char *value;
 } string_t;
 
-static char string_last(string_t s) {
-  pg_assert(s.len < s.cap);
-
-  return s.value[s.len];
-}
 
 static void string_append_char(string_t *s, char c, arena_t *arena);
 
@@ -4695,7 +4690,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_array_append(class_file->methods, method, arena);
 
-    // In the current implementation, 2 stack map frames are emitted per if-then-else.
+    // In the current implementation, 2 stack map frames are emitted per
+    // if-then-else.
     pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
