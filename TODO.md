@@ -20,7 +20,10 @@
 [ ] String
 [ ] Grouping
 [ ] Casts
+[ ] Long
+[ ] Double, Float
 [x] Control flow: If
+[x] Logical operator !
 [ ] Logical operators (and, or)
 [ ] Control flow: While
 [ ] Control flow: Continue
