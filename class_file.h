@@ -75,13 +75,20 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert(arena->current_offset + len < arena->cap);
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
   pg_assert(element_size > 0);
-  const u64 actual_len = len * element_size; // TODO: check overflow.
+  const u64 physical_size = len * element_size; // TODO: check overflow.
 
-  const u64 new_offset = align_forward_16(arena->current_offset + actual_len);
+  const u64 new_offset =
+      align_forward_16(arena->current_offset + physical_size);
   pg_assert((new_offset % 16) == 0);
+  pg_assert(arena->current_offset + physical_size <= new_offset);
+  pg_assert(new_offset < arena->current_offset + physical_size + 16);
 
-  void *res = arena->base + arena->current_offset;
+  void *const res = arena->base + arena->current_offset;
   pg_assert((((u64)res) % 16) == 0);
+  pg_assert((u64)(arena->base + arena->current_offset) <= (u64)res);
+  pg_assert((u64)(res) + physical_size <= (u64)arena->base + new_offset);
+
+  pg_assert(arena->current_offset < arena->cap);
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
   return res;
@@ -101,13 +108,15 @@ typedef struct pg_array_header_t {
 
 #define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
   do {                                                                         \
-    void **pg__array_ = (void **)&(x);                                         \
     pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
         arg_arena, 1,                                                          \
         sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(arg_capacity)));     \
     pg__ah->len = 0;                                                           \
     pg__ah->cap = (u64)(arg_capacity);                                         \
-    *pg__array_ = (void *)(pg__ah + 1);                                        \
+    x = (void *)(pg__ah + 1);                                                  \
+    pg_assert((u64)x == (u64)pg__ah + 2 * sizeof(u64));                        \
+    pg_assert(pg_array_cap(x) == arg_capacity);                                \
+    pg_assert(pg_array_len(x) == 0);                                           \
   } while (0)
 
 #define pg_array_last_index(x) (pg_array_len(x) - 1)
@@ -124,15 +133,22 @@ typedef struct pg_array_header_t {
   do {                                                                         \
     pg_assert(pg_array_len(x) <= -pg_array_cap(x));                            \
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
-      void **pg__array_ = (void **)&(x);                                       \
       const u64 new_cap = 8 + pg_array_cap(x) * 2;                             \
-      pg_array_header_t *const pg__ah = (pg_array_header_t *)arena_alloc(      \
-          arena, 1,                                                            \
-          sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)new_cap));          \
-      memcpy(pg__ah, (x),                                                      \
-             sizeof(pg_array_header_t) +                                       \
-                 sizeof(*(x)) * ((u64)pg_array_cap(x)));                       \
-      *pg__array_ = (void *)(pg__ah + 1);                                      \
+      LOG("grow: old_cap=%lu new_cap=%lu len=%lu", pg_array_cap(x), new_cap,   \
+          pg_array_len(x));                                                    \
+      const u64 old_physical_len =                                             \
+          sizeof(pg_array_header_t) + sizeof(*(x)) * pg_array_cap(x);          \
+      const u64 new_physical_len =                                             \
+          sizeof(pg_array_header_t) + sizeof(*(x)) * new_cap;                  \
+      pg_array_header_t *const pg__ah =                                        \
+          arena_alloc(arena, 1, new_physical_len);                             \
+      LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
+          "new_ptr=%p diff=%lu",                                               \
+          old_physical_len, new_physical_len, PG_ARRAY_HEADER(x), pg__ah,      \
+          (u64)pg__ah - (u64)PG_ARRAY_HEADER(x));                              \
+      pg_assert((u64)pg__ah >= (u64)PG_ARRAY_HEADER(x)+ old_physical_len);             \
+      memcpy(pg__ah, PG_ARRAY_HEADER(x), old_physical_len);                    \
+      x = (void *)(pg__ah + 1);                                                \
       PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
     }                                                                          \
     (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
@@ -992,8 +1008,8 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
             var_i); // FIXME: variable size. Also do we need to expand the local
                     // variable array automatically?
 
-    pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                  frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE, arena);
   cf_code_array_push_u8(code, var_i, arena);
@@ -4641,6 +4657,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_append(method.attributes, attribute_code, arena);
 
     pg_array_append(class_file->methods, method, arena);
+
+    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
     gen->frame = NULL;
