@@ -70,6 +70,16 @@ static u64 align_forward_16(u64 n) {
 }
 
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
+  // clang-format off
+  // 
+  // ....|--------------------|++++|
+  //     ^                    ^    ^
+  //   base          old_offset    new_offset
+  //                          ^
+  //                        res
+  //                           ++++ == physical_size
+  // clang-format on
+
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->cap);
   pg_assert(arena->current_offset + len < arena->cap);
@@ -146,7 +156,7 @@ typedef struct pg_array_header_t {
           "new_ptr=%p diff=%lu",                                               \
           old_physical_len, new_physical_len, PG_ARRAY_HEADER(x), pg__ah,      \
           (u64)pg__ah - (u64)PG_ARRAY_HEADER(x));                              \
-      pg_assert((u64)pg__ah >= (u64)PG_ARRAY_HEADER(x)+ old_physical_len);             \
+      pg_assert((u64)pg__ah >= (u64)PG_ARRAY_HEADER(x) + old_physical_len);    \
       memcpy(pg__ah, PG_ARRAY_HEADER(x), old_physical_len);                    \
       x = (void *)(pg__ah + 1);                                                \
       PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
