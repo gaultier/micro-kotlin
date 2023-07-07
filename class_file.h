@@ -118,14 +118,15 @@ typedef struct pg_array_header_t {
 
 #define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
   do {                                                                         \
+    u64 capacity = pg_max((u64)(arg_capacity), 8);                             \
     pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
         arg_arena, 1,                                                          \
-        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(arg_capacity)));     \
+        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)));     \
     pg__ah->len = 0;                                                           \
-    pg__ah->cap = (u64)(arg_capacity);                                         \
+    pg__ah->cap = capacity;                                                \
     x = (void *)(pg__ah + 1);                                                  \
     pg_assert((u64)x == (u64)pg__ah + 2 * sizeof(u64));                        \
-    pg_assert(pg_array_cap(x) == arg_capacity);                                \
+    pg_assert(pg_array_cap(x) == capacity);                                \
     pg_assert(pg_array_len(x) == 0);                                           \
   } while (0)
 
@@ -143,7 +144,8 @@ typedef struct pg_array_header_t {
   do {                                                                         \
     pg_assert(pg_array_len(x) <= -pg_array_cap(x));                            \
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
-      const u64 new_cap = 8 + pg_array_cap(x) * 2;                             \
+      pg_assert(pg_array_cap(x) >= 8);                                         \
+      const u64 new_cap = pg_array_cap(x) * 2;                                 \
       LOG("grow: old_cap=%lu new_cap=%lu len=%lu", pg_array_cap(x), new_cap,   \
           pg_array_len(x));                                                    \
       const u64 old_physical_len =                                             \
