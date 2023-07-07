@@ -2809,12 +2809,44 @@ static void cf_read_class_files(char *path, u64 path_len,
 }
 
 static bool
+cf_class_files_find_class_exactly(const cf_class_file_t *class_files,
+                                  string_t class_name,
+                                  string_t alernate_class_name) {
+  pg_assert(class_files != NULL);
+  pg_assert(class_name.len > 0);
+
+  // TODO: use the file path <-> class name mapping to search less?
+
+  for (u64 i = 0; i < pg_array_len(class_files); i++) {
+    const cf_class_file_t *const class_file = &class_files[i];
+    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
+    pg_assert(class_file->file_path.len > 0);
+    pg_assert(class_file->file_path.value != NULL);
+
+    const cf_constant_t *const this_class = cf_constant_array_get(
+        &class_file->constant_pool, class_file->this_class);
+    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+    const u16 this_class_i = this_class->v.class_name;
+    const string_t this_class_name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, this_class_i);
+
+    if (!string_eq(this_class_name, class_name) &&
+        !string_eq(this_class_name, alernate_class_name))
+      continue;
+
+    return true; // TODO: return more information?
+  }
+  return false;
+}
+
+static bool
 cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
                                    string_t class_name, string_t method_name,
                                    string_t descriptor) {
   pg_assert(class_files != NULL);
   pg_assert(descriptor.len > 0);
   pg_assert(descriptor.value != NULL);
+  pg_assert(class_name.len > 0);
 
   // TODO: use the file path <-> class name mapping to search less?
 
@@ -4226,6 +4258,21 @@ static u32 ty_add_type(par_type_t **types, const par_type_t *type,
   return pg_array_last_index(*types);
 }
 
+static string_t ty_know_type_aliases(string_t type_literal) {
+  if (string_eq_c(type_literal, "Int"))
+    return string_make_from_c_no_alloc("java/lang/Integer");
+  if (string_eq_c(type_literal, "Short"))
+    return string_make_from_c_no_alloc("java/lang/Short");
+  if (string_eq_c(type_literal, "Byte"))
+    return string_make_from_c_no_alloc("java/lang/Byte");
+  if (string_eq_c(type_literal, "Char"))
+    return string_make_from_c_no_alloc("java/lang/Char");
+  if (string_eq_c(type_literal, "Boolean"))
+    return string_make_from_c_no_alloc("java/lang/Boolean");
+
+  return string_make_from_c_no_alloc("");
+}
+
 static u32 ty_resolve_types(par_parser_t *parser,
                             const cf_class_file_t *class_files, u32 node_i,
                             arena_t *arena) {
@@ -4329,11 +4376,26 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i = pg_array_last_index(parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
+    const string_t type_literal_string =
+        par_token_to_string(parser, node->main_token_i + 2);
+
+    const string_t alternate_type_string =
+        ty_know_type_aliases(type_literal_string);
+
+    if (!cf_class_files_find_class_exactly(class_files, type_literal_string,
+                                           alternate_type_string)) {
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "unknown type: ", arena);
+      string_append_string(&error, type_literal_string, arena);
+
+      par_error(parser, token, error.value);
+      return 0;
+    }
+
     const u32 type_lhs_i =
         ty_resolve_types(parser, class_files, node->lhs, arena);
 
-    const string_t type_literal_string =
-        par_token_to_string(parser, node->main_token_i + 2);
     const string_t type_inferred_string =
         ty_type_to_human_string(parser->types, type_lhs_i, arena);
 
