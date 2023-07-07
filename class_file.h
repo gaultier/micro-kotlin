@@ -121,12 +121,12 @@ typedef struct pg_array_header_t {
     u64 capacity = pg_max((u64)(arg_capacity), 8);                             \
     pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
         arg_arena, 1,                                                          \
-        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)));     \
+        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)));         \
     pg__ah->len = 0;                                                           \
-    pg__ah->cap = capacity;                                                \
+    pg__ah->cap = capacity;                                                    \
     x = (void *)(pg__ah + 1);                                                  \
     pg_assert((u64)x == (u64)pg__ah + 2 * sizeof(u64));                        \
-    pg_assert(pg_array_cap(x) == capacity);                                \
+    pg_assert(pg_array_cap(x) == capacity);                                    \
     pg_assert(pg_array_len(x) == 0);                                           \
   } while (0)
 
@@ -178,16 +178,32 @@ typedef struct {
   u16 cap;
   u16 len;
   char *value;
-  arena_t *arena;
 } string_t;
+
+static char string_last(string_t s) {
+  pg_assert(s.len < s.cap);
+
+  return s.value[s.len];
+}
+
+static void string_append_char(string_t *s, char c, arena_t *arena);
+
+static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
+  pg_assert(s != NULL);
+  pg_assert(s->value != NULL);
+  pg_assert(s->len < s->cap);
+
+  if (s->value[s->len] != 0)
+    string_append_char(s, 0, arena);
+}
 
 static string_t string_reserve(u16 cap, arena_t *arena) {
   pg_assert(arena != NULL);
+  cap = pg_max(8, cap + 1);
 
   return (string_t){
       .cap = cap,
       .value = arena_alloc(arena, cap, sizeof(u8)),
-      .arena = arena,
   };
 }
 
@@ -197,20 +213,24 @@ static string_t string_make_from_c(char *s, arena_t *arena) {
 
   const u64 len = strlen(s);
   string_t res = string_reserve(len, arena);
+
   res.len = len;
   memcpy(res.value, s, len);
 
   pg_assert(res.value != NULL);
-  pg_assert(res.len <= res.cap);
-  pg_assert(res.arena != NULL);
+  pg_assert(res.len < res.cap);
 
+  string_ensure_null_terminated(&res, arena);
   return res;
 }
 
 static string_t string_make_from_c_no_alloc(char *s) {
   pg_assert(s != NULL);
 
-  return (string_t){.value = s, .len = strlen(s)};
+  string_t res = {.value = s, .len = strlen(s)};
+  string_ensure_null_terminated(&res, NULL);
+
+  return res;
 }
 
 static string_t string_make(string_t src, arena_t *arena) {
@@ -219,6 +239,7 @@ static string_t string_make(string_t src, arena_t *arena) {
   memcpy(result.value, src.value, src.len);
   result.len = src.len;
 
+  string_ensure_null_terminated(&result, arena);
   return result;
 }
 
@@ -306,15 +327,15 @@ static bool string_eq_c(string_t a, char *b) {
   return mem_eq_c(a.value, a.len, b);
 }
 
-static void string_append_char(string_t *s, char c) {
+static void string_append_char(string_t *s, char c, arena_t *arena) {
   pg_assert(s != NULL);
   pg_assert(s->cap != 0);
   pg_assert(s->len <= s->cap);
-  pg_assert(s->arena != NULL);
+  pg_assert(arena != NULL);
 
   if (s->len == s->cap - 1) {
     s->cap *= 2;
-    char *const new_s = arena_alloc(s->arena, s->cap, sizeof(u8));
+    char *const new_s = arena_alloc(arena, s->cap, sizeof(u8));
     s->value = memcpy(new_s, s->value, s->len);
   }
 
@@ -324,43 +345,43 @@ static void string_append_char(string_t *s, char c) {
 
   pg_assert(s->value != NULL);
   pg_assert(s->len <= s->cap);
-  pg_assert(s->arena != NULL);
+
+  string_ensure_null_terminated(s, arena);
 }
 
-static void string_append_char_if_not_exists(string_t *s, char c) {
+static void string_append_char_if_not_exists(string_t *s, char c,
+                                             arena_t *arena) {
   pg_assert(s != NULL);
 
-  if (s->len > 0 && s->value[0] != c)
-    string_append_char(s, c);
+  if (s->len > 0 && s->value[0] != c) {
+    pg_assert(arena != NULL);
+    string_append_char(s, c, arena);
+  }
 }
 
-static void string_append_string(string_t *a, string_t b) {
+static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   pg_assert(a != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
-  pg_assert(a->arena != NULL);
 
   for (u64 i = 0; i < b.len; i++)
-    string_append_char(a, b.value[i]);
+    string_append_char(a, b.value[i], arena);
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
-  pg_assert(a->arena != NULL);
 }
 
-static void string_append_cstring(string_t *a, const char *b) {
+static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   pg_assert(a != NULL);
   pg_assert(b != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
-  pg_assert(a->arena != NULL);
 
   for (u64 i = 0; i < strlen(b); i++)
-    string_append_char(a, b[i]);
+    string_append_char(a, b[i], arena);
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
-  pg_assert(a->arena != NULL);
 }
 
 static bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
@@ -889,7 +910,8 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
 }
 
 static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
-                                           string_t *type_descriptor) {
+                                           string_t *type_descriptor,
+                                           arena_t *arena) {
   pg_assert(types != NULL);
   pg_assert(type_i < pg_array_len(types));
   pg_assert(type_descriptor != NULL);
@@ -900,72 +922,72 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   case TYPE_ANY:
     pg_assert(0 && "unreachable");
   case TYPE_VOID: {
-    string_append_char(type_descriptor, 'V');
+    string_append_char(type_descriptor, 'V', arena);
     break;
   }
   case TYPE_BYTE: {
-    string_append_char(type_descriptor, 'B');
+    string_append_char(type_descriptor, 'B', arena);
     break;
   }
   case TYPE_CHAR: {
-    string_append_char(type_descriptor, 'C');
+    string_append_char(type_descriptor, 'C', arena);
     break;
   }
   case TYPE_DOUBLE: {
-    string_append_char(type_descriptor, 'D');
+    string_append_char(type_descriptor, 'D', arena);
     break;
   }
   case TYPE_FLOAT: {
-    string_append_char(type_descriptor, 'F');
+    string_append_char(type_descriptor, 'F', arena);
     break;
   }
   case TYPE_INT: {
-    string_append_char(type_descriptor, 'I');
+    string_append_char(type_descriptor, 'I', arena);
     break;
   }
   case TYPE_LONG: {
-    string_append_char(type_descriptor, 'J');
+    string_append_char(type_descriptor, 'J', arena);
     break;
   }
   case TYPE_INSTANCE_REFERENCE: {
     const string_t class_name = type->v.class_name;
 
-    string_append_char(type_descriptor, 'L');
-    string_append_string(type_descriptor, class_name);
-    string_append_char(type_descriptor, ';');
+    string_append_char(type_descriptor, 'L', arena);
+    string_append_string(type_descriptor, class_name, arena);
+    string_append_char(type_descriptor, ';', arena);
 
     break;
   }
   case TYPE_SHORT: {
-    string_append_char(type_descriptor, 'S');
+    string_append_char(type_descriptor, 'S', arena);
     break;
   }
   case TYPE_BOOL: {
-    string_append_char(type_descriptor, 'Z');
+    string_append_char(type_descriptor, 'Z', arena);
     break;
   }
   case TYPE_ARRAY_REFERENCE: {
-    string_append_char(type_descriptor, '[');
+    string_append_char(type_descriptor, '[', arena);
 
-    cf_fill_type_descriptor_string(types, type->v.array_type_i,
-                                   type_descriptor);
+    cf_fill_type_descriptor_string(types, type->v.array_type_i, type_descriptor,
+                                   arena);
 
     break;
   }
   case TYPE_CONSTRUCTOR:
   case TYPE_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
-    string_append_char(type_descriptor, '(');
+    string_append_char(type_descriptor, '(', arena);
 
     for (u64 i = 0; i < method_type->argument_count; i++) {
       cf_fill_type_descriptor_string(types, method_type->argument_types_i,
-                                     type_descriptor);
+                                     type_descriptor, arena);
     }
 
-    string_append_char(type_descriptor, ')');
+    string_append_char(type_descriptor, ')', arena);
 
     cf_fill_type_descriptor_string(types, method_type->return_type_i,
-                                   type_descriptor);
+                                   type_descriptor, arena);
 
     break;
   }
@@ -1017,8 +1039,8 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(frame->locals) >
-            var_i); // FIXME: variable size. Also do we need to expand the local
-                    // variable array automatically?
+            var_i); // FIXME: variable size. Also do we need to expand the
+                    // local variable array automatically?
 
   pg_assert(cf_stack_type_dumbbed_down_for_jvm(
                 frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
@@ -1731,8 +1753,8 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
   pg_assert(read_bytes == attribute_len);
 }
 
-// FIXME: each function call here should take the `attributes` argument and push
-// to it!
+// FIXME: each function call here should take the `attributes` argument and
+// push to it!
 static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
                                   cf_attribute_t **attributes, arena_t *arena) {
@@ -2682,13 +2704,13 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   pg_assert(last_path_component.value[0] != '/');
 
   string_drop_after_last_incl(&last_path_component, '.');
-  string_append_cstring(&last_path_component, "Kt.class");
+  string_append_cstring(&last_path_component, "Kt.class", arena);
   string_capitalize_first(&last_path_component);
 
   string_t result = string_make(source_file_name, arena);
   string_drop_after_last_incl(&result, '/');
-  string_append_char_if_not_exists(&result, '/');
-  string_append_string(&result, last_path_component);
+  string_append_char_if_not_exists(&result, '/', arena);
+  string_append_string(&result, last_path_component, arena);
   return result;
 }
 
@@ -4214,7 +4236,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     string_t descriptor = string_reserve(64, arena);
     cf_fill_type_descriptor_string(
-        parser->types, pg_array_last_index(parser->types), &descriptor);
+        parser->types, pg_array_last_index(parser->types), &descriptor, arena);
 
     pg_array_last(parser->types)->v.method.descriptor = descriptor;
 
@@ -4223,12 +4245,14 @@ static u32 ty_resolve_types(par_parser_t *parser,
             string_make_from_c_no_alloc("println"), descriptor)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ");
+      string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, node->type_i, arena));
-      string_append_cstring(&error, " vs ");
+          &error, ty_type_to_human_string(parser->types, node->type_i, arena),
+          arena);
+      string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, lhs->type_i, arena));
+          &error, ty_type_to_human_string(parser->types, lhs->type_i, arena),
+          arena);
       par_error(parser, token, error.value);
     }
 
@@ -4250,12 +4274,12 @@ static u32 ty_resolve_types(par_parser_t *parser,
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ");
+      string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, lhs_i, arena));
-      string_append_cstring(&error, " vs ");
+          &error, ty_type_to_human_string(parser->types, lhs_i, arena), arena);
+      string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, rhs_i, arena));
+          &error, ty_type_to_human_string(parser->types, rhs_i, arena), arena);
       par_error(parser, token, error.value);
     }
 
@@ -4289,10 +4313,10 @@ static u32 ty_resolve_types(par_parser_t *parser,
     if (!string_eq(type_literal_string, type_inferred_string)) {
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ");
-      string_append_string(&error, type_literal_string);
-      string_append_cstring(&error, " vs ");
-      string_append_string(&error, type_inferred_string);
+      string_append_cstring(&error, "incompatible types: ", arena);
+      string_append_string(&error, type_literal_string, arena);
+      string_append_cstring(&error, " vs ", arena);
+      string_append_string(&error, type_inferred_string, arena);
       par_error(parser, token, error.value);
     }
 
@@ -4315,11 +4339,11 @@ static u32 ty_resolve_types(par_parser_t *parser,
       const lex_token_t token = parser->lexer->tokens[node->main_token];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
-                            "incompatible types, expect Boolean, got: ");
+                            "incompatible types, expect Boolean, got: ", arena);
 
       const string_t type_inferred_string =
           ty_type_to_human_string(parser->types, type_condition_i, arena);
-      string_append_string(&error, type_inferred_string);
+      string_append_string(&error, type_inferred_string, arena);
       par_error(parser, token, error.value);
     }
 
@@ -4413,7 +4437,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(rhs->kind == AST_KIND_BINARY);
 
   // Emit `then` branch.
-  // Save a clone of the frame before the `then` branch since we need it later.
+  // Save a clone of the frame before the `then` branch since we need it
+  // later.
   cg_frame_t frame_before_then_else = {0};
   cg_frame_clone(&frame_before_then_else, gen->frame, arena);
 
@@ -4451,8 +4476,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    // This stack map frame covers the conditional jump as if we took it, so the
-    // `then` branch never executed. Hence, it seems it should always be
+    // This stack map frame covers the conditional jump as if we took it, so
+    // the `then` branch never executed. Hence, it seems it should always be
     // `same_frame`?
     stack_map_add_same_frame(gen->frame, jump_from_i + 2, arena);
   }
@@ -4621,8 +4646,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u32 main_type_i = pg_array_last_index(parser->types);
 
     string_t type_descriptor = string_reserve(64, arena);
-    cf_fill_type_descriptor_string(parser->types, main_type_i,
-                                   &type_descriptor);
+    cf_fill_type_descriptor_string(parser->types, main_type_i, &type_descriptor,
+                                   arena);
     const u16 descriptor_i =
         cf_add_constant_string(&class_file->constant_pool, type_descriptor);
 
