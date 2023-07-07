@@ -1546,7 +1546,7 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
         .kind = buf_read_u8(buf, buf_len, current),
     };
 
-    if (0 <= stack_map_frame.kind && stack_map_frame.kind <= 63) // same_frame
+    if (stack_map_frame.kind <= 63) // same_frame
     {
       stack_map_frame.offset_delta = stack_map_frame.kind;
     } else if (64 <= stack_map_frame.kind &&
@@ -1576,8 +1576,7 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       const u16 verification_info_count = stack_map_frame.kind - 251;
       cf_buf_read_stack_map_table_attribute_verification_infos(
           buf, buf_len, current, verification_info_count);
-    } else if (255 <= stack_map_frame.kind &&
-               stack_map_frame.kind <= 255) { // full_frame_attribute
+    } else { // full_frame_attribute
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       const u16 locals_count = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(
@@ -2381,7 +2380,7 @@ static u32 cf_compute_verification_infos_size(
     const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
 
-  if (0 <= stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
+  if (stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
   {
     return 0;
   } else if (64 <= stack_map_frame->kind &&
@@ -2409,8 +2408,7 @@ static u32 cf_compute_verification_infos_size(
   } else if (252 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 254) { // append_frame
     pg_assert(stack_map_frame->kind == 252 && "todo");
-  } else if (255 <= stack_map_frame->kind &&
-             stack_map_frame->kind <= 255) { // full_frame
+  } else { // full_frame
     pg_assert(0 && "todo");
   }
   pg_assert(0 && "unreachable");
@@ -2453,8 +2451,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     for (u16 i = 0; i < pg_array_len(stack_map_frames); i++) {
       const cf_stack_map_frame_t *const stack_map_frame = &stack_map_frames[i];
 
-      if (0 <= stack_map_frame->kind &&
-          stack_map_frame->kind <= 63) // same_frame
+      if (stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
       {
         size += sizeof(u8);
       } else if (64 <= stack_map_frame->kind &&
@@ -2480,8 +2477,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                  stack_map_frame->kind <= 254) { // append_frame
         pg_assert(stack_map_frame->kind == 252 && "todo");
         size += sizeof(u8) + sizeof(u16) + sizeof(u8);
-      } else if (255 <= stack_map_frame->kind &&
-                 stack_map_frame->kind <= 255) { // full_frame
+      } else { // full_frame
         pg_assert(0 && "todo");
       }
     }
@@ -2499,7 +2495,7 @@ static void cf_write_stack_map_table_attribute(
   pg_assert(file != NULL);
   pg_assert(stack_map_frame != NULL);
 
-  if (0 <= stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
+  if (stack_map_frame->kind <= 63) // same_frame
   {
     file_write_u8(file, stack_map_frame->kind);
   } else if (64 <= stack_map_frame->kind &&
@@ -2525,8 +2521,7 @@ static void cf_write_stack_map_table_attribute(
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
     file_write_u8(file, stack_map_frame->verification_info);
-  } else if (255 <= stack_map_frame->kind &&
-             stack_map_frame->kind <= 255) { // full_frame
+  } else { // full_frame
     pg_assert(0 && "todo");
   }
 }
@@ -3822,7 +3817,8 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     };
     pg_array_append(parser->nodes, node, arena);
 
-    const string_t variable_name = par_token_to_string(parser, node.main_token_i);
+    const string_t variable_name =
+        par_token_to_string(parser, node.main_token_i);
     const u32 variable_i = par_find_variable(parser, variable_name);
     if (variable_i == (u32)-1) {
       par_error(parser, parser->lexer->tokens[node.main_token_i],
