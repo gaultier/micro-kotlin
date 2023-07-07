@@ -180,7 +180,6 @@ typedef struct {
   char *value;
 } string_t;
 
-
 static void string_append_char(string_t *s, char c, arena_t *arena);
 
 static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
@@ -222,7 +221,11 @@ static string_t string_make_from_c(char *s, arena_t *arena) {
 static string_t string_make_from_c_no_alloc(char *s) {
   pg_assert(s != NULL);
 
-  string_t res = {.value = s, .len = strlen(s)};
+  string_t res = {
+      .value = s,
+      .len = strlen(s),
+      .cap = strlen(s) + 1,
+  };
   string_ensure_null_terminated(&res, NULL);
 
   return res;
