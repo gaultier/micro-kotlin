@@ -690,6 +690,7 @@ static u16 cg_compute_stack_size(const cf_type_kind_t *stack) {
   for (u16 i = 0; i < pg_array_len(stack); i++) {
     size += cf_type_kind_stack_size(stack[i]);
   }
+  pg_assert(size >= pg_array_len(stack));
   return size;
 }
 
@@ -1063,6 +1064,8 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cf_code_array_push_u8(code, var_i, arena);
 
   pg_array_append(frame->stack, TYPE_INT, arena);
+  frame->max_stack =
+      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
 
 static void cf_asm_nop(u8 **code, arena_t *arena) {
