@@ -1075,7 +1075,7 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
 }
 
 static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                     arena_t *arena) {
+                                     cf_type_kind_t type_kind, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1087,7 +1087,7 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
   cf_code_array_push_u8(code, var_i, arena);
 
-  pg_array_append(frame->stack, TYPE_INT, arena);
+  pg_array_append(frame->stack, type_kind, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
@@ -4921,7 +4921,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
-    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
+    const cf_type_kind_t type_kind = parser->types[node->type_i].kind;
+    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, type_kind, arena);
     break;
   }
   case AST_KIND_IF: {
