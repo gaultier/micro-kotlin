@@ -157,7 +157,7 @@ typedef struct pg_array_header_t {
 // FIXME
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
-    pg_assert(pg_array_len(x) <= -pg_array_cap(x));                            \
+    pg_assert(pg_array_len(x) <= pg_array_cap(x));                             \
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
       pg_assert(pg_array_cap(x) >= 8);                                         \
       const u64 new_cap = pg_array_cap(x) * 2;                                 \
@@ -3553,6 +3553,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
   pg_assert(node_i < pg_array_len(parser->nodes));
 
+#ifdef PG_WITH_LOG
   const par_ast_node_t *const node = &parser->nodes[node_i];
   if (node->kind == AST_KIND_NONE)
     return;
@@ -3564,9 +3565,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
   string_t token_string = {0};
   par_find_token_position(parser, token, &line, &column, &token_string);
 
-#ifdef PG_WITH_LOG
   ut_fwrite_indent(file, indent);
-#endif
 
   const string_t human_type =
       ty_type_to_human_string(parser->types, node->type_i, arena);
@@ -3580,6 +3579,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
     par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
     par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
   }
+#endif
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {

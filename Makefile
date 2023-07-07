@@ -1,6 +1,6 @@
 .PHONY: test_debug test_release clean
 
-WARNINGS := -Wall -Wextra -Wpadded -Wunused
+WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
 main_debug: main.c class_file.h
 	$(CC) -DPG_WITH_LOG=1 -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined $< -o $@ 
