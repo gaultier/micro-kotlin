@@ -189,6 +189,44 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
+static bool ut_cstring_ends_with(const char *s, u64 s_len, const char *suffix,
+                                 u64 suffix_len) {
+  pg_assert(s != NULL);
+  pg_assert(s_len > 0);
+  pg_assert(suffix != NULL);
+  pg_assert(suffix_len > 0);
+
+  if (s_len < suffix_len)
+    return false;
+
+  return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+static char *ut_memrchr(char *s, char c, u64 n) {
+  pg_assert(s != NULL);
+  pg_assert(n > 0);
+
+  char *res = s + n - 1;
+  while (res-- != s) {
+    if (*res == c)
+      return res;
+  }
+  return NULL;
+}
+
+static bool ut_char_is_alphabetic(u8 c) {
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+}
+
+static bool mem_eq_c(const char *a, u32 a_len, char *b) {
+  pg_assert(b != NULL);
+
+  const u64 b_len = strlen(b);
+  return a_len == b_len && memcmp(a, b, a_len) == 0;
+}
+
+// ------------------- String
+
 typedef struct {
   u16 cap;
   u16 len;
@@ -257,22 +295,6 @@ static string_t string_make(string_t src, arena_t *arena) {
   return result;
 }
 
-static char *ut_memrchr(char *s, char c, u64 n) {
-  pg_assert(s != NULL);
-  pg_assert(n > 0);
-
-  char *res = s + n - 1;
-  while (res-- != s) {
-    if (*res == c)
-      return res;
-  }
-  return NULL;
-}
-
-static bool ut_char_is_alphabetic(u8 c) {
-  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
-}
-
 static string_t string_find_last_path_component(string_t path) {
   pg_assert(path.value != NULL);
   pg_assert(path.len > 0);
@@ -326,13 +348,6 @@ static bool string_eq(string_t a, string_t b) {
   pg_assert(b.value != NULL);
 
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
-}
-
-static bool mem_eq_c(const char *a, u32 a_len, char *b) {
-  pg_assert(b != NULL);
-
-  const u64 b_len = strlen(b);
-  return a_len == b_len && memcmp(a, b, a_len) == 0;
 }
 
 static bool string_eq_c(string_t a, char *b) {
@@ -398,18 +413,7 @@ static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   pg_assert(a->len <= a->cap);
 }
 
-static bool cstring_ends_with(const char *s, u64 s_len, const char *suffix,
-                              u64 suffix_len) {
-  pg_assert(s != NULL);
-  pg_assert(s_len > 0);
-  pg_assert(suffix != NULL);
-  pg_assert(suffix_len > 0);
-
-  if (s_len < suffix_len)
-    return false;
-
-  return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
-}
+// ------------------- Logs
 
 #ifdef PG_WITH_LOG
 #define LOG(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
@@ -2380,7 +2384,7 @@ static u32 cf_compute_verification_infos_size(
     const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
 
-  if ( stack_map_frame->kind <= 63) // same_frame
+  if (stack_map_frame->kind <= 63) // same_frame
   {
     return 0;
   } else if (64 <= stack_map_frame->kind &&
@@ -2743,7 +2747,8 @@ static void cf_read_class_files(char *path, u64 path_len,
     return;
   }
 
-  if (S_ISREG(st.st_mode) && cstring_ends_with(path, path_len, ".class", 6)) {
+  if (S_ISREG(st.st_mode) &&
+      ut_cstring_ends_with(path, path_len, ".class", 6)) {
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
