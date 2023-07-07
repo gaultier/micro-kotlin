@@ -2380,7 +2380,7 @@ static u32 cf_compute_verification_infos_size(
     const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
 
-  if (stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
+  if ( stack_map_frame->kind <= 63) // same_frame
   {
     return 0;
   } else if (64 <= stack_map_frame->kind &&
@@ -2451,7 +2451,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     for (u16 i = 0; i < pg_array_len(stack_map_frames); i++) {
       const cf_stack_map_frame_t *const stack_map_frame = &stack_map_frames[i];
 
-      if (stack_map_frame->kind && stack_map_frame->kind <= 63) // same_frame
+      if (stack_map_frame->kind <= 63) // same_frame
       {
         size += sizeof(u8);
       } else if (64 <= stack_map_frame->kind &&
@@ -3737,12 +3737,15 @@ static u32 par_parse_block_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  if (par_match_token(parser, TOKEN_KIND_LEFT_BRACE)) {
   par_begin_scope(parser);
-    return par_parse_block(parser, arena);
-  par_end_scope(parser);
+  if (par_match_token(parser, TOKEN_KIND_LEFT_BRACE)) {
+    const u32 node_i = par_parse_block(parser, arena);
+    par_end_scope(parser);
+    return node_i;
   } else {
-    return par_parse_expression(parser, arena);
+    const u32 node_i = par_parse_expression(parser, arena);
+    par_end_scope(parser);
+    return node_i;
   }
 }
 
