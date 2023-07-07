@@ -3756,7 +3756,7 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   //
   //               IF 
   //              /  \
-  //    condition     BINARY
+  //    condition     BINARY )
   //                 /      \
   //             then        else
   //
