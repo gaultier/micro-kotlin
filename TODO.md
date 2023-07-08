@@ -34,6 +34,7 @@
 [ ] Recursion (mutual recursion?)
 [ ] Multiple files
 [ ] Packages
+[ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
 
 Later, nice to have:
 
@@ -53,7 +54,7 @@ Probably much later/never:
 [ ] Operator overloading
 [ ] Data class
 
-## Approach for reading external class files to know what fields/methods are available
+## Naive approach for reading external class files to know what fields/methods are available
 
 1. For each class file in the class path:
     1. Parse the whole class file
