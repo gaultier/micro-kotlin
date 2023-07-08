@@ -1,5 +1,4 @@
 #include "class_file.h"
-#include <stdint.h>
 #include <sys/stat.h>
 
 int main(int argc, char *argv[]) {
@@ -15,11 +14,28 @@ int main(int argc, char *argv[]) {
         .len = strlen(argv[1]),
     };
     const int fd = open(source_file_name.value, O_RDONLY);
-    pg_assert(fd > 0);
+    if (fd == -1) {
+      fprintf(stderr, "Failed to open the file %.*s: %s\n",
+              source_file_name.len, source_file_name.value, strerror(errno));
+      return errno;
+    }
 
     struct stat st = {0};
-    pg_assert(stat(source_file_name.value, &st) == 0);
-    pg_assert(st.st_size > 0);
+    if (stat(source_file_name.value, &st) == -1) {
+      fprintf(stderr, "Failed to get the file size %.*s: %s\n",
+              source_file_name.len, source_file_name.value, strerror(errno));
+      return errno;
+    }
+    if (st.st_size == 0) {
+      return 0;
+    }
+    if (st.st_size > UINT32_MAX) {
+      fprintf(stderr,
+              "The file %.*s is too big (limit is %u, got: %ld), stopping.\n",
+              source_file_name.len, source_file_name.value, UINT32_MAX,
+              st.st_size);
+      return E2BIG;
+    }
     pg_assert(st.st_size <= UINT32_MAX);
 
     const u32 buf_len = st.st_size;
@@ -84,7 +100,11 @@ int main(int argc, char *argv[]) {
     cg_emit(&parser, &class_file, class_files, root_i, &arena);
 
     FILE *file = fopen(class_file.file_path.value, "w");
-    pg_assert(file != NULL);
+    if (file == NULL) {
+      fprintf(stderr, "Failed to open the file %.*s: %s\n",
+              source_file_name.len, source_file_name.value, strerror(errno));
+      return errno;
+    }
     cf_write(&class_file, file);
     fclose(file);
 
@@ -93,10 +113,18 @@ int main(int argc, char *argv[]) {
       LOG("\n----------- Verifiying%s", "");
 
       int fd = open(class_file.file_path.value, O_RDONLY);
-      pg_assert(fd > 0);
+      if (fd == -1) {
+        fprintf(stderr, "Failed to open the file %.*s: %s\n",
+                source_file_name.len, source_file_name.value, strerror(errno));
+        return errno;
+      }
 
       struct stat st = {0};
-      pg_assert(stat(class_file.file_path.value, &st) == 0);
+      if (stat(class_file.file_path.value, &st) == -1) {
+        fprintf(stderr, "Failed to get the file size %.*s: %s\n",
+                source_file_name.len, source_file_name.value, strerror(errno));
+        return errno;
+      }
       pg_assert(st.st_size > 0);
       pg_assert(st.st_size <= UINT32_MAX);
 
