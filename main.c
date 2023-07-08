@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
       arena.current_offset = arena_offset_before;
     }
     if (parser.state != PARSER_STATE_OK)
-      return 1;
+      return 1; // TODO: Should type checking still proceed?
 
     cf_class_file_t *class_files = NULL;
     pg_array_init_reserve(class_files, 32768, &arena);
@@ -96,7 +96,6 @@ int main(int argc, char *argv[]) {
         .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
     };
     cf_init(&class_file, &arena);
-
     cg_emit(&parser, &class_file, class_files, root_i, &arena);
 
     FILE *file = fopen(class_file.file_path.value, "w");
