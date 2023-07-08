@@ -29,37 +29,43 @@ int main(int argc, char *argv[]) {
     if (st.st_size == 0) {
       return 0;
     }
-    if (st.st_size > UINT32_MAX) {
+    if (st.st_size > UINT16_MAX) {
       fprintf(stderr,
               "The file %.*s is too big (limit is %u, got: %ld), stopping.\n",
-              source_file_name.len, source_file_name.value, UINT32_MAX,
+              source_file_name.len, source_file_name.value, UINT16_MAX,
               st.st_size);
       return E2BIG;
     }
-    pg_assert(st.st_size <= UINT32_MAX);
 
-    const u32 buf_len = st.st_size;
-    char *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
-
-    pg_assert(read(fd, buf, buf_len) == buf_len);
+    string_t source = {0};
+    int res = ut_read_all_from_fd(fd, st.st_size, &source, &arena);
+    if (res != -1) {
+      fprintf(stderr, "Failed to read the full file %.*s: %s\n",
+              source_file_name.len, source_file_name.value, strerror(res));
+      return res;
+    }
     close(fd);
 
-    const u64 estimated_capacity = pg_clamp(64, buf_len / 8, UINT16_MAX);
+    // Lex.
+    const u64 estimated_capacity = pg_clamp(64, source.len / 8, UINT16_MAX);
     lex_lexer_t lexer = {
         .file_path = source_file_name,
     };
     pg_array_init_reserve(lexer.tokens, estimated_capacity, &arena);
     pg_array_init_reserve(lexer.line_table, estimated_capacity, &arena);
 
-    const char *current = buf;
-    lex_lex(&lexer, buf, buf_len, &current, &arena);
+    const char *current = source.value;
+    lex_lex(&lexer, source.value, source.len, &current, &arena);
 
+    // Parse.
     par_parser_t parser = {
-        .buf = buf,
-        .buf_len = buf_len,
+        .buf = source.value,
+        .buf_len = source.len,
         .lexer = &lexer,
     };
     const u32 root_i = par_parse(&parser, &arena);
+
+    // Debug AST.
     {
       const u64 arena_offset_before = arena.current_offset;
       par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
@@ -68,6 +74,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
+    // Read class files (stdlib, etc).
     cf_class_file_t *class_files = NULL;
     pg_array_init_reserve(class_files, 32768, &arena);
     {
@@ -80,6 +87,7 @@ int main(int argc, char *argv[]) {
     }
     ty_resolve_types(&parser, class_files, root_i, &arena);
 
+    // Debug types.
     {
       const u64 arena_offset_before = arena.current_offset;
       par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
@@ -89,6 +97,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
+    // Emit bytecode.
     cf_class_file_t class_file = {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
         .minor_version = 0,

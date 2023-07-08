@@ -382,7 +382,7 @@ static void string_append_char_if_not_exists(string_t *s, char c,
                                              arena_t *arena) {
   pg_assert(s != NULL);
 
-  if (s->len > 0 && s->value[s->len-1] != c) {
+  if (s->len > 0 && s->value[s->len - 1] != c) {
     pg_assert(arena != NULL);
     string_append_char(s, c, arena);
   }
@@ -413,7 +413,7 @@ static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   pg_assert(a->len <= a->cap);
 }
 
-static void string_drop_n(string_t *a, u64 n) {
+static void string_drop_last_n(string_t *a, u64 n) {
   pg_assert(a != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
@@ -421,7 +421,7 @@ static void string_drop_n(string_t *a, u64 n) {
   while (a->len > 0 && n > 0) {
     a->value[a->len - 1] = 0;
     a->len -= 1;
-    n += 1;
+    n -= 1;
   }
 
   pg_assert(a->value != NULL);
@@ -459,11 +459,39 @@ static void string_drop_file_component(string_t *path, arena_t *arena) {
   }
 
   const u64 file_len = path->value + path->len - file;
-  string_drop_n(path, file_len);
+  string_drop_last_n(path, file_len);
 
   if (path->len > 0)
     pg_assert(path->value[path->len - 1] != '/');
 }
+
+// ------------------- Utils, continued
+
+static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
+                               arena_t *arena) {
+  pg_assert(fd > 0);
+  pg_assert(result != NULL);
+  pg_assert(arena != NULL);
+
+  if (announced_len > UINT16_MAX)
+    return E2BIG;
+
+  *result = string_reserve(announced_len, arena);
+  while (result->len < announced_len) {
+    pg_assert(result->len < result->cap);
+
+    const i64 read_bytes = read(fd, result->value + result->len, result->cap);
+    if (read_bytes == -1)
+      return errno;
+    if (read_bytes == 0)
+      return EINVAL; // TODO: retry?
+
+    pg_assert((i64)result->len + read_bytes <= UINT16_MAX);
+    result->len += read_bytes;
+  }
+  return -1;
+}
+
 // ------------------- Logs
 
 #ifdef PG_WITH_LOG

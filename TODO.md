@@ -15,6 +15,7 @@
 [x] Naive register (e.g. locals) allocation
 [x] Type checking, no inference
 [x] Local variables
+[ ] Local variable mutation
 [ ] Function definition
 [ ] Field access
 [ ] String
@@ -24,15 +25,19 @@
 [ ] Double, Float
 [x] Control flow: If
 [x] Logical operator !
+[x] Comparison operators <,<=,>,>=,==,!=
 [ ] Logical operators (and, or)
 [ ] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
 [ ] Control flow: For (?)
 [ ] Recursion (mutual recursion?)
+[ ] Multiple files
+[ ] Packages
 
 Later, nice to have:
 
+[ ] High level APIs for the driver
 [ ] Generate line tables
 [ ] Generate full debug information
 [ ] Generate exceptions table
@@ -43,7 +48,10 @@ Later, nice to have:
 
 Probably much later/never:
 
-[ ] ...
+[ ] Infix functions
+[ ] Vararg
+[ ] Operator overloading
+[ ] Data class
 
 ## Approach for reading external class files to know what fields/methods are available
 
