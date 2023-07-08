@@ -15,6 +15,7 @@
 [x] Naive register (e.g. locals) allocation
 [x] Type checking, no inference
 [x] Local variables
+[ ] Comments
 [ ] Local variable mutation
 [ ] Function definition
 [ ] Field access
@@ -53,6 +54,8 @@ Probably much later/never:
 [ ] Vararg
 [ ] Operator overloading
 [ ] Data class
+[ ] Raw (multiline) strings
+[ ] Nested (interpolation) strings 
 
 ## Naive approach for reading external class files to know what fields/methods are available
 
