@@ -4825,15 +4825,15 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
-static void cg_frame_begin_scope(cg_generator_t *gen) {
+static void cg_begin_scope(cg_generator_t *gen) {
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth < UINT32_MAX);
 
   gen->frame->scope_depth += 1;
 }
 
-static void cg_frame_end_scope(cg_generator_t *gen, const par_parser_t *parser,
-                               arena_t *arena) {
+static void cg_end_scope(cg_generator_t *gen, const par_parser_t *parser,
+                         arena_t *arena) {
   pg_assert(gen);
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth > 0);
@@ -5303,8 +5303,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
     }
 
+    cg_begin_scope(gen);
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
+    cg_end_scope(gen, parser,arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
