@@ -534,12 +534,6 @@ typedef struct {
   string_t name;
 } par_variable_t;
 
-typedef struct {
-  u32 node_i;
-  u32 type_i;
-  u32 scope_depth;
-} cf_variable_t;
-
 typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
   VERIFICATION_INFO_INT = 1,
@@ -550,6 +544,14 @@ typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_OBJECT = 7,
   VERIFICATION_INFO_UNINITIALIZED = 8,
 } cf_verification_info_t;
+
+typedef struct {
+  u32 node_i;
+  u32 type_i;
+  u32 scope_depth;
+  cf_verification_info_t verification_info;
+  pg_pad(3);
+} cf_variable_t;
 
 typedef struct {
   u8 kind;
@@ -615,7 +617,7 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-static u16
+static i32
 stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
                                  u16 current_offset) {
   pg_assert(stack_map_frames != NULL);
@@ -623,18 +625,15 @@ stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
     return current_offset;
 
   const u16 last_offset = pg_array_last(stack_map_frames)->offset_absolute;
-  pg_assert(last_offset < current_offset);
   return current_offset - last_offset - 1;
 }
 
 static void stack_map_add_same_frame(cg_frame_t *frame, u16 current_offset,
-                                     arena_t *arena) {
+                                     u16 offset_delta, arena_t *arena) {
 
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
 
-  const u16 offset_delta =
-      stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta <= 63);
   pg_assert(offset_delta <= current_offset);
 
@@ -651,7 +650,8 @@ static void stack_map_add_same_frame(cg_frame_t *frame, u16 current_offset,
 }
 
 static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
-                                     u16 current_offset, arena_t *arena) {
+                                     u16 current_offset, u16 offset_delta,
+                                     arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(frame->stack != NULL);
@@ -659,8 +659,6 @@ static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
   pg_assert(chopped_locals_count <= 3);
   pg_assert(pg_array_len(frame->stack) == 0);
 
-  const u16 offset_delta =
-      stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
   pg_assert(offset_delta <= current_offset);
 
@@ -676,7 +674,8 @@ static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
 
 static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
                                        cf_verification_info_t verification_info,
-                                       u16 current_offset, arena_t *arena) {
+                                       u16 current_offset, u16 offset_delta,
+                                       arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(added_locals_count > 0);
@@ -684,8 +683,6 @@ static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) == 0);
 
-  const u16 offset_delta =
-      stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
   pg_assert(offset_delta <= current_offset);
 
@@ -704,14 +701,12 @@ static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
 
 static void stack_map_add_same_locals_1_stack_item_frame(
     cg_frame_t *frame, cf_verification_info_t verification_info,
-    u16 current_offset, arena_t *arena) {
+    u16 current_offset, u16 offset_delta, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) == 1);
 
-  const u16 offset_delta =
-      stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
   pg_assert(offset_delta > 0);
   pg_assert(offset_delta <= current_offset);
 
@@ -825,7 +820,8 @@ cf_type_kind_to_verification_info(cf_type_kind_t kind) {
 
 static void stack_map_add_frame(cg_frame_t *frame, u16 current_offset,
                                 const cg_frame_t *before,
-                                const cg_frame_t *after, arena_t *arena) {
+                                const cg_frame_t *after,
+                                bool skip_if_same_frame, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
   pg_assert(before != NULL);
@@ -837,12 +833,32 @@ static void stack_map_add_frame(cg_frame_t *frame, u16 current_offset,
   const u16 diff_stack =
       pg_array_len(after->stack) - pg_array_len(before->stack);
 
-  if (diff_stack == 0) {
-    stack_map_add_same_frame(frame, current_offset, arena);
-  } else if (diff_stack == 1) {
-    stack_map_add_same_locals_1_stack_item_frame(
-        frame, VERIFICATION_INFO_INT /* FIXME */, current_offset, arena);
+  u32 added_locals_len = 0;
+  cf_verification_info_t added_locals[256] = {0};
+  for (i64 i = pg_array_len(after->locals) - 1;
+       i >= (i64)pg_array_len(before->locals); i--) {
+    const cf_variable_t *const variable = &after->locals[i];
+    pg_assert(variable->scope_depth == after->scope_depth);
 
+    pg_assert(added_locals_len < UINT8_MAX);
+    added_locals[added_locals_len++] = variable->verification_info;
+  }
+
+  const i32 offset_delta =
+      stack_map_offset_delta_from_last(frame->stack_map_frames, current_offset);
+  if (offset_delta == -1)
+    return;
+
+  pg_assert(offset_delta >= 0);
+  pg_assert(offset_delta <= UINT16_MAX);
+
+  if (diff_stack == 0 && added_locals_len == 0 && offset_delta <= 63) {
+    if (!skip_if_same_frame)
+      stack_map_add_same_frame(frame, current_offset, offset_delta, arena);
+  } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
+    stack_map_add_same_locals_1_stack_item_frame(
+        frame, cf_type_kind_to_verification_info(*pg_array_last(frame->stack)),
+        current_offset, offset_delta, arena);
   } else {
     pg_assert(0 && "todo");
   }
@@ -4826,25 +4842,35 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
-static void cg_end_scope(cg_generator_t *gen, const par_parser_t *parser,
-                         arena_t *arena) {
+static void cg_frame_drop_current_scope_variables(cg_frame_t *frame) {
+  pg_assert(frame != NULL);
+
+  u64 to_drop = 0;
+  for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
+    const cf_variable_t *const variable = &frame->locals[i];
+    if (variable->scope_depth < frame->scope_depth)
+      break;
+
+    pg_assert(variable->scope_depth == frame->scope_depth);
+
+    to_drop += 1;
+  }
+
+  pg_array_drop_last_n(frame->locals, to_drop);
+}
+
+static void cg_end_scope(cg_generator_t *gen,
+                         const cg_frame_t *frame_before_scope,
+                         bool skip_if_same_frame, arena_t *arena) {
   pg_assert(gen);
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth > 0);
 
-  const u16 current_offset = pg_array_len(gen->code->code);
+  cg_frame_drop_current_scope_variables(gen->frame);
 
-  u32 dropped_locals = 0;
-  for (i64 i = pg_array_len(gen->frame->locals) - 1; i >= 0; i--) {
-    const cf_variable_t *const variable = &gen->frame->locals[i];
-    if (variable->scope_depth < gen->frame->scope_depth)
-      break;
-
-    pg_assert(variable->scope_depth == gen->frame->scope_depth);
-
-    dropped_locals += 1;
-  }
-  stack_map_add_chop_frame(gen->frame, dropped_locals, current_offset, arena);
+  stack_map_add_frame(gen->frame, pg_array_len(gen->code->code),
+                      frame_before_scope, gen->frame, skip_if_same_frame,
+                      arena);
   gen->frame->scope_depth -= 1;
 }
 
@@ -4969,7 +4995,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     // This stack map frame covers the conditional jump as if we took it, so
     // the `then` branch never executed. Hence, it seems it should always be
     // `same_frame`?
-    stack_map_add_same_frame(gen->frame, jump_from_i + 2, arena);
+    stack_map_add_frame(gen->frame, jump_from_i + 2, &frame_before_then_else,
+                        &frame_before_then_else, false, arena);
   }
   // Patch second, unconditional, jump.
   {
@@ -4980,7 +5007,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     // This stack map frame covers the unconditional jump, i.e. the `then`
     // branch.
     stack_map_add_frame(gen->frame, jump_to_i, &frame_before_then_else,
-                        &frame_after_then, arena);
+                        &frame_after_then, false, arena);
   }
 }
 
@@ -5153,7 +5180,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = &code;
     cg_frame_t frame = {0};
     cg_frame_init(&frame, arena);
-    const cf_variable_t arg0 = {.type_i = main_argument_types_i};
+    const cf_variable_t arg0 = {
+        .type_i = main_argument_types_i,
+        .scope_depth = frame.scope_depth,
+        .verification_info = VERIFICATION_INFO_OBJECT,
+    };
     pg_array_append(frame.locals, arg0, arena);
     frame.max_locals = pg_array_len(frame.locals);
     gen->frame = &frame;
@@ -5184,7 +5215,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_append(method.attributes, attribute_code, arena);
 
     pg_array_append(class_file->methods, method, arena);
-
 
     gen->code = NULL;
     gen->frame = NULL;
@@ -5295,6 +5325,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     LOG("fact=cg_begin_scope node_i=%u scope=%u", node_i,
         gen->frame->scope_depth);
+    cg_frame_t frame_before_scope = {0};
+    cg_frame_clone(&frame_before_scope, gen->frame, arena);
+
     cg_begin_scope(gen);
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -5302,7 +5335,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     LOG("fact=cg_end_scope node_i=%u scope=%u", node_i,
         gen->frame->scope_depth);
-    cg_end_scope(gen, parser, arena);
+
+    cg_end_scope(gen, &frame_before_scope, true, arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
@@ -5319,6 +5353,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
+        .verification_info =
+            cf_type_kind_to_verification_info(parser->types[node->type_i].kind),
     };
     pg_array_append(gen->frame->locals, variable, arena);
     pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -5329,10 +5365,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cf_asm_store_variable_int(&gen->code->code, gen->frame,
                               pg_array_last_index(gen->frame->locals), arena);
 
-    const cf_type_kind_t type_kind = parser->types[node->type_i].kind;
-    stack_map_add_append_frame(gen->frame, 1,
-                               cf_type_kind_to_verification_info(type_kind),
-                               pg_array_len(gen->code->code), arena);
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
