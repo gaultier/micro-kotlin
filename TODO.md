@@ -56,6 +56,8 @@ Probably much later/never:
 [ ] Data class
 [ ] Raw (multiline) strings
 [ ] Nested (interpolation) strings 
+[ ] Property delegate
+[ ] Lazy/lateinit
 
 ## Naive approach for reading external class files to know what fields/methods are available
 

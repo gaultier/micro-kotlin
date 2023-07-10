@@ -4440,7 +4440,8 @@ static u32 par_parse_function_declaration(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  if (!par_match_token(parser,TOKEN_KIND_KEYWORD_FUN))return 0;
+  if (!par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
+    return 0;
 
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
                    "expected function name (identifier)");
@@ -5201,19 +5202,32 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    cg_emit_node(gen, parser, class_file, node->rhs, arena);
-
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     switch (token.kind) {
     case TOKEN_KIND_NONE:
       break; // Nothing to do.
     case TOKEN_KIND_PLUS:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_iadd(&gen->code->code, gen->frame, arena);
       break;
     case TOKEN_KIND_STAR:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_imul(&gen->code->code, gen->frame, arena);
       break;
+    case TOKEN_KIND_EQUAL:
+      pg_assert(node->lhs > 0);
+      const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
+      pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
+
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+
+      const u32 var_i = cf_find_variable(gen->frame, node->lhs);
+      pg_assert(var_i != (u32)-1);
+      cf_asm_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
+      break;
+
     default:
       pg_assert(0 && "todo");
     }
