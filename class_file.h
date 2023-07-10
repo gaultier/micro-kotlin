@@ -699,6 +699,8 @@ static void stack_map_add_append_frame(cg_frame_t *frame, u8 added_locals_count,
   pg_assert(stack_map_frame.kind >= 252);
   pg_assert(stack_map_frame.kind <= 254);
   pg_array_append(frame->stack_map_frames, stack_map_frame, arena);
+
+  LOG("fact=stack_map_add_append_frame pc=%u", current_offset);
 }
 
 static void stack_map_add_same_locals_1_stack_item_frame(
@@ -975,29 +977,28 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
   pg_assert(dst != NULL);
   pg_assert(arena != NULL);
 
+  cg_frame_init(dst, arena);
+
   dst->max_stack = src->max_stack;
   dst->max_locals = src->max_locals;
 
-  pg_array_init_reserve(dst->locals, pg_array_len(src->locals), arena);
-  memcpy(dst->locals, src->locals,
-         sizeof(cf_variable_t) * pg_array_len(src->locals));
-  PG_ARRAY_HEADER(dst->locals)->len = pg_array_len(src->locals);
+  for (u64 i = 0; i < pg_array_len(src->locals); i++)
+    pg_array_append(dst->locals, src->locals[i], arena);
 
-  pg_array_init_reserve(dst->stack, pg_array_len(src->stack), arena);
-  memcpy(dst->stack, src->stack,
-         sizeof(cf_type_kind_t) * pg_array_len(src->stack));
-  PG_ARRAY_HEADER(dst->stack)->len = pg_array_len(src->stack);
+  for (u64 i = 0; i < pg_array_len(src->stack); i++)
+    pg_array_append(dst->stack, src->stack[i], arena);
 
-  pg_array_init_reserve(dst->stack_map_frames,
-                        pg_array_len(src->stack_map_frames), arena);
-  memcpy(dst->stack_map_frames, src->stack_map_frames,
-         sizeof(cf_stack_map_frame_t) * pg_array_len(src->stack_map_frames));
-  PG_ARRAY_HEADER(dst->stack_map_frames)->len =
-      pg_array_len(src->stack_map_frames);
+  for (u64 i = 0; i < pg_array_len(src->stack_map_frames); i++)
+    pg_array_append(dst->stack_map_frames, src->stack_map_frames[i], arena);
 
   pg_assert(dst->stack != NULL);
   pg_assert(dst->locals != NULL);
   pg_assert(dst->stack_map_frames != NULL);
+
+  pg_assert(pg_array_len(dst->locals) == pg_array_len(src->locals));
+  pg_assert(pg_array_len(dst->stack) == pg_array_len(src->stack));
+  pg_assert(pg_array_len(dst->stack_map_frames) ==
+            pg_array_len(src->stack_map_frames));
 }
 
 static const cf_constant_t *
