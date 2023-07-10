@@ -982,6 +982,7 @@ static void cg_frame_clone(cg_frame_t *dst, const cg_frame_t *src,
 
   dst->max_stack = src->max_stack;
   dst->max_locals = src->max_locals;
+  dst->scope_depth = src->scope_depth;
 
   for (u64 i = 0; i < pg_array_len(src->locals); i++)
     pg_array_append(dst->locals, src->locals[i], arena);
@@ -5193,8 +5194,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_append(class_file->methods, method, arena);
 
     // In the current implementation, 2 stack map frames are emitted per
-    // if-then-else.
-    //    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
+    // if-then-else and per variable definition (append + chop).
+    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
     gen->frame = NULL;
@@ -5303,10 +5304,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
     }
 
+    LOG("fact=cg_begin_scope node_i=%u scope=%u", node_i,
+        gen->frame->scope_depth);
     cg_begin_scope(gen);
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
-    cg_end_scope(gen, parser,arena);
+    LOG("fact=cg_end_scope node_i=%u scope=%u", node_i,
+        gen->frame->scope_depth);
+    cg_end_scope(gen, parser, arena);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
