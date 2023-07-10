@@ -537,6 +537,7 @@ typedef struct {
 typedef struct {
   u32 node_i;
   u32 type_i;
+  u32 scope_depth;
 } cf_variable_t;
 
 typedef enum __attribute__((packed)) {
@@ -580,7 +581,7 @@ typedef enum cf_type_kind_t cf_type_kind_t;
 typedef struct {
   u16 max_stack;
   u16 max_locals;
-  pg_pad(4);
+  u32 scope_depth;
   cf_variable_t *locals;
   cf_type_kind_t *stack;
   cf_stack_map_frame_t *stack_map_frames;
@@ -4824,6 +4825,36 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+static void cg_frame_begin_scope(cg_generator_t *gen) {
+  pg_assert(gen->frame);
+  pg_assert(gen->frame->scope_depth < UINT32_MAX);
+
+  gen->frame->scope_depth += 1;
+}
+
+static void cg_frame_end_scope(cg_generator_t *gen, const par_parser_t *parser,
+                               arena_t *arena) {
+  pg_assert(gen);
+  pg_assert(gen->frame);
+  pg_assert(gen->frame->scope_depth > 0);
+
+  const u16 current_offset = pg_array_len(gen->code->code);
+
+  for (i64 i = pg_array_len(gen->frame->locals) - 1; i >= 0; i--) {
+    const cf_variable_t *const variable = &gen->frame->locals[i];
+    if (variable->scope_depth < gen->frame->scope_depth)
+      break;
+
+    pg_assert(variable->scope_depth == gen->frame->scope_depth);
+
+    const cf_verification_info_t verification_info =
+        cf_type_kind_to_verification_info(parser->types[variable->type_i].kind);
+    stack_map_add_chop_frame(gen->frame, 1, verification_info, current_offset,
+                             arena);
+  }
+  gen->frame->scope_depth -= 1;
+}
+
 // TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable slot
 // number? Or use a lookup table?
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
@@ -5163,7 +5194,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     // In the current implementation, 2 stack map frames are emitted per
     // if-then-else.
-//    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
+    //    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
     gen->frame = NULL;
@@ -5289,6 +5320,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
+        .scope_depth = gen->frame->scope_depth,
     };
     pg_array_append(gen->frame->locals, variable, arena);
     pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
