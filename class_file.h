@@ -3986,7 +3986,15 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
   return 0;
 }
 
-static u32 par_parse_var_definition(par_parser_t *parser, arena_t *arena) {
+// multiVariableDeclaration:
+//     '('
+//     {NL}
+//     variableDeclaration
+//     {{NL} ',' {NL} variableDeclaration}
+//     [{NL} ',']
+//     {NL}
+//     ')'
+static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4432,6 +4440,8 @@ static u32 par_parse_function_declaration(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
+  if (!par_match_token(parser,TOKEN_KIND_KEYWORD_FUN))return 0;
+
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER,
                    "expected function name (identifier)");
   const u32 start_token = parser->tokens_i - 1;
@@ -4478,6 +4488,28 @@ static void par_sync_if_panicked(par_parser_t *parser) {
   }
 }
 
+// propertyDeclaration:
+//     [modifiers]
+//     ('val' | 'var')
+//     [{NL} typeParameters]
+//     [{NL} receiverType {NL} '.']
+//     ({NL} (multiVariableDeclaration | variableDeclaration))
+//     [{NL} typeConstraints]
+//     [{NL} (('=' {NL} expression) | propertyDelegate)]
+//     [(NL {NL}) ';']
+//     {NL}
+//     (([getter] [{NL} [semi] setter]) | ([setter] [{NL} [semi] getter]))
+static u32 par_parse_property_declaration(par_parser_t *parser,
+                                          arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  if (par_match_token(parser, TOKEN_KIND_KEYWORD_VAR))
+    return par_parse_var_declaration(parser, arena);
+
+  return 0;
+}
+
 // declaration:
 //     classDeclaration
 //     | objectDeclaration
@@ -4492,9 +4524,11 @@ static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   u32 new_node_i = 0;
-  if (par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
-    new_node_i = par_parse_function_declaration(parser, arena);
-  // TODO
+  if ((new_node_i = par_parse_function_declaration(parser, arena)) != 0)
+    return new_node_i;
+
+  if ((new_node_i = par_parse_property_declaration(parser, arena)) != 0)
+    return new_node_i;
 
   par_sync_if_panicked(parser);
 
