@@ -651,7 +651,6 @@ static void stack_map_add_same_frame(cg_frame_t *frame, u16 current_offset,
 }
 
 static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
-                                     cf_verification_info_t verification_info,
                                      u16 current_offset, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(frame->stack_map_frames != NULL);
@@ -667,7 +666,6 @@ static void stack_map_add_chop_frame(cg_frame_t *frame, u8 chopped_locals_count,
 
   const cf_stack_map_frame_t stack_map_frame = {
       .kind = 251 - chopped_locals_count,
-      .verification_info = verification_info,
       .offset_delta = offset_delta,
       .offset_absolute = current_offset,
   };
@@ -3502,8 +3500,10 @@ typedef struct {
   u32 lhs;
   u32 rhs;
   u32 type_i; // TODO: should it be separate?
+  // TODO: should it be separate?
+  u32 *nodes; // AST_KIND_LIST
   par_ast_node_kind_t kind;
-  pg_pad(3);
+  pg_pad(7);
 } par_ast_node_t;
 
 typedef enum __attribute__((packed)) {
@@ -4388,15 +4388,17 @@ static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
   if (par_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)
     return 0;
 
-  const u32 lhs_i = par_parse_statement(parser, arena);
-  if (lhs_i == 0)
-    return lhs_i;
+  u32 node_i = par_parse_statement(parser, arena);
+  if (node_i == 0)
+    return node_i;
 
-  const par_ast_node_t node = {
-      .kind = AST_KIND_LIST,
-      .lhs = lhs_i,
-      .rhs = par_parse_statements(parser, arena),
-  };
+  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  pg_array_init_reserve(node.nodes, 128, arena);
+  pg_array_append(node.nodes, node_i, arena);
+
+  while ((node_i = par_parse_statement(parser, arena)) != 0)
+    pg_array_append(node.nodes, node_i, arena);
+
   return par_add_node(parser, &node, arena);
 }
 
@@ -4412,21 +4414,12 @@ static u32 par_parse_function_value_parameters(par_parser_t *parser,
   if (par_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
     return 0;
 
-  const par_ast_node_t node = {
-      .kind = AST_KIND_LIST,
-  };
-  u32 last_node_i = par_add_node(parser, &node, arena);
-  const u32 root_i = last_node_i;
+  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  pg_array_init_reserve(node.nodes, 128, arena);
 
+  const u32 root_i = par_add_node(parser, &node, arena);
   do {
-    const par_ast_node_t node = {
-        .kind = AST_KIND_LIST,
-        .lhs = par_parse_expression(parser, arena),
-    };
-    par_add_node(parser, &node, arena);
-
-    last_node_i = parser->nodes[last_node_i].rhs =
-        pg_array_last_index(parser->nodes);
+    pg_array_append(node.nodes, par_parse_expression(parser, arena), arena);
   } while (par_match_token(parser, TOKEN_KIND_COMMA));
 
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
@@ -4729,8 +4722,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i;
   }
   case AST_KIND_LIST: {
-    ty_resolve_types(parser, class_files, node->lhs, arena);
-    ty_resolve_types(parser, class_files, node->rhs, arena);
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+      ty_resolve_types(parser, class_files, node->nodes[i], arena);
 
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID}, arena);
 
@@ -4841,6 +4834,7 @@ static void cg_end_scope(cg_generator_t *gen, const par_parser_t *parser,
 
   const u16 current_offset = pg_array_len(gen->code->code);
 
+  u32 dropped_locals = 0;
   for (i64 i = pg_array_len(gen->frame->locals) - 1; i >= 0; i--) {
     const cf_variable_t *const variable = &gen->frame->locals[i];
     if (variable->scope_depth < gen->frame->scope_depth)
@@ -4848,11 +4842,9 @@ static void cg_end_scope(cg_generator_t *gen, const par_parser_t *parser,
 
     pg_assert(variable->scope_depth == gen->frame->scope_depth);
 
-    const cf_verification_info_t verification_info =
-        cf_type_kind_to_verification_info(parser->types[variable->type_i].kind);
-    stack_map_add_chop_frame(gen->frame, 1, verification_info, current_offset,
-                             arena);
+    dropped_locals += 1;
   }
+  stack_map_add_chop_frame(gen->frame, dropped_locals, current_offset, arena);
   gen->frame->scope_depth -= 1;
 }
 
@@ -5193,9 +5185,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_array_append(class_file->methods, method, arena);
 
-    // In the current implementation, 2 stack map frames are emitted per
-    // if-then-else and per variable definition (append + chop).
-    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
     gen->frame = NULL;
@@ -5307,8 +5296,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     LOG("fact=cg_begin_scope node_i=%u scope=%u", node_i,
         gen->frame->scope_depth);
     cg_begin_scope(gen);
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    cg_emit_node(gen, parser, class_file, node->rhs, arena);
+
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+      cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
+
     LOG("fact=cg_end_scope node_i=%u scope=%u", node_i,
         gen->frame->scope_depth);
     cg_end_scope(gen, parser, arena);
