@@ -75,7 +75,7 @@ static void arena_init(arena_t *arena, u64 cap) {
   arena->current_offset = 0;
 }
 
-static u64 align_forward_16(u64 n) {
+static u64 ut_align_forward_16(u64 n) {
   const u64 modulo = n & (16 - 1);
   if (modulo != 0)
     n += 16 - modulo;
@@ -103,7 +103,7 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   const u64 physical_size = len * element_size; // TODO: check overflow.
 
   const u64 new_offset =
-      align_forward_16(arena->current_offset + physical_size);
+      ut_align_forward_16(arena->current_offset + physical_size);
   pg_assert((new_offset % 16) == 0);
   pg_assert(arena->current_offset + physical_size <= new_offset);
   pg_assert(new_offset < arena->current_offset + physical_size + 16);
@@ -3824,6 +3824,10 @@ static string_t par_token_to_string(par_parser_t *parser, u32 token_i) {
 
 static u32 par_parse_expression(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_block(par_parser_t *parser, arena_t *arena);
+static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
+                                              arena_t *arena);
+static u32 par_parse_statements(par_parser_t *parser, arena_t *arena);
+static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena);
 
 static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
@@ -3846,23 +3850,27 @@ static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
-static u32 par_parse_block_expression(par_parser_t *parser, arena_t *arena) {
+// block:
+//     '{'
+//     {NL}
+//     statements
+//     {NL}
+//     '}'
+static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
+  par_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
+                   "Expected a left curly brace to start a block");
   par_begin_scope(parser);
-  if (par_match_token(parser, TOKEN_KIND_LEFT_BRACE)) {
-    const u32 node_i = par_parse_block(parser, arena);
-    par_end_scope(parser);
-    return node_i;
-  } else {
-    const u32 node_i = par_parse_expression(parser, arena);
-    par_end_scope(parser);
-    return node_i;
-  }
+  const u32 node_i = par_parse_statements(parser, arena);
+  par_end_scope(parser);
+  par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
+                   "Expected a right curly brace to end a block");
+  return node_i;
 }
 
 static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
@@ -3895,9 +3903,9 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t binary_node = {
       .kind = AST_KIND_BINARY,
       .main_token_i = parser->tokens_i - 1,
-      .lhs = par_parse_block_expression(parser, arena), // Then
+      .lhs = par_parse_block(parser, arena), // Then
       .rhs = par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)
-                 ? par_parse_block_expression(parser, arena)
+                 ? par_parse_block(parser, arena)
                  : 0,
   };
   const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
@@ -3911,6 +3919,21 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &if_node, arena);
 }
 
+// primaryExpression:
+//     parenthesizedExpression
+//     | simpleIdentifier
+//     | literalConstant
+//     | stringLiteral
+//     | callableReference
+//     | functionLiteral
+//     | objectLiteral
+//     | collectionLiteral
+//     | thisExpression
+//     | superExpression
+//     | ifExpression
+//     | whenExpression
+//     | tryExpression
+//     | jumpExpression
 static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4021,6 +4044,66 @@ static u32 par_parse_var_definition(par_parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
+// directlyAssignableExpression:
+//     (postfixUnaryExpression assignableSuffix)
+//     | simpleIdentifier
+//     | parenthesizedDirectlyAssignableExpression
+static u32 par_parse_directly_assignable_expression(par_parser_t *parser,
+                                                    arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  if (par_peek_token(parser).kind == TOKEN_KIND_IDENTIFIER)
+    return par_parse_primary_expression(parser, arena);
+
+  return par_parse_postfix_unary_expression(parser, arena);
+}
+
+// assignment:
+//     ((directlyAssignableExpression '=') | (assignableExpression
+//     assignmentAndOperator)) {NL} expression
+static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  const u32 lhs_i = par_parse_directly_assignable_expression(parser, arena);
+  if (lhs_i == 0)
+    return 0;
+
+  par_expect_token(parser, TOKEN_KIND_EQUAL,
+                   "Expected an equal sign for an assignement");
+  const u32 main_token_i = parser->tokens_i - 1;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = lhs_i,
+      .main_token_i = main_token_i,
+      .rhs = par_parse_expression(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
+}
+
+// FIXME: lhs of an assignement is actually a postfix unary expression.
+static bool par_peek_assignement(par_parser_t *parser) {
+  pg_assert(parser != NULL);
+
+  return (par_peek_token(parser).kind == TOKEN_KIND_IDENTIFIER &&
+          !par_is_at_end(parser) &&
+          parser->lexer->tokens[parser->tokens_i].kind == TOKEN_KIND_EQUAL);
+}
+
+static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  // TODO
+
+  return 0;
+}
+
+// statement:
+//     {label | annotation} (declaration | assignment | loopStatement |
+//     expression)
 static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4033,12 +4116,21 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
               "code outside of a function body");
   }
 
-  if (par_match_token(parser, TOKEN_KIND_KEYWORD_VAR))
-    return par_parse_var_definition(parser, arena);
-  else
-    return par_parse_expression(parser, arena);
+  u32 node_i = 0;
+  if ((node_i = par_parse_declaration(parser, arena)) != 0)
+    return node_i;
+
+  if ((node_i = par_parse_loop_statement(parser, arena)) != 0)
+    return node_i;
+
+  if ((node_i = par_parse_assignment(parser, arena)) == 0)
+    return node_i;
+
+  return par_parse_expression(parser, arena);
 }
 
+// postfixUnaryExpression:
+//     primaryExpression {postfixUnarySuffix}
 static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
                                               arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4051,6 +4143,8 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
       parser, arena); // TODO: parse {0,n} postfix unary suffix.
 }
 
+// prefixUnaryExpression:
+//     {unaryPrefix} postfixUnaryExpression
 static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
                                              arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4071,6 +4165,20 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
   return par_parse_postfix_unary_expression(parser, arena);
 }
 
+// asExpression:
+//     prefixUnaryExpression {{NL} asOperator {NL} type}
+static u32 par_parse_as_expression(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_prefix_unary_expression(parser, arena);
+}
+
+// multiplicativeExpression:
+//     asExpression {multiplicativeOperator {NL} asExpression}
 static u32 par_parse_multiplicative_expression(par_parser_t *parser,
                                                arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4079,7 +4187,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const u32 expression_node = par_parse_prefix_unary_expression(parser, arena);
+  const u32 expression_node = par_parse_as_expression(parser, arena);
   if (!par_match_token(parser, TOKEN_KIND_STAR))
     return expression_node;
 
@@ -4092,6 +4200,8 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   return par_add_node(parser, &node, arena);
 }
 
+// additiveExpression:
+//     multiplicativeExpression {additiveOperator {NL} multiplicativeExpression}
 static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4113,7 +4223,9 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
+// rangeExpression:
+//     additiveExpression {'..' {NL} additiveExpression}
+static u32 par_parse_range_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4123,32 +4235,138 @@ static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
   return par_parse_additive_expression(parser, arena);
 }
 
-static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
+// infixFunctionCall:
+//     rangeExpression {simpleIdentifier {NL} rangeExpression}
+static u32 par_parse_infix_function_call(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  // Empty block.
-  if (par_match_token(parser, TOKEN_KIND_RIGHT_BRACE))
-    return 0;
-
-  if (par_is_at_end(parser)) {
-    par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
-                     "expected right curly brace after the arguments");
-    return 0;
-  }
-
-  const par_ast_node_t root = {
-      .kind = AST_KIND_LIST,
-      .lhs = par_parse_statement(parser, arena),
-      .rhs = par_parse_block(parser, arena),
-  };
-  return par_add_node(parser, &root, arena);
+  return par_parse_range_expression(parser, arena);
 }
 
-static u32 par_parse_function_arguments(par_parser_t *parser, arena_t *arena) {
+// elvisExpression:
+//     infixFunctionCall {{NL} elvis {NL} infixFunctionCall}
+static u32 par_parse_elvis_expression(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_infix_function_call(parser, arena);
+}
+
+// infixOperation:
+//     elvisExpression {(inOperator {NL} elvisExpression) | (isOperator {NL}
+//     type)}
+static u32 par_parse_infix_operation(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_elvis_expression(parser, arena);
+}
+
+// genericCallLikeComparison:
+//     infixOperation {callSuffix}
+static u32 par_parse_generic_call_like_comparison(par_parser_t *parser,
+                                                  arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_infix_operation(parser, arena);
+}
+
+// comparison:
+//     genericCallLikeComparison {comparisonOperator {NL}
+//     genericCallLikeComparison}
+static u32 par_parse_comparison(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_generic_call_like_comparison(parser, arena);
+}
+
+// equality:
+//     comparison {equalityOperator {NL} comparison}
+static u32 par_parse_equality(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_comparison(parser, arena);
+}
+
+// conjunction:
+//     equality {{NL} '&&' {NL} equality}
+static u32 par_parse_conjunction(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_equality(parser, arena);
+}
+// disjunction:
+//     conjunction {{NL} '||' {NL} conjunction}
+static u32 par_parse_disjunction(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_conjunction(parser, arena);
+}
+// expression:
+//     disjunction
+static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_disjunction(parser, arena);
+}
+
+// statements:
+//     [statement {semis statement}] [semis]
+static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  const u32 lhs_i = par_parse_statement(parser, arena);
+  if (lhs_i == 0)
+    return lhs_i;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_LIST,
+      .lhs = lhs_i,
+      .rhs = par_parse_statements(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
+}
+
+static u32 par_parse_function_value_parameters(par_parser_t *parser,
+                                               arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4181,7 +4399,30 @@ static u32 par_parse_function_arguments(par_parser_t *parser, arena_t *arena) {
   return root_i;
 }
 
-static u32 par_parse_function_definition(par_parser_t *parser, arena_t *arena) {
+// functionBody:
+//     block
+//     | ('=' {NL} expression)
+static u32 par_parse_function_body(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  return par_parse_block(parser, arena);
+}
+
+// functionDeclaration:
+//     [modifiers]
+//     'fun'
+//     [{NL} typeParameters]
+//     [{NL} receiverType {NL} '.']
+//     {NL}
+//     simpleIdentifier
+//     {NL}
+//     functionValueParameters
+//     [{NL} ':' {NL} type]
+//     [{NL} typeConstraints]
+//     [{NL} functionBody]
+static u32 par_parse_function_declaration(par_parser_t *parser,
+                                          arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4203,14 +4444,10 @@ static u32 par_parse_function_definition(par_parser_t *parser, arena_t *arena) {
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
   parser->nodes[parser->current_function_i].lhs =
-      par_parse_function_arguments(parser, arena);
+      par_parse_function_value_parameters(parser, arena);
 
-  par_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
-                   "expected left curly brace before the arguments");
-  par_begin_scope(parser);
   parser->nodes[parser->current_function_i].rhs =
-      par_parse_block(parser, arena);
-  par_end_scope(parser);
+      par_parse_function_body(parser, arena);
   parser->current_function_i = 0;
 
   return fn_i;
@@ -4238,6 +4475,12 @@ static void par_sync_if_panicked(par_parser_t *parser) {
   }
 }
 
+// declaration:
+//     classDeclaration
+//     | objectDeclaration
+//     | functionDeclaration
+//     | propertyDeclaration
+//     | typeAlias
 static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4247,30 +4490,15 @@ static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
 
   u32 new_node_i = 0;
   if (par_match_token(parser, TOKEN_KIND_KEYWORD_FUN))
-    new_node_i = par_parse_function_definition(parser, arena);
-  else
-    new_node_i = par_parse_statement(parser, arena);
+    new_node_i = par_parse_function_declaration(parser, arena);
+  // TODO
 
   par_sync_if_panicked(parser);
 
   return new_node_i;
 }
 
-static u32 par_parse_declarations(par_parser_t *parser, arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
-
-  const par_ast_node_t node = {
-      .kind = AST_KIND_LIST,
-      .lhs = par_parse_declaration(parser, arena),
-      .rhs = par_is_at_end(parser) ? 0 : par_parse_declarations(parser, arena),
-  };
-  return par_add_node(parser, &node, arena);
-}
-
+// topLevelObject: declaration [semis]
 static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4287,7 +4515,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t dummy_node = {0};
   par_add_node(parser, &dummy_node, arena);
 
-  const u32 root_i = par_parse_declarations(parser, arena);
+  const u32 root_i = par_parse_declaration(parser, arena);
 
   pg_array_init_reserve(parser->types, pg_array_len(parser->nodes) + 32, arena);
   pg_array_append(parser->types, (par_type_t){0}, arena); // Default value.
