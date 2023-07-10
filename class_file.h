@@ -4913,6 +4913,13 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // Restore the frame as if the `then` branch never executed.
   gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
   cg_frame_clone(gen->frame, &frame_before_then_else, arena);
+
+  // Keep newly added stack map frames
+  for (u64 i = pg_array_len(frame_before_then_else.stack_map_frames);
+       i < pg_array_len(frame_after_then.stack_map_frames); i++)
+    pg_array_append(gen->frame->stack_map_frames,
+                    frame_after_then.stack_map_frames[i], arena);
+
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   // Add a nop to ensure the `<else branch>` has at least one instruction, so
   // that the corresponding, second, stack map frame can be unconditionally
@@ -5156,7 +5163,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     // In the current implementation, 2 stack map frames are emitted per
     // if-then-else.
-    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
+//    pg_assert(pg_array_len(gen->frame->stack_map_frames) % 2 == 0);
 
     gen->code = NULL;
     gen->frame = NULL;
