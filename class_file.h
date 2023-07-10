@@ -4066,30 +4066,30 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
-  const u32 lhs_i = par_parse_directly_assignable_expression(parser, arena);
-  if (lhs_i == 0)
-    return 0;
+  u32 lhs_i = 0;
+  const u32 old_nodes_len = pg_array_len(parser->nodes);
+  const u32 old_tokens_i = parser->tokens_i;
+  const par_parser_state_t old_state = parser->state;
 
-  par_expect_token(parser, TOKEN_KIND_EQUAL,
-                   "Expected an equal sign for an assignement");
-  const u32 main_token_i = parser->tokens_i - 1;
+  if ((lhs_i = par_parse_directly_assignable_expression(parser, arena)) != 0 &&
+      par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
+    const u32 main_token_i = parser->tokens_i - 1;
 
-  const par_ast_node_t node = {
-      .kind = AST_KIND_BINARY,
-      .lhs = lhs_i,
-      .main_token_i = main_token_i,
-      .rhs = par_parse_expression(parser, arena),
-  };
-  return par_add_node(parser, &node, arena);
-}
+    const par_ast_node_t node = {
+        .kind = AST_KIND_BINARY,
+        .lhs = lhs_i,
+        .main_token_i = main_token_i,
+        .rhs = par_parse_expression(parser, arena),
+    };
+    return par_add_node(parser, &node, arena);
+  }
 
-// FIXME: lhs of an assignement is actually a postfix unary expression.
-static bool par_peek_assignement(par_parser_t *parser) {
-  pg_assert(parser != NULL);
+  // Reset
+  PG_ARRAY_HEADER(parser->nodes)->len=old_nodes_len;
+  parser->tokens_i = old_tokens_i;
+  parser->state = old_state;
 
-  return (par_peek_token(parser).kind == TOKEN_KIND_IDENTIFIER &&
-          !par_is_at_end(parser) &&
-          parser->lexer->tokens[parser->tokens_i].kind == TOKEN_KIND_EQUAL);
+  return par_parse_expression(parser, arena);
 }
 
 static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
@@ -4352,6 +4352,9 @@ static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  if (par_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)
+    return 0;
 
   const u32 lhs_i = par_parse_statement(parser, arena);
   if (lhs_i == 0)
