@@ -4089,6 +4089,14 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
+  // We could here try to parse a `directlyAssignableExpression`, and if it
+  // fails, or if it succeeds but the next token is *not* `TOKEN_KIND_EQUAL`,
+  // backtrack. 
+  // But that potentially means we are parsing twice every
+  // expression and lots of expensive cloning/resetting.
+  // Instead, we first parse it as an expression, and if the next
+  // token is `TOKEN_KIND_EQUAL`, we check that this expression was indeed a
+  // lvalue. Otherwise, we just return this expression, no more work to do.
   u32 lhs_i = par_parse_expression(parser, arena);
 
   if (par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
