@@ -3711,13 +3711,14 @@ static lex_token_t par_peek_token(const par_parser_t *parser) {
   return parser->lexer->tokens[parser->tokens_i];
 }
 
-static lex_token_t par_advance_token(par_parser_t *parser) {
+static void par_advance_token(par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return parser->lexer->tokens[parser->tokens_i++];
+  // TODO: should we clamp it to the length?
+  parser->tokens_i++;
 }
 
 static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
@@ -3982,7 +3983,6 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     return par_parse_if_expression(parser, arena);
   }
 
-  par_advance_token(parser);
   return 0;
 }
 
@@ -4085,7 +4085,7 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   }
 
   // Reset
-  PG_ARRAY_HEADER(parser->nodes)->len=old_nodes_len;
+  PG_ARRAY_HEADER(parser->nodes)->len = old_nodes_len;
   parser->tokens_i = old_tokens_i;
   parser->state = old_state;
 
@@ -4123,7 +4123,7 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
   if ((node_i = par_parse_loop_statement(parser, arena)) != 0)
     return node_i;
 
-  if ((node_i = par_parse_assignment(parser, arena)) == 0)
+  if ((node_i = par_parse_assignment(parser, arena)) != 0)
     return node_i;
 
   return par_parse_expression(parser, arena);
