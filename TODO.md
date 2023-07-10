@@ -16,7 +16,7 @@
 [x] Type checking, no inference
 [x] Local variables
 [ ] Comments
-[ ] Local variable mutation
+[x] Local variable mutation
 [ ] Function definition
 [ ] Field access
 [ ] String

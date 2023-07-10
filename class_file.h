@@ -5290,6 +5290,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_store_variable_int(&gen->code->code, gen->frame,
                               pg_array_last_index(gen->frame->locals), arena);
+
+    const cf_type_kind_t type_kind = parser->types[node->type_i].kind;
+    stack_map_add_append_frame(gen->frame, 1,
+                               cf_type_kind_to_verification_info(type_kind),
+                               pg_array_len(gen->code->code), arena);
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
