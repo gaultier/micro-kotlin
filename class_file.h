@@ -4067,6 +4067,20 @@ static u32 par_parse_directly_assignable_expression(par_parser_t *parser,
   return par_parse_postfix_unary_expression(parser, arena);
 }
 
+static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
+  pg_assert(parser != NULL);
+
+  const par_ast_node_t *const node = &parser->nodes[node_i];
+  switch (node->kind) {
+  case AST_KIND_VAR_REFERENCE:
+    return true;
+    // TODO: more
+
+  default:
+    return false;
+  }
+}
+
 // assignment:
 //     ((directlyAssignableExpression '=') | (assignableExpression
 //     assignmentAndOperator)) {NL} expression
@@ -4074,13 +4088,13 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
-  u32 lhs_i = 0;
-  const u32 old_nodes_len = pg_array_len(parser->nodes);
-  const u32 old_tokens_i = parser->tokens_i;
-  const par_parser_state_t old_state = parser->state;
+  u32 lhs_i = par_parse_expression(parser, arena);
 
-  if ((lhs_i = par_parse_directly_assignable_expression(parser, arena)) != 0 &&
-      par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
+  if (par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
+    if (!par_is_lvalue(parser, lhs_i)) {
+      pg_assert(0&&"todo");
+    }
+
     const u32 main_token_i = parser->tokens_i - 1;
 
     const par_ast_node_t node = {
@@ -4092,12 +4106,7 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
     return par_add_node(parser, &node, arena);
   }
 
-  // Reset
-  PG_ARRAY_HEADER(parser->nodes)->len = old_nodes_len;
-  parser->tokens_i = old_tokens_i;
-  parser->state = old_state;
-
-  return par_parse_expression(parser, arena);
+  return lhs_i;
 }
 
 static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
@@ -4209,7 +4218,8 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
 }
 
 // additiveExpression:
-//     multiplicativeExpression {additiveOperator {NL} multiplicativeExpression}
+//     multiplicativeExpression {additiveOperator {NL}
+//     multiplicativeExpression}
 static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
