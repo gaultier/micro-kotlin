@@ -3975,6 +3975,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
       par_error(parser, parser->lexer->tokens[node.main_token_i],
                 "unknown reference to variable");
     } else {
+      pg_assert(pg_array_last(parser->nodes)->kind == AST_KIND_VAR_REFERENCE);
       pg_array_last(parser->nodes)->lhs =
           parser->variables[variable_i].var_definition_node_i;
     }
@@ -4092,7 +4093,7 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
 
   if (par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
     if (!par_is_lvalue(parser, lhs_i)) {
-      pg_assert(0&&"todo");
+      pg_assert(0 && "todo");
     }
 
     const u32 main_token_i = parser->tokens_i - 1;
@@ -4812,6 +4813,8 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+// TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable slot
+// number? Or use a lookup table?
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -4822,7 +4825,7 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
       return (u32)i;
   }
 
-  return 0;
+  return (u32)-1;
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -5233,7 +5236,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
-      const u32 var_i = cf_find_variable(gen->frame, node->lhs);
+      const u32 var_i = cf_find_variable(gen->frame, lhs->lhs);
       pg_assert(var_i != (u32)-1);
       cf_asm_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
       break;
