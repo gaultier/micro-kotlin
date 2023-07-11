@@ -6,7 +6,7 @@
 [.] Call functions generically (no builtin) from the same class file
 [.] Call functions generically (no builtin) from other class files
 [x] Define functions
-[x] Generate stack map tables
+[.] Generate stack map tables
 [x] Use latest jvm version
 [x] Makefile/build.sh
 [x] Log memory used in arena

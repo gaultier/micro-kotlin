@@ -566,7 +566,7 @@ typedef struct cg_frame_t cg_frame_t;
 typedef struct {
   u8 kind;
   u8 offset_delta;
-  u16 offset_absolute;
+  u16 pc;
   pg_pad(4);
   cg_frame_t *frame; // Immutable clone of the frame when the stack map
                      // frame was created.
@@ -635,7 +635,7 @@ stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
   if (pg_array_len(stack_map_frames) == 0)
     return current_offset;
 
-  const u16 last_offset = pg_array_last(stack_map_frames)->offset_absolute;
+  const u16 last_offset = pg_array_last(stack_map_frames)->pc;
   return current_offset - last_offset - 1;
 }
 
@@ -652,14 +652,14 @@ static void stack_map_add_same_frame(cf_stack_map_frame_t **stack_map_frames,
 
   const cf_stack_map_frame_t stack_map_frame = {
       .kind = offset_delta,
-      .offset_absolute = current_offset,
+      .pc = current_offset,
       .offset_delta = offset_delta,
   };
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
   LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
       "offset_absolute=%u len=%lu",
-      current_offset, offset_delta, stack_map_frame.kind,
-      stack_map_frame.offset_absolute, pg_array_len(*stack_map_frames));
+      current_offset, offset_delta, stack_map_frame.kind, stack_map_frame.pc,
+      pg_array_len(*stack_map_frames));
 }
 
 static cf_verification_info_kind_t
@@ -700,7 +700,7 @@ static void stack_map_add_full_frame(cf_stack_map_frame_t **stack_map_frames,
 
   cf_stack_map_frame_t stack_map_frame = {
       .kind = 255,
-      .offset_absolute = current_offset,
+      .pc = current_offset,
       .offset_delta = offset_delta,
   };
   pg_array_init_reserve(stack_map_frame.locals, pg_array_len(frame->locals),
@@ -720,8 +720,8 @@ static void stack_map_add_full_frame(cf_stack_map_frame_t **stack_map_frames,
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
   LOG("fact='add full frame' current_offset=%hu offset_delta=%hu kind=%hu "
       "offset_absolute=%u len=%lu",
-      current_offset, offset_delta, stack_map_frame.kind,
-      stack_map_frame.offset_absolute, pg_array_len(*stack_map_frames));
+      current_offset, offset_delta, stack_map_frame.kind, stack_map_frame.pc,
+      pg_array_len(*stack_map_frames));
 }
 
 static void stack_map_add_chop_frame(cf_stack_map_frame_t **stack_map_frames,
@@ -737,7 +737,7 @@ static void stack_map_add_chop_frame(cf_stack_map_frame_t **stack_map_frames,
   const cf_stack_map_frame_t stack_map_frame = {
       .kind = 251 - chopped_locals_count,
       .offset_delta = offset_delta,
-      .offset_absolute = current_offset,
+      .pc = current_offset,
   };
   pg_assert(stack_map_frame.kind >= 248);
   pg_assert(stack_map_frame.kind <= 250);
@@ -758,7 +758,7 @@ static void stack_map_add_append_frame(cf_stack_map_frame_t **stack_map_frames,
   cf_stack_map_frame_t stack_map_frame = {
       .kind = 251 + added_locals_count,
       .offset_delta = offset_delta,
-      .offset_absolute = current_offset,
+      .pc = current_offset,
   };
   pg_array_init_reserve(stack_map_frame.locals, 1, arena);
   pg_array_append(stack_map_frame.locals, verification_info, arena);
@@ -783,7 +783,7 @@ static void stack_map_add_same_locals_1_stack_item_frame(
   cf_stack_map_frame_t stack_map_frame = {
       .kind = offset_delta + 64,
       .offset_delta = offset_delta,
-      .offset_absolute = current_offset,
+      .pc = current_offset,
   };
   pg_array_init_reserve(stack_map_frame.stack, 1, arena);
   pg_array_append(stack_map_frame.stack, verification_info, arena);
@@ -5043,7 +5043,7 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
-// TODO: interleaved stack map frames are real!
+// TODO: interleaved stack map frames are real! (?)
 // We need to first store all of the stack map frames absolute offset locations
 // (aka: jump targets) *and then* sort them and compute all the delta data and
 // delta offsets in the right order.
@@ -5208,6 +5208,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
   const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame, arena);
+  const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we can
   // generate a stack map frame later.
@@ -5227,34 +5228,38 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   pg_assert(pg_array_len(frame_after_then->stack) ==
             pg_array_len(gen->frame->stack));
+  const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
+
   gen->frame->max_stack =
       pg_max(frame_after_then->max_stack, gen->frame->max_stack);
   gen->frame->max_locals =
       pg_max(frame_after_then->max_locals, gen->frame->max_locals);
 
-  const u16 jump_to_i = pg_array_len(gen->code->code);
-
   // Patch first, conditional, jump.
   {
-    const u16 jump_offset = (jump_from_i + 2) - (jump_conditionally_from_i - 1);
+    const u16 jump_offset =
+        (conditional_jump_target_absolute) - (jump_conditionally_from_i - 1);
     gen->code->code[jump_conditionally_from_i + 0] =
         (u8)((u16)jump_offset & 0xff00) >> 8;
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
     stack_map_add_frame(gen->first_method_frame, frame_before_else,
-                        &gen->stack_map_frames, jump_from_i + 2, arena);
+                        &gen->stack_map_frames,
+                        conditional_jump_target_absolute, arena);
   }
   // Patch second, unconditional, jump.
   {
-    const u16 jump_offset = (jump_to_i) - (jump_from_i - 1);
+    const u16 jump_offset =
+        (unconditional_jump_target_absolute) - (jump_from_i - 1);
     gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
     gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
 
     // This stack map frame covers the unconditional jump, i.e. the `then`
     // branch.
     stack_map_add_frame(gen->first_method_frame, frame_after_then,
-                        &gen->stack_map_frames, jump_to_i, arena);
+                        &gen->stack_map_frames,
+                        unconditional_jump_target_absolute, arena);
   }
 }
 
