@@ -560,11 +560,11 @@ typedef struct {
   u8 kind;
   u8 offset_delta;
   u16 offset_absolute;
-  // TODO: it's actually: `cf_verification_info_t[]`.
-  cf_verification_info_t verification_info;
-  pg_pad(3);
+  pg_pad(4);
   cg_frame_t *frame; // Immutable clone of the frame when the stack map
                      // frame was created.
+  cf_verification_info_t *locals;
+  cf_verification_info_t *stack;
 } cf_stack_map_frame_t;
 
 enum __attribute__((packed)) cf_type_kind_t {
@@ -639,6 +639,7 @@ static void stack_map_add_same_frame(cf_stack_map_frame_t **stack_map_frames,
 
   pg_assert(stack_map_frames != NULL);
   pg_assert(*stack_map_frames != NULL);
+  pg_assert(arena != NULL);
 
   pg_assert(offset_delta <= 63);
   pg_assert(offset_delta <= current_offset);
@@ -648,6 +649,66 @@ static void stack_map_add_same_frame(cf_stack_map_frame_t **stack_map_frames,
       .offset_absolute = current_offset,
       .offset_delta = offset_delta,
   };
+  pg_array_append(*stack_map_frames, stack_map_frame, arena);
+  LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
+      "offset_absolute=%u len=%lu",
+      current_offset, offset_delta, stack_map_frame.kind,
+      stack_map_frame.offset_absolute, pg_array_len(*stack_map_frames));
+}
+
+static cf_verification_info_t
+cf_type_kind_to_verification_info(cf_type_kind_t kind) {
+  switch (kind) {
+  case TYPE_BYTE:
+  case TYPE_BOOL:
+  case TYPE_CHAR:
+  case TYPE_SHORT:
+  case TYPE_INT:
+    return VERIFICATION_INFO_INT;
+  case TYPE_FLOAT:
+    return VERIFICATION_INFO_FLOAT;
+  case TYPE_DOUBLE:
+    return VERIFICATION_INFO_DOUBLE;
+  case TYPE_LONG:
+    return VERIFICATION_INFO_LONG;
+  case TYPE_INSTANCE_REFERENCE:
+  case TYPE_ARRAY_REFERENCE:
+    return VERIFICATION_INFO_OBJECT;
+  case TYPE_CONSTRUCTOR:
+  case TYPE_ANY:
+  case TYPE_METHOD:
+  case TYPE_VOID:
+    pg_assert(0 && "unreachable");
+  }
+}
+
+static void stack_map_add_full_frame(cf_stack_map_frame_t **stack_map_frames,
+                                     const cg_frame_t *frame,
+                                     u16 current_offset, u16 offset_delta,
+                                     arena_t *arena) {
+
+  pg_assert(stack_map_frames != NULL);
+  pg_assert(*stack_map_frames != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_stack_map_frame_t stack_map_frame = {
+      .kind = 255,
+      .offset_absolute = current_offset,
+      .offset_delta = offset_delta,
+  };
+  pg_array_init_reserve(stack_map_frame.locals, pg_array_len(frame->locals),
+                        arena);
+  for (u64 i = 0; i < pg_array_len(frame->locals); i++)
+    pg_array_append(stack_map_frame.locals, frame->locals[i].verification_info,
+                    arena);
+
+  pg_array_init_reserve(stack_map_frame.stack, pg_array_len(frame->stack),
+                        arena);
+  for (u64 i = 0; i < pg_array_len(frame->stack); i++)
+    pg_array_append(stack_map_frame.stack,
+                    cf_type_kind_to_verification_info(frame->stack[i]), arena);
+
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
   LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
       "offset_absolute=%u len=%lu",
@@ -686,12 +747,14 @@ static void stack_map_add_append_frame(cf_stack_map_frame_t **stack_map_frames,
   pg_assert(offset_delta > 0);
   pg_assert(offset_delta <= current_offset);
 
-  const cf_stack_map_frame_t stack_map_frame = {
+  cf_stack_map_frame_t stack_map_frame = {
       .kind = 251 + added_locals_count,
-      .verification_info = verification_info,
       .offset_delta = offset_delta,
       .offset_absolute = current_offset,
   };
+  pg_array_init_reserve(stack_map_frame.locals, 1, arena);
+  pg_array_append(stack_map_frame.locals, verification_info, arena);
+
   pg_assert(stack_map_frame.kind >= 252);
   pg_assert(stack_map_frame.kind <= 254);
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
@@ -709,12 +772,14 @@ static void stack_map_add_same_locals_1_stack_item_frame(
   pg_assert(offset_delta > 0);
   pg_assert(offset_delta <= current_offset);
 
-  const cf_stack_map_frame_t stack_map_frame = {
+  cf_stack_map_frame_t stack_map_frame = {
       .kind = offset_delta + 64,
-      .verification_info = verification_info,
       .offset_delta = offset_delta,
       .offset_absolute = current_offset,
   };
+  pg_array_init_reserve(stack_map_frame.stack, 1, arena);
+  pg_array_append(stack_map_frame.stack, verification_info, arena);
+
   pg_assert(stack_map_frame.kind >= 64);
   pg_assert(stack_map_frame.kind <= 127);
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
@@ -789,32 +854,6 @@ static u16 cg_compute_stack_size(const cf_type_kind_t *stack) {
   }
   pg_assert(size >= pg_array_len(stack));
   return size;
-}
-
-static cf_verification_info_t
-cf_type_kind_to_verification_info(cf_type_kind_t kind) {
-  switch (kind) {
-  case TYPE_BYTE:
-  case TYPE_BOOL:
-  case TYPE_CHAR:
-  case TYPE_SHORT:
-  case TYPE_INT:
-    return VERIFICATION_INFO_INT;
-  case TYPE_FLOAT:
-    return VERIFICATION_INFO_FLOAT;
-  case TYPE_DOUBLE:
-    return VERIFICATION_INFO_DOUBLE;
-  case TYPE_LONG:
-    return VERIFICATION_INFO_LONG;
-  case TYPE_INSTANCE_REFERENCE:
-  case TYPE_ARRAY_REFERENCE:
-    return VERIFICATION_INFO_OBJECT;
-  case TYPE_CONSTRUCTOR:
-  case TYPE_ANY:
-  case TYPE_METHOD:
-  case TYPE_VOID:
-    pg_assert(0 && "unreachable");
-  }
 }
 
 static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena);
@@ -2426,6 +2465,13 @@ static void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
   pg_assert(class_file->fields_count == 0 && "unimplemented");
 }
 
+static u32
+cf_compute_verification_info_size(cf_verification_info_t verification_info) {
+  pg_assert(verification_info <= 8);
+
+  return verification_info < 7 ? sizeof(u8) : sizeof(u8) + sizeof(u16);
+}
+
 static u32 cf_compute_verification_infos_size(
     const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
@@ -2435,31 +2481,53 @@ static u32 cf_compute_verification_infos_size(
     return 0;
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
-    u32 size = sizeof(u8);
-    if (stack_map_frame->verification_info < 7)
-      return size;
-    else if (stack_map_frame->verification_info <= 8)
-      return size + sizeof(u16);
-    else
-      pg_assert(0 && "unreachable");
+    pg_assert(stack_map_frame->locals == NULL);
+    pg_assert(stack_map_frame->stack != NULL);
+    pg_assert(pg_array_len(stack_map_frame->stack) == 1);
+    const cf_verification_info_t verification_info = stack_map_frame->stack[0];
+
+    return cf_compute_verification_info_size(verification_info);
   } else if (128 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
   } else if (247 <= stack_map_frame->kind &&
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
-    pg_assert(0 && "todo");
+    pg_assert(stack_map_frame->locals == NULL);
+    pg_assert(stack_map_frame->stack != NULL);
+    pg_assert(pg_array_len(stack_map_frame->stack) == 1);
+    const cf_verification_info_t verification_info = stack_map_frame->stack[0];
+
+    return cf_compute_verification_info_size(verification_info);
   } else if (248 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 250) { // chop_frame
-    pg_assert(0 && "todo");
+    return 0;
   } else if (251 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 251) { // same_frame_extended
-    pg_assert(0 && "todo");
+    return 0;
   } else if (252 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 254) { // append_frame
-    pg_assert(stack_map_frame->kind == 252 && "todo");
+    pg_assert(stack_map_frame->stack == NULL);
+    pg_assert(stack_map_frame->locals != NULL);
+    pg_assert(pg_array_len(stack_map_frame->locals) <= 3);
+
+    u32 size = 0;
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->locals); i++)
+      size += cf_compute_verification_info_size(stack_map_frame->locals[i]);
+
+    return size;
   } else { // full_frame
-    pg_assert(0 && "todo");
+    pg_assert(stack_map_frame->stack != NULL);
+    pg_assert(stack_map_frame->locals != NULL);
+
+    u32 size = 0;
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->locals); i++)
+      size += cf_compute_verification_info_size(stack_map_frame->locals[i]);
+
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->stack); i++)
+      size += cf_compute_verification_info_size(stack_map_frame->stack[i]);
+
+    return size;
   }
   pg_assert(0 && "unreachable");
 }
@@ -2516,19 +2584,21 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
       } else if (247 <= stack_map_frame->kind &&
                  stack_map_frame->kind <=
                      247) { // same_locals_1_stack_item_frame_extended
-        pg_assert(0 && "todo");
+        size += sizeof(u8) + sizeof(u16) +
+                cf_compute_verification_infos_size(stack_map_frame);
       } else if (248 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 250) { // chop_frame
         size += sizeof(u8) + sizeof(u16);
       } else if (251 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 251) { // same_frame_extended
-        pg_assert(0 && "todo");
+        size += sizeof(u8) + sizeof(u16);
       } else if (252 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 254) { // append_frame
-        pg_assert(stack_map_frame->kind == 252 && "todo");
-        size += sizeof(u8) + sizeof(u16) + sizeof(u8);
+        size += sizeof(u8) + sizeof(u16) +
+                cf_compute_verification_infos_size(stack_map_frame);
       } else { // full_frame
-        pg_assert(0 && "todo");
+        size += sizeof(u8) + 3 * sizeof(u16) +
+                cf_compute_verification_infos_size(stack_map_frame);
       }
     }
 
@@ -2540,6 +2610,19 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
 static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes);
 
+static void
+cf_write_verification_info(FILE *file,
+                           cf_verification_info_t verification_info) {
+  pg_assert(file != NULL);
+  pg_assert(verification_info <= 8);
+
+  if (verification_info < 7) {
+    file_write_u8(file, verification_info);
+  } else {
+    pg_assert(0 && "todo");
+  }
+}
+
 static void cf_write_stack_map_table_attribute(
     FILE *file, const cf_stack_map_frame_t *stack_map_frame) {
   pg_assert(file != NULL);
@@ -2550,8 +2633,12 @@ static void cf_write_stack_map_table_attribute(
     file_write_u8(file, stack_map_frame->kind);
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
+    pg_assert(stack_map_frame->locals == NULL);
+    pg_assert(stack_map_frame->stack != NULL);
+    pg_assert(pg_array_len(stack_map_frame->stack) == 1);
+
     file_write_u8(file, stack_map_frame->kind);
-    file_write_u8(file, stack_map_frame->verification_info);
+    cf_write_verification_info(file, stack_map_frame->stack[0]);
   } else if (128 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
@@ -2568,11 +2655,29 @@ static void cf_write_stack_map_table_attribute(
     pg_assert(0 && "todo");
   } else if (252 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 254) { // append_frame
+    pg_assert(stack_map_frame->stack == NULL);
+    pg_assert(stack_map_frame->locals != NULL);
+    pg_assert(pg_array_len(stack_map_frame->locals) == 1);
+
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
-    file_write_u8(file, stack_map_frame->verification_info);
+    cf_write_verification_info(file, stack_map_frame->locals[0]);
   } else { // full_frame
-    pg_assert(0 && "todo");
+    pg_assert(stack_map_frame->stack != NULL);
+    pg_assert(stack_map_frame->locals != NULL);
+
+    file_write_u8(file, stack_map_frame->kind);
+    file_write_be_u16(file, stack_map_frame->offset_delta);
+    file_write_be_u16(file, pg_array_len(stack_map_frame->locals));
+
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->locals); i++) {
+      cf_write_verification_info(file, stack_map_frame->locals[i]);
+    }
+
+    file_write_be_u16(file, pg_array_len(stack_map_frame->stack));
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->stack); i++) {
+      cf_write_verification_info(file, stack_map_frame->stack[i]);
+    }
   }
 }
 
@@ -4807,24 +4912,28 @@ static void stack_map_add_frame(const cg_frame_t *frame,
 
   u8 added_locals_len = 0;
   cf_verification_info_t added_locals[256] = {0};
-  for (i64 i = pg_array_len(frame->locals) - 1;
-       i >= (i64)pg_array_len(frame->previous_frame->locals); i--) {
-    const cf_variable_t *const variable = &frame->locals[i];
-    pg_assert(variable->scope_depth == frame->scope_depth);
+  {
+    for (i64 i = pg_array_len(frame->locals) - 1;
+         i >= (i64)pg_array_len(frame->previous_frame->locals); i--) {
+      const cf_variable_t *const variable = &frame->locals[i];
+      pg_assert(variable->scope_depth == frame->scope_depth);
 
-    pg_assert(added_locals_len < UINT8_MAX);
-    added_locals[added_locals_len++] = variable->verification_info;
+      pg_assert(added_locals_len < UINT8_MAX);
+      added_locals[added_locals_len++] = variable->verification_info;
+    }
   }
 
   u8 removed_locals_len = 0;
   cf_verification_info_t removed_locals[256] = {0};
-  for (i64 i = pg_array_len(frame->previous_frame->locals) - 1;
-       i >= (i64)pg_array_len(frame->locals); i--) {
-    const cf_variable_t *const variable = &frame->locals[i];
-    pg_assert(variable->scope_depth == frame->scope_depth);
+  {
+    for (i64 i = pg_array_len(frame->previous_frame->locals) - 1;
+         i >= (i64)pg_array_len(frame->locals); i--) {
+      const cf_variable_t *const variable = &frame->locals[i];
+      pg_assert(variable->scope_depth == frame->scope_depth);
 
-    pg_assert(removed_locals_len < UINT8_MAX);
-    removed_locals[removed_locals_len++] = variable->verification_info;
+      pg_assert(removed_locals_len < UINT8_MAX);
+      removed_locals[removed_locals_len++] = variable->verification_info;
+    }
   }
 
   pg_assert(!(removed_locals_len > 0 && added_locals_len > 0));
@@ -4852,7 +4961,8 @@ static void stack_map_add_frame(const cg_frame_t *frame,
   } else if (diff_stack == 0 && removed_locals_len == 1 && offset_delta <= 3) {
     pg_assert(0 && "todo"); // chop_frame
   } else {
-    pg_assert(0 && "todo");
+    stack_map_add_full_frame(stack_map_frames, frame, current_offset,
+                             offset_delta, arena);
   }
 
   cg_frame_t *const frame_clone = cg_frame_clone(frame, arena);
