@@ -4330,13 +4330,13 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const u32 expression_node = par_parse_as_expression(parser, arena);
+  const u32 node_i = par_parse_as_expression(parser, arena);
   if (!par_match_token(parser, TOKEN_KIND_STAR))
-    return expression_node;
+    return node_i;
 
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
-      .lhs = expression_node,
+      .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
       .rhs = par_parse_multiplicative_expression(parser, arena),
   };
@@ -4353,14 +4353,13 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const u32 expression_node =
-      par_parse_multiplicative_expression(parser, arena);
+  const u32 node_i = par_parse_multiplicative_expression(parser, arena);
   if (!par_match_token(parser, TOKEN_KIND_PLUS))
-    return expression_node;
+    return node_i;
 
   const par_ast_node_t node = {
       .kind = AST_KIND_BINARY,
-      .lhs = expression_node,
+      .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
       .rhs = par_parse_additive_expression(parser, arena),
   };
@@ -4451,7 +4450,17 @@ static u32 par_parse_equality(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return par_parse_comparison(parser, arena);
+  const u32 node_i = par_parse_comparison(parser, arena);
+  if (!par_match_token(parser, TOKEN_KIND_EQUAL_EQUAL))
+    return node_i;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = node_i,
+      .main_token_i = parser->tokens_i - 1,
+      .rhs = par_parse_equality(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
 }
 
 // conjunction:
@@ -4818,9 +4827,9 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -4831,7 +4840,14 @@ static u32 ty_resolve_types(par_parser_t *parser,
       par_error(parser, token, error.value);
     }
 
-    return node->type_i;
+    switch (token.kind) {
+    case TOKEN_KIND_EQUAL_EQUAL: {
+      pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
+      return node->type_i = pg_array_last_index(parser->types);
+    }
+    default:
+      return node->type_i;
+    }
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -5041,7 +5057,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
 static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
                                  cf_class_file_t *class_file, u32 node_i,
-                                 arena_t *arena) {
+                                 u8 conditional_jump_opcode, arena_t *arena) {
   // clang-format off
   //
   //               IF 
@@ -5085,7 +5101,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
   const u16 jump_conditionally_from_i = cf_asm_jump_conditionally(
-      &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
+      &gen->code->code, gen->frame, conditional_jump_opcode, arena);
 
   pg_assert(node->rhs > 0);
   const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
@@ -5147,6 +5163,58 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     stack_map_add_frame(gen->first_method_frame, frame_after_then,
                         &gen->stack_map_frames, jump_to_i, arena);
   }
+}
+
+static void
+cg_emit_synthetic_if_then_else(cg_generator_t *gen, par_parser_t *parser,
+                               cf_class_file_t *class_file, u32 node_i,
+                               u8 conditional_jump_opcode, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(parser != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const par_ast_node_t *const node = &parser->nodes[node_i];
+  pg_assert(node->lhs < pg_array_len(parser->nodes));
+
+  const par_ast_node_t true_node = {
+      .kind = AST_KIND_BOOL,
+      .lhs = true,
+  };
+  const u32 true_node_i = par_add_node(parser, &true_node, arena);
+
+  const par_ast_node_t false_node = {
+      .kind = AST_KIND_BOOL,
+      .lhs = false,
+  };
+  const u32 false_node_i = par_add_node(parser, &false_node, arena);
+
+  const par_ast_node_t binary_node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = true_node_i,
+      .rhs = false_node_i,
+      .main_token_i = node->main_token_i,
+  };
+  const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
+
+  const par_ast_node_t if_node = {
+      .kind = AST_KIND_IF,
+      .lhs = node->lhs,
+      .rhs = binary_node_i,
+  };
+  const u32 if_node_i = par_add_node(parser, &if_node, arena);
+
+  ty_resolve_types(parser, class_file, if_node_i, arena);
+
+  cg_emit_if_then_else(gen, parser, class_file, if_node_i,
+                       conditional_jump_opcode, arena);
+
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 }
 
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
@@ -5384,58 +5452,16 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_UNARY: {
-    pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->locals != NULL);
-    pg_assert(gen->frame->stack != NULL);
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
-    pg_assert(node->lhs < pg_array_len(parser->nodes));
-
-    const u16 stack_before = pg_array_len(gen->frame->stack);
-
-    const par_ast_node_t true_node = {
-        .kind = AST_KIND_BOOL,
-        .lhs = true,
-    };
-    const u32 true_node_i = par_add_node(parser, &true_node, arena);
-
-    const par_ast_node_t false_node = {
-        .kind = AST_KIND_BOOL,
-        .lhs = false,
-    };
-    const u32 false_node_i = par_add_node(parser, &false_node, arena);
-
-    const par_ast_node_t binary_node = {
-        .kind = AST_KIND_BINARY,
-        .rhs = true_node_i,
-        .lhs = false_node_i,
-        .main_token_i = node->main_token_i,
-    };
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
-    const bool is_not = token.kind == TOKEN_KIND_NOT;
-    if (!is_not)
-      pg_assert(0 && "todo");
-
-    const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
-
-    const par_ast_node_t if_node = {
-        .kind = AST_KIND_IF,
-        .lhs = node->lhs,
-        .rhs = binary_node_i,
-    };
-    const u32 if_node_i = par_add_node(parser, &if_node, arena);
-
-    ty_resolve_types(parser, class_file, if_node_i, arena);
-
-    cg_emit_node(gen, parser, class_file, if_node_i, arena);
-
-    pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->locals != NULL);
-    pg_assert(gen->frame->stack != NULL);
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-
-    const u16 stack_after = pg_array_len(gen->frame->stack);
-    pg_assert(stack_after == stack_before + 1); // TODO: Is it always +1?
+    switch (token.kind) {
+    case TOKEN_KIND_NOT:
+      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
+                                     BYTECODE_IFNE, arena);
+      break;
+    default:
+      pg_assert(0 && "unimplemented");
+    }
     break;
   }
   case AST_KIND_BINARY: {
@@ -5461,6 +5487,19 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_imul(&gen->code->code, gen->frame, arena);
       break;
+    case TOKEN_KIND_EQUAL_EQUAL:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
+                                     BYTECODE_IFEQ, arena);
+      break;
+    case TOKEN_KIND_NOT_EQUAL:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
+                                     BYTECODE_IFNE, arena);
+      break;
+
     case TOKEN_KIND_EQUAL:
       pg_assert(node->lhs > 0);
       const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
@@ -5542,7 +5581,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_IF: {
-    cg_emit_if_then_else(gen, parser, class_file, node_i, arena);
+    cg_emit_if_then_else(gen, parser, class_file, node_i, BYTECODE_IFEQ, arena);
     break;
   }
   case AST_KIND_MAX:
