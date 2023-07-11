@@ -570,7 +570,8 @@ typedef struct {
   // Remove!
   u8 offset_delta;
   u16 pc;
-  pg_pad(4);
+  bool tombstone;
+  pg_pad(3);
   cg_frame_t *frame; // Immutable clone of the frame when the stack map
                      // frame was created.
   // TODO: Pretty sure we can remove those two and just use the `frame` locals
@@ -5227,9 +5228,7 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
     cg_frame_t *const frame = stack_map_frame->frame;
 
     const cg_frame_t *const previous_frame =
-        pg_array_len(stack_map_frames) > 0
-            ? pg_array_last(stack_map_frames)->frame
-            : first_method_frame;
+        i > 0 ? stack_map_frames[i - 1].frame : first_method_frame;
     const i32 diff_stack =
         pg_array_len(frame->stack) - pg_array_len(previous_frame->stack);
 
@@ -5237,7 +5236,15 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
         pg_array_len(frame->locals) - pg_array_len(previous_frame->locals);
 
     i32 offset_delta =
-        stack_map_offset_delta_from_last(stack_map_frames, stack_map_frame->pc);
+        i == 0 ? stack_map_frame->pc
+               : (stack_map_frame->pc - stack_map_frames[i - 1].pc - 1);
+
+    if (offset_delta ==
+        -1) // Duplicate jump target, already has a valid stack map frame, skip.
+    {
+      stack_map_frame->tombstone = true;
+      continue;
+    }
 
     pg_assert(offset_delta >= 0);
     pg_assert(offset_delta <= UINT16_MAX);
@@ -5537,9 +5544,11 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_init_reserve(attribute_stack_map_frames.v.stack_map_table,
                           pg_array_len(gen->stack_map_frames), arena);
 
-    for (u64 i = 0; i < pg_array_len(gen->stack_map_frames); i++)
+    for (u64 i = 0; i < pg_array_len(gen->stack_map_frames); i++) {
+      if(!gen->stack_map_frames[i].tombstone)
       pg_array_append(attribute_stack_map_frames.v.stack_map_table,
                       gen->stack_map_frames[i], arena);
+    }
 
     pg_array_append(code.attributes, attribute_stack_map_frames, arena);
 
