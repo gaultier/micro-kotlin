@@ -544,6 +544,12 @@ typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_NULL = 6,
   VERIFICATION_INFO_OBJECT = 7,
   VERIFICATION_INFO_UNINITIALIZED = 8,
+} cf_verification_info_kind_t;
+
+typedef struct {
+  cf_verification_info_kind_t kind;
+  pg_pad(1);
+  u16 extra_data;
 } cf_verification_info_t;
 
 typedef struct {
@@ -551,7 +557,6 @@ typedef struct {
   u32 type_i;
   u32 scope_depth;
   cf_verification_info_t verification_info;
-  pg_pad(3);
 } cf_variable_t;
 
 struct cg_frame_t;
@@ -656,8 +661,8 @@ static void stack_map_add_same_frame(cf_stack_map_frame_t **stack_map_frames,
       stack_map_frame.offset_absolute, pg_array_len(*stack_map_frames));
 }
 
-static cf_verification_info_t
-cf_type_kind_to_verification_info(cf_type_kind_t kind) {
+static cf_verification_info_kind_t
+cf_type_kind_to_verification_info_kind(cf_type_kind_t kind) {
   switch (kind) {
   case TYPE_BYTE:
   case TYPE_BOOL:
@@ -705,9 +710,11 @@ static void stack_map_add_full_frame(cf_stack_map_frame_t **stack_map_frames,
 
   pg_array_init_reserve(stack_map_frame.stack, pg_array_len(frame->stack),
                         arena);
-  for (u64 i = 0; i < pg_array_len(frame->stack); i++)
-    pg_array_append(stack_map_frame.stack,
-                    cf_type_kind_to_verification_info(frame->stack[i]), arena);
+  for (u64 i = 0; i < pg_array_len(frame->stack); i++) {
+    cf_verification_info_t verification_info = {
+        .kind = cf_type_kind_to_verification_info_kind(frame->stack[i])};
+    pg_array_append(stack_map_frame.stack, verification_info, arena);
+  }
 
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
   LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
@@ -786,7 +793,7 @@ static void stack_map_add_same_locals_1_stack_item_frame(
 }
 
 static u16 cf_verification_info_size(cf_verification_info_t verification_info) {
-  switch (verification_info) {
+  switch (verification_info.kind) {
   case VERIFICATION_INFO_TOP:
   case VERIFICATION_INFO_INT:
   case VERIFICATION_INFO_FLOAT:
@@ -2467,9 +2474,9 @@ static void cf_write_fields(const cf_class_file_t *class_file, FILE *file) {
 
 static u32
 cf_compute_verification_info_size(cf_verification_info_t verification_info) {
-  pg_assert(verification_info <= 8);
+  pg_assert(verification_info.kind <= 8);
 
-  return verification_info < 7 ? sizeof(u8) : sizeof(u8) + sizeof(u16);
+  return verification_info.kind < 7 ? sizeof(u8) : sizeof(u8) + sizeof(u16);
 }
 
 static u32 cf_compute_verification_infos_size(
@@ -2614,10 +2621,10 @@ static void
 cf_write_verification_info(FILE *file,
                            cf_verification_info_t verification_info) {
   pg_assert(file != NULL);
-  pg_assert(verification_info <= 8);
+  pg_assert(verification_info.kind <= 8);
 
-  if (verification_info < 7) {
-    file_write_u8(file, verification_info);
+  if (verification_info.kind < 7) {
+    file_write_u8(file, verification_info.kind);
   } else {
     pg_assert(0 && "todo");
   }
@@ -4950,10 +4957,13 @@ static void stack_map_add_frame(const cg_frame_t *frame,
   } else if (diff_stack == 0 && added_locals_len == 0 && offset_delta > 63) {
     pg_assert(0 && "todo"); // same_frame_extended
   } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
+    cf_verification_info_t verification_info = {
+        .kind = cf_type_kind_to_verification_info_kind(
+            *pg_array_last(frame->stack)),
+    };
     stack_map_add_same_locals_1_stack_item_frame(
-        stack_map_frames,
-        cf_type_kind_to_verification_info(*pg_array_last(frame->stack)),
-        current_offset, offset_delta, arena);
+        stack_map_frames, verification_info, current_offset, offset_delta,
+        arena);
   } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
     pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
   } else if (diff_stack == 0 && added_locals_len == 1 && offset_delta <= 3) {
@@ -5297,10 +5307,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
     cg_frame_init(gen->frame, arena);
 
+    cf_verification_info_t verification_info = {
+        .kind = VERIFICATION_INFO_OBJECT,
+        .extra_data = 0, // FIXME
+    };
     const cf_variable_t arg0 = {
         .type_i = main_argument_types_i,
         .scope_depth = gen->frame->scope_depth,
-        .verification_info = VERIFICATION_INFO_OBJECT,
+        .verification_info = verification_info,
     };
     pg_array_append(gen->frame->locals, arg0, arena);
     gen->frame->max_locals = pg_array_len(gen->frame->locals);
@@ -5468,12 +5482,16 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
+    cf_verification_info_t verification_info = {
+        .kind = cf_type_kind_to_verification_info_kind(
+            parser->types[node->type_i].kind),
+    };
+
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
-        .verification_info =
-            cf_type_kind_to_verification_info(parser->types[node->type_i].kind),
+        .verification_info = verification_info,
     };
     pg_array_append(gen->frame->locals, variable, arena);
     pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
