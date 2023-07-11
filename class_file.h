@@ -5159,10 +5159,6 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_frame_t *const frame_before_else =
       cg_frame_clone(frame_before_then_else, arena);
 
-  // Add a nop to ensure the `<else branch>` has at least one instruction, so
-  // that the corresponding, second, stack map frame can be unconditionally
-  // emitted with an offset delta >= 1.
-  cf_asm_nop(&gen->code->code, arena);
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   pg_assert(pg_array_len(frame_after_then->stack) ==
             pg_array_len(gen->frame->stack));
@@ -5545,9 +5541,9 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                           pg_array_len(gen->stack_map_frames), arena);
 
     for (u64 i = 0; i < pg_array_len(gen->stack_map_frames); i++) {
-      if(!gen->stack_map_frames[i].tombstone)
-      pg_array_append(attribute_stack_map_frames.v.stack_map_table,
-                      gen->stack_map_frames[i], arena);
+      if (!gen->stack_map_frames[i].tombstone)
+        pg_array_append(attribute_stack_map_frames.v.stack_map_table,
+                        gen->stack_map_frames[i], arena);
     }
 
     pg_array_append(code.attributes, attribute_stack_map_frames, arena);
