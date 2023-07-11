@@ -716,7 +716,7 @@ static void stack_map_add_full_frame(cf_stack_map_frame_t **stack_map_frames,
   }
 
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
-  LOG("fact='add same frame' current_offset=%hu offset_delta=%hu kind=%hu "
+  LOG("fact='add full frame' current_offset=%hu offset_delta=%hu kind=%hu "
       "offset_absolute=%u len=%lu",
       current_offset, offset_delta, stack_map_frame.kind,
       stack_map_frame.offset_absolute, pg_array_len(*stack_map_frames));
@@ -789,6 +789,9 @@ static void stack_map_add_same_locals_1_stack_item_frame(
   pg_assert(stack_map_frame.kind >= 64);
   pg_assert(stack_map_frame.kind <= 127);
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
+
+  LOG("fact=stack_map_add_same_locals_1_stack_item_frame pc=%u",
+      current_offset);
 }
 
 static u16 cf_verification_info_size(cf_verification_info_t verification_info) {
@@ -1633,6 +1636,7 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
   const u16 len = buf_read_be_u16(buf, buf_len, current);
   cf_stack_map_frame_t *stack_map_frames = NULL;
   pg_array_init_reserve(stack_map_frames, len, arena);
+      LOG("fact=new stack map frame attribute count=%hu", len);
 
   for (u16 i = 0; i < len; i++) {
     cf_stack_map_frame_t stack_map_frame = {
@@ -1642,11 +1646,17 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
     if (stack_map_frame.kind <= 63) // same_frame
     {
       stack_map_frame.offset_delta = stack_map_frame.kind;
+      LOG("fact=new stack map frame kind=same_frame offset_delta=%hu",
+          stack_map_frame.offset_delta);
     } else if (64 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 127) { // same_locals_1_stack_item_frame
       stack_map_frame.offset_delta = stack_map_frame.kind - 64;
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
+
+      LOG("fact=new stack map frame kind=same_locals_1_stack_item_frame "
+          "offset_delta=%hu",
+          stack_map_frame.offset_delta);
 
     } else if (128 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 246) { // reserved
@@ -1657,18 +1667,32 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
+      LOG("fact=new stack map frame "
+          "kind=same_locals_1_stack_item_frame_extended "
+          "offset_delta=%hu",
+          stack_map_frame.offset_delta);
+
     } else if (248 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 250) { // chop_frame
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
+      LOG("fact=new stack map frame kind=chop_frame offset_delta=%hu",
+          stack_map_frame.offset_delta);
+
     } else if (251 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 251) { // same_frame_extended
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
+      LOG("fact=new stack map frame kind=same_frame_extended offset_delta=%hu",
+          stack_map_frame.offset_delta);
+
     } else if (252 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 254) { // append_frame
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       const u16 verification_info_count = stack_map_frame.kind - 251;
       cf_buf_read_stack_map_table_attribute_verification_infos(
           buf, buf_len, current, verification_info_count);
+      LOG("fact=new stack map frame kind=append_frame offset_delta=%hu",
+          stack_map_frame.offset_delta);
+
     } else { // full_frame_attribute
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       const u16 locals_count = buf_read_be_u16(buf, buf_len, current);
@@ -1677,6 +1701,8 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       const u16 stack_items_count = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(
           buf, buf_len, current, stack_items_count);
+      LOG("fact=new stack map frame kind=full_frame offset_delta=%hu",
+          stack_map_frame.offset_delta);
     }
     pg_array_append(stack_map_frames, stack_map_frame, arena);
   }
@@ -1865,8 +1891,6 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
   pg_assert(read_bytes == attribute_len);
 }
 
-// FIXME: each function call here should take the `attributes` argument and
-// push to it!
 static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
                                   cf_attribute_t **attributes, arena_t *arena) {
