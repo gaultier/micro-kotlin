@@ -1117,7 +1117,6 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
   pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) > 0);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
   cf_code_array_push_u8(code, jump_opcode, arena);
@@ -1125,7 +1124,18 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1, arena);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2, arena);
 
-  pg_array_drop_last_n(frame->stack, 2);
+  switch (jump_opcode) {
+  case BYTECODE_IF_ICMPEQ:
+  case BYTECODE_IF_ICMPNE:
+    pg_array_drop_last_n(frame->stack, 2);
+    break;
+  case BYTECODE_IFEQ:
+  case BYTECODE_IFNE:
+    pg_array_drop_last_n(frame->stack, 1);
+    break;
+  default:
+    pg_assert(0 && "unreachable/unimplemented");
+  }
 
   return jump_from_i;
 }
