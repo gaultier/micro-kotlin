@@ -3137,17 +3137,6 @@ static u8 lex_peek(const char *buf, u32 buf_len, const char *const *current) {
   return lex_is_at_end(buf, buf_len, current) ? 0 : **current;
 }
 
-static u8 lex_peek_next(const char *buf, u32 buf_len,
-                        const char *const *current) {
-  pg_assert(buf != NULL);
-  pg_assert(buf_len > 0);
-  pg_assert(current != NULL);
-  pg_assert(*current != NULL);
-
-  const char *const next = *current + 1;
-  return lex_is_at_end(buf, buf_len, &next) ? 0 : *next;
-}
-
 static u8 lex_advance(const char *buf, u32 buf_len, const char **current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -3159,6 +3148,20 @@ static u8 lex_advance(const char *buf, u32 buf_len, const char **current) {
   *current += 1;
 
   return lex_is_at_end(buf, buf_len, current) ? 0 : c;
+}
+
+static bool lex_match(const char *buf, u32 buf_len, const char **current,
+                      u8 c) {
+  pg_assert(buf != NULL);
+  pg_assert(buf_len > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  if (lex_peek(buf, buf_len, current) == c) {
+    lex_advance(buf, buf_len, current);
+    return true;
+  }
+  return false;
 }
 
 static bool lex_is_digit(const char *buf, u32 buf_len,
@@ -3408,22 +3411,14 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       break;
     }
     case '!': {
-      if (lex_peek_next(buf, buf_len, current) == '=') {
-        const lex_token_t token = {
-            .kind = TOKEN_KIND_NOT_EQUAL,
-            .source_offset = lex_get_current_offset(buf, buf_len, current),
-        };
-        pg_array_append(lexer->tokens, token, arena);
-        lex_advance(buf, buf_len, current);
-        lex_advance(buf, buf_len, current);
-      } else {
-        const lex_token_t token = {
-            .kind = TOKEN_KIND_NOT,
-            .source_offset = lex_get_current_offset(buf, buf_len, current),
-        };
-        pg_array_append(lexer->tokens, token, arena);
-        lex_advance(buf, buf_len, current);
-      }
+      lex_advance(buf, buf_len, current);
+      const lex_token_t token = {
+          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_NOT_EQUAL
+                                                        : TOKEN_KIND_NOT,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+
       break;
     }
     case '{': {
@@ -3472,12 +3467,14 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       break;
     }
     case '=': {
+      lex_advance(buf, buf_len, current);
+
       const lex_token_t token = {
-          .kind = TOKEN_KIND_EQUAL,
+          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_EQUAL_EQUAL
+                                                        : TOKEN_KIND_EQUAL,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
       pg_array_append(lexer->tokens, token, arena);
-      lex_advance(buf, buf_len, current);
       break;
     }
     case '\n': {
