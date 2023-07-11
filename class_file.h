@@ -634,17 +634,6 @@ typedef struct {
   u16 catch_type;
 } cf_exception_t;
 
-static i32
-stack_map_offset_delta_from_last(const cf_stack_map_frame_t *stack_map_frames,
-                                 u16 current_offset) {
-  pg_assert(stack_map_frames != NULL);
-  if (pg_array_len(stack_map_frames) == 0)
-    return current_offset;
-
-  const u16 last_offset = pg_array_last(stack_map_frames)->pc;
-  return current_offset - last_offset - 1;
-}
-
 static void stack_map_fill_same_frame(cf_stack_map_frame_t *stack_map_frame,
                                       u16 offset_delta) {
 
@@ -770,21 +759,6 @@ static void stack_map_fill_same_locals_1_stack_item_frame(
 
   pg_assert(stack_map_frame->kind >= 64);
   pg_assert(stack_map_frame->kind <= 127);
-}
-
-static u16 cf_verification_info_size(cf_verification_info_t verification_info) {
-  switch (verification_info.kind) {
-  case VERIFICATION_INFO_TOP:
-  case VERIFICATION_INFO_INT:
-  case VERIFICATION_INFO_FLOAT:
-  case VERIFICATION_INFO_NULL:
-  case VERIFICATION_INFO_DOUBLE:
-  case VERIFICATION_INFO_LONG:
-    return 1;
-  case VERIFICATION_INFO_OBJECT:
-  case VERIFICATION_INFO_UNINITIALIZED:
-    return 2;
-  }
 }
 
 static u16 cf_type_kind_stack_size(cf_type_kind_t kind) {
@@ -1169,12 +1143,6 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_array_append(frame->stack, type_kind, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
-}
-
-static void cf_asm_nop(u8 **code, arena_t *arena) {
-  pg_assert(code != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_NOP, arena);
 }
 
 static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -4231,20 +4199,6 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
-// directlyAssignableExpression:
-//     (postfixUnaryExpression assignableSuffix)
-//     | simpleIdentifier
-//     | parenthesizedDirectlyAssignableExpression
-static u32 par_parse_directly_assignable_expression(par_parser_t *parser,
-                                                    arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(arena != NULL);
-
-  if (par_peek_token(parser).kind == TOKEN_KIND_IDENTIFIER)
-    return par_parse_primary_expression(parser, arena);
-
-  return par_parse_postfix_unary_expression(parser, arena);
-}
 
 static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
   pg_assert(parser != NULL);
@@ -5269,57 +5223,6 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
       stack_map_fill_full_frame(stack_map_frame, offset_delta, arena);
     }
   }
-}
-
-static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
-                                           par_parser_t *parser,
-                                           cf_class_file_t *class_file,
-                                           u32 condition_node_i,
-                                           arena_t *arena) {
-  pg_assert(gen != NULL);
-  pg_assert(parser != NULL);
-  pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-
-  pg_assert(condition_node_i < pg_array_len(parser->nodes));
-  const par_ast_node_t *const condition_node = &parser->nodes[condition_node_i];
-
-  const par_ast_node_t true_node = {
-      .kind = AST_KIND_BOOL,
-      .lhs = true,
-  };
-  const u32 true_node_i = par_add_node(parser, &true_node, arena);
-
-  const par_ast_node_t false_node = {
-      .kind = AST_KIND_BOOL,
-      .lhs = false,
-  };
-  const u32 false_node_i = par_add_node(parser, &false_node, arena);
-
-  const par_ast_node_t binary_node = {
-      .kind = AST_KIND_BINARY,
-      .lhs = true_node_i,
-      .rhs = false_node_i,
-  };
-  const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
-
-  const par_ast_node_t if_node = {
-      .kind = AST_KIND_IF,
-      .lhs = condition_node->lhs,
-      .rhs = binary_node_i,
-  };
-  const u32 if_node_i = par_add_node(parser, &if_node, arena);
-
-  ty_resolve_types(parser, class_file, if_node_i, arena);
-
-  cg_emit_if_then_else(gen, parser, class_file, if_node_i, arena);
-
-  pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 }
 
 static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
