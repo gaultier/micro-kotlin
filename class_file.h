@@ -521,6 +521,8 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IXOR = 0x82,
   BYTECODE_IFEQ = 0x99,
   BYTECODE_IFNE = 0x9a,
+  BYTECODE_IF_ICMPEQ = 0x9f,
+  BYTECODE_IF_ICMPNE = 0xa0,
   BYTECODE_GOTO = 0xa7,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
   BYTECODE_IMPDEP1 = 0xfe,
@@ -1117,14 +1119,13 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) > 0);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(*pg_array_last(frame->stack) == TYPE_BOOL);
 
   cf_code_array_push_u8(code, jump_opcode, arena);
   const u16 jump_from_i = pg_array_len(*code);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP1, arena);
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2, arena);
 
-  pg_array_drop_last(frame->stack);
+  pg_array_drop_last_n(frame->stack, 2);
 
   return jump_from_i;
 }
@@ -5545,12 +5546,12 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IFEQ;
+      return BYTECODE_IF_ICMPNE;
       break;
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IFNE;
+      return BYTECODE_IF_ICMPEQ;
       break;
 
     case TOKEN_KIND_EQUAL:
