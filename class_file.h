@@ -3477,6 +3477,28 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       pg_array_append(lexer->tokens, token, arena);
       break;
     }
+    case '<': {
+      lex_advance(buf, buf_len, current);
+      const lex_token_t token = {
+          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_LE
+                                                        : TOKEN_KIND_LT,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+
+      break;
+    }
+    case '>': {
+      lex_advance(buf, buf_len, current);
+      const lex_token_t token = {
+          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_GE
+                                                        : TOKEN_KIND_GT,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+
+      break;
+    }
     case '\n': {
       lex_advance(buf, buf_len, current);
 
