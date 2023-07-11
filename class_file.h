@@ -1636,7 +1636,7 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
   const u16 len = buf_read_be_u16(buf, buf_len, current);
   cf_stack_map_frame_t *stack_map_frames = NULL;
   pg_array_init_reserve(stack_map_frames, len, arena);
-      LOG("fact=new stack map frame attribute count=%hu", len);
+  LOG("fact=new stack map frame attribute count=%hu", len);
 
   for (u16 i = 0; i < len; i++) {
     cf_stack_map_frame_t stack_map_frame = {
@@ -2603,17 +2603,25 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
       } else if (64 <= stack_map_frame->kind &&
                  stack_map_frame->kind <=
                      127) { // same_locals_1_stack_item_frame
-        size +=
+        const u32 delta =
             sizeof(u8) + cf_compute_verification_infos_size(stack_map_frame);
+        pg_assert(delta >= 2);
+        pg_assert(delta <= 3);
 
+        size += delta;
       } else if (128 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 246) { // reserved
         pg_assert(0 && "unreachable");
       } else if (247 <= stack_map_frame->kind &&
                  stack_map_frame->kind <=
                      247) { // same_locals_1_stack_item_frame_extended
-        size += sizeof(u8) + sizeof(u16) +
-                cf_compute_verification_infos_size(stack_map_frame);
+        const u32 delta = sizeof(u8) + sizeof(u16) +
+                          cf_compute_verification_infos_size(stack_map_frame);
+        pg_assert(delta >= 4);
+        pg_assert(delta <= 5);
+
+        size += delta;
+
       } else if (248 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 250) { // chop_frame
         size += sizeof(u8) + sizeof(u16);
@@ -2622,8 +2630,13 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
         size += sizeof(u8) + sizeof(u16);
       } else if (252 <= stack_map_frame->kind &&
                  stack_map_frame->kind <= 254) { // append_frame
-        size += sizeof(u8) + sizeof(u16) +
-                cf_compute_verification_infos_size(stack_map_frame);
+        const u32 delta = sizeof(u8) + sizeof(u16) +
+                          cf_compute_verification_infos_size(stack_map_frame);
+
+        pg_assert(delta >= 4);
+        pg_assert(delta <= 9);
+
+        size += delta;
       } else { // full_frame
         size += sizeof(u8) + 3 * sizeof(u16) +
                 cf_compute_verification_infos_size(stack_map_frame);
