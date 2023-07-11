@@ -4820,10 +4820,8 @@ static void stack_map_add_frame(const cg_frame_t *first_method_frame,
   }
   // TODO: removed_locals?
 
-  i32 offset_delta =
-      current_offset - pg_array_last(*stack_map_frames)->offset_absolute;
-  if (!is_first_frame)
-    offset_delta -= 1;
+ 
+  i32 offset_delta = stack_map_offset_delta_from_last(*stack_map_frames, current_offset);
 
   pg_assert(offset_delta >= 0);
   pg_assert(offset_delta <= UINT16_MAX);
@@ -5169,6 +5167,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = &code;
     gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
     cg_frame_init(gen->frame, arena);
+
     const cf_variable_t arg0 = {
         .type_i = main_argument_types_i,
         .scope_depth = gen->frame->scope_depth,
@@ -5176,6 +5175,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     };
     pg_array_append(gen->frame->locals, arg0, arena);
     gen->frame->max_locals = pg_array_len(gen->frame->locals);
+
+    gen->first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
     // TODO: Handle `lhs`.
@@ -5323,7 +5324,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
-
 
     cg_end_scope(gen);
     break;
