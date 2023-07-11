@@ -596,7 +596,6 @@ struct cg_frame_t {
   u32 scope_depth;
   cf_variable_t *locals;
   cf_type_kind_t *stack;
-  const struct cg_frame_t *previous_frame;
 };
 
 struct par_type_t;
@@ -1007,8 +1006,6 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
 
   pg_assert(pg_array_len(dst->locals) == pg_array_len(src->locals));
   pg_assert(pg_array_len(dst->stack) == pg_array_len(src->stack));
-
-  dst->previous_frame = src->previous_frame;
 
   return dst;
 }
@@ -4906,22 +4903,26 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
-static void stack_map_add_frame(const cg_frame_t *frame,
+static void stack_map_add_frame(const cg_frame_t *first_method_frame,
+                                const cg_frame_t *frame,
                                 cf_stack_map_frame_t **stack_map_frames,
                                 u16 current_offset, arena_t *arena) {
   pg_assert(frame != NULL);
-  pg_assert(frame->previous_frame != NULL);
   pg_assert(arena != NULL);
 
+  const cg_frame_t *const previous_frame =
+      pg_array_len(*stack_map_frames) > 0
+          ? pg_array_last(*stack_map_frames)->frame
+          : first_method_frame;
   const i32 diff_stack =
-      pg_array_len(frame->stack) - pg_array_len(frame->previous_frame->stack);
+      pg_array_len(frame->stack) - pg_array_len(previous_frame->stack);
   pg_assert(diff_stack >= 0); // Not sure?
 
   u8 added_locals_len = 0;
   cf_verification_info_t added_locals[256] = {0};
   {
     for (i64 i = pg_array_len(frame->locals) - 1;
-         i >= (i64)pg_array_len(frame->previous_frame->locals); i--) {
+         i >= (i64)pg_array_len(previous_frame->locals); i--) {
       const cf_variable_t *const variable = &frame->locals[i];
       pg_assert(variable->scope_depth == frame->scope_depth);
 
@@ -4933,7 +4934,7 @@ static void stack_map_add_frame(const cg_frame_t *frame,
   u8 removed_locals_len = 0;
   cf_verification_info_t removed_locals[256] = {0};
   {
-    for (i64 i = pg_array_len(frame->previous_frame->locals) - 1;
+    for (i64 i = pg_array_len(previous_frame->locals) - 1;
          i >= (i64)pg_array_len(frame->locals); i--) {
       const cf_variable_t *const variable = &frame->locals[i];
       pg_assert(variable->scope_depth == frame->scope_depth);
@@ -5093,11 +5094,9 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // Emit `else` branch.
   // Restore the frame as if the `then` branch never executed.
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
-  gen->frame->previous_frame = frame_before_then_else;
 
   cg_frame_t *const frame_before_else =
       cg_frame_clone(frame_before_then_else, arena);
-  frame_before_else->previous_frame = frame_before_then_else;
 
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   // Add a nop to ensure the `<else branch>` has at least one instruction, so
@@ -5121,7 +5120,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    stack_map_add_frame(frame_before_else, &gen->stack_map_frames,
+    stack_map_add_frame(gen->first_method_frame, frame_before_else, &gen->stack_map_frames,
                         jump_from_i + 2, arena);
   }
   // Patch second, unconditional, jump.
@@ -5132,7 +5131,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
     // This stack map frame covers the unconditional jump, i.e. the `then`
     // branch.
-    stack_map_add_frame(frame_after_then, &gen->stack_map_frames, jump_to_i,
+    stack_map_add_frame(gen->first_method_frame, frame_after_then, &gen->stack_map_frames, jump_to_i,
                         arena);
   }
 }
@@ -5320,7 +5319,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->frame->max_locals = pg_array_len(gen->frame->locals);
 
     gen->first_method_frame = cg_frame_clone(gen->frame, arena);
-    gen->frame->previous_frame = gen->first_method_frame;
 
     // `lhs` is the arguments, `rhs` is the body.
     // TODO: Handle `lhs`.
