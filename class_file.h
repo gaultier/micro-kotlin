@@ -4935,33 +4935,8 @@ static void stack_map_add_frame(const cg_frame_t *first_method_frame,
   const i32 diff_stack =
       pg_array_len(frame->stack) - pg_array_len(previous_frame->stack);
 
-  u8 added_locals_len = 0;
-  cf_verification_info_t added_locals[256] = {0};
-  {
-    for (i64 i = pg_array_len(frame->locals) - 1;
-         i >= (i64)pg_array_len(previous_frame->locals); i--) {
-      const cf_variable_t *const variable = &frame->locals[i];
-      pg_assert(variable->scope_depth == frame->scope_depth);
-
-      pg_assert(added_locals_len < UINT8_MAX);
-      added_locals[added_locals_len++] = variable->verification_info;
-    }
-  }
-
-  u8 removed_locals_len = 0;
-  cf_verification_info_t removed_locals[256] = {0};
-  {
-    for (i64 i = pg_array_len(previous_frame->locals) - 1;
-         i >= (i64)pg_array_len(frame->locals); i--) {
-      const cf_variable_t *const variable = &frame->locals[i];
-      pg_assert(variable->scope_depth == frame->scope_depth);
-
-      pg_assert(removed_locals_len < UINT8_MAX);
-      removed_locals[removed_locals_len++] = variable->verification_info;
-    }
-  }
-
-  pg_assert(!(removed_locals_len > 0 && added_locals_len > 0));
+  i16 locals_delta =
+      pg_array_len(frame->locals) - pg_array_len(previous_frame->locals);
 
   i32 offset_delta =
       stack_map_offset_delta_from_last(*stack_map_frames, current_offset);
@@ -4969,12 +4944,12 @@ static void stack_map_add_frame(const cg_frame_t *first_method_frame,
   pg_assert(offset_delta >= 0);
   pg_assert(offset_delta <= UINT16_MAX);
 
-  if (diff_stack == 0 && added_locals_len == 0 && offset_delta <= 63) {
+  if (diff_stack == 0 && locals_delta == 0 && offset_delta <= 63) {
     stack_map_add_same_frame(stack_map_frames, current_offset, offset_delta,
                              arena);
-  } else if (diff_stack == 0 && added_locals_len == 0 && offset_delta > 63) {
+  } else if (diff_stack == 0 && locals_delta == 0 && offset_delta > 63) {
     pg_assert(0 && "todo"); // same_frame_extended
-  } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
+  } else if (diff_stack == 1 && locals_delta == 0 && offset_delta <= 63) {
     cf_verification_info_t verification_info = {
         .kind = cf_type_kind_to_verification_info_kind(
             *pg_array_last(frame->stack)),
@@ -4982,11 +4957,13 @@ static void stack_map_add_frame(const cg_frame_t *first_method_frame,
     stack_map_add_same_locals_1_stack_item_frame(
         stack_map_frames, verification_info, current_offset, offset_delta,
         arena);
-  } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
+  } else if (diff_stack == 1 && locals_delta == 0 && offset_delta <= 63) {
     pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
-  } else if (diff_stack == 0 && added_locals_len == 1 && offset_delta <= 3) {
+  } else if (diff_stack == 0 && locals_delta == 1 && offset_delta <= 3) {
     pg_assert(0 && "todo"); // append_frame
-  } else if (diff_stack == 0 && removed_locals_len == 1 && offset_delta <= 3) {
+  } else if (diff_stack == 0 &&
+             (locals_delta == -1 || locals_delta == -2 || locals_delta == -3) &&
+             offset_delta <= 3) {
     pg_assert(0 && "todo"); // chop_frame
   } else {
     stack_map_add_full_frame(stack_map_frames, frame, current_offset,
