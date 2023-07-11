@@ -3426,13 +3426,20 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     }
     case '!': {
       lex_advance(buf, buf_len, current);
-      const lex_token_t token = {
-          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_NOT_EQUAL
-                                                        : TOKEN_KIND_NOT,
-          .source_offset = lex_get_current_offset(buf, buf_len, current),
-      };
-      pg_array_append(lexer->tokens, token, arena);
 
+      if (lex_match(buf, buf_len, current, '=')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_NOT_EQUAL,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_EQUAL,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
       break;
     }
     case '{': {
@@ -3483,34 +3490,55 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
     case '=': {
       lex_advance(buf, buf_len, current);
 
-      const lex_token_t token = {
-          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_EQUAL_EQUAL
-                                                        : TOKEN_KIND_EQUAL,
-          .source_offset = lex_get_current_offset(buf, buf_len, current),
-      };
-      pg_array_append(lexer->tokens, token, arena);
+      if (lex_match(buf, buf_len, current, '=')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_EQUAL_EQUAL,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_EQUAL,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
       break;
     }
     case '<': {
       lex_advance(buf, buf_len, current);
-      const lex_token_t token = {
-          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_LE
-                                                        : TOKEN_KIND_LT,
-          .source_offset = lex_get_current_offset(buf, buf_len, current),
-      };
-      pg_array_append(lexer->tokens, token, arena);
 
+      if (lex_match(buf, buf_len, current, '=')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_LE,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_LT,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
       break;
     }
     case '>': {
       lex_advance(buf, buf_len, current);
-      const lex_token_t token = {
-          .kind = lex_match(buf, buf_len, current, '=') ? TOKEN_KIND_GE
-                                                        : TOKEN_KIND_GT,
-          .source_offset = lex_get_current_offset(buf, buf_len, current),
-      };
-      pg_array_append(lexer->tokens, token, arena);
 
+      if (lex_match(buf, buf_len, current, '=')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_GE,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_GT,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
       break;
     }
     case '\n': {
@@ -3783,9 +3811,18 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
       parser->lexer->file_path.value, line, column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  if (node->kind != AST_KIND_BOOL) {
+  switch (node->kind) {
+  case AST_KIND_BOOL:
+    break;
+  case AST_KIND_LIST:
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+      par_ast_fprint_node(parser, node->nodes[i], file, indent + 2, arena);
+    break;
+
+  default:
     par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
     par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
+    break;
   }
 #endif
 }
@@ -4717,7 +4754,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 // TODO: Something smarter.
 // TODO: Find a better name.
 static bool ty_merge_types(const par_type_t *types, u32 lhs_i, u32 rhs_i,
-                       u32 *result_i) {
+                           u32 *result_i) {
   pg_assert(types != NULL);
   pg_assert(lhs_i < pg_array_len(types));
   pg_assert(rhs_i < pg_array_len(types));
