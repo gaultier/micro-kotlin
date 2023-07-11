@@ -4794,23 +4794,23 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
-static void stack_map_add_frame(const cg_frame_t *current_frame,
+static void stack_map_add_frame(const cg_frame_t *frame,
                                 cf_stack_map_frame_t **stack_map_frames,
                                 u16 current_offset, arena_t *arena) {
-  pg_assert(current_frame != NULL);
-  pg_assert(current_frame->previous_frame != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->previous_frame != NULL);
   pg_assert(arena != NULL);
 
-  const i32 diff_stack = pg_array_len(current_frame->stack) -
-                         pg_array_len(current_frame->previous_frame->stack);
+  const i32 diff_stack = pg_array_len(frame->stack) -
+                         pg_array_len(frame->previous_frame->stack);
   pg_assert(diff_stack >= 0); // Not sure?
 
   u8 added_locals_len = 0;
   cf_verification_info_t added_locals[256] = {0};
-  for (i64 i = pg_array_len(current_frame->locals) - 1;
-       i >= (i64)pg_array_len(current_frame->previous_frame->locals); i--) {
-    const cf_variable_t *const variable = &current_frame->locals[i];
-    pg_assert(variable->scope_depth == current_frame->scope_depth);
+  for (i64 i = pg_array_len(frame->locals) - 1;
+       i >= (i64)pg_array_len(frame->previous_frame->locals); i--) {
+    const cf_variable_t *const variable = &frame->locals[i];
+    pg_assert(variable->scope_depth == frame->scope_depth);
 
     pg_assert(added_locals_len < UINT8_MAX);
     added_locals[added_locals_len++] = variable->verification_info;
@@ -4829,13 +4829,13 @@ static void stack_map_add_frame(const cg_frame_t *current_frame,
   } else if (diff_stack == 1 && added_locals_len == 0 && offset_delta <= 63) {
     stack_map_add_same_locals_1_stack_item_frame(
         stack_map_frames,
-        cf_type_kind_to_verification_info(*pg_array_last(current_frame->stack)),
+        cf_type_kind_to_verification_info(*pg_array_last(frame->stack)),
         current_offset, offset_delta, arena);
   } else {
     pg_assert(0 && "todo");
   }
 
-  cg_frame_t *const frame_clone = cg_frame_clone(current_frame, arena);
+  cg_frame_t *const frame_clone = cg_frame_clone(frame, arena);
   pg_array_last(*stack_map_frames)->frame = frame_clone;
 }
 
@@ -4992,7 +4992,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
     // This stack map frame covers the unconditional jump, i.e. the `then`
     // branch.
-    stack_map_add_frame(frame_after_then, &gen->stack_map_frames, jump_to_i, arena);
+    stack_map_add_frame(frame_after_then, &gen->stack_map_frames, jump_to_i,
+                        arena);
   }
 }
 
