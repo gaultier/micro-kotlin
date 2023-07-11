@@ -4006,6 +4006,7 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
                                               arena_t *arena);
 static u32 par_parse_statements(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena);
+static u32 par_parse_statement(par_parser_t *parser, arena_t *arena);
 
 static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4051,6 +4052,30 @@ static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
+// controlStructureBody:
+//     block
+//     | statement
+static u32 par_parse_control_structure_body(par_parser_t *parser,
+                                            arena_t *arena) {
+  pg_assert(parser);
+  pg_assert(arena);
+
+  if (par_peek_token(parser).kind == TOKEN_KIND_LEFT_BRACE)
+    return par_parse_block(parser, arena);
+  else
+    return par_parse_statement(parser, arena);
+}
+
+//  'if'
+//  {NL}
+//  '('
+//  {NL}
+//  expression
+//  {NL}
+//  ')'
+//  {NL}
+//  (controlStructureBody | ([controlStructureBody] {NL} [';'] {NL} 'else' {NL}
+//  (controlStructureBody | ';')) | ';')
 static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4081,9 +4106,9 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t binary_node = {
       .kind = AST_KIND_BINARY,
       .main_token_i = parser->tokens_i - 1,
-      .lhs = par_parse_block(parser, arena), // Then
+      .lhs = par_parse_control_structure_body(parser, arena), // Then
       .rhs = par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)
-                 ? par_parse_block(parser, arena)
+                 ? par_parse_control_structure_body(parser, arena)
                  : 0,
   };
   const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
@@ -5191,11 +5216,11 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_frame_t *const frame_before_else =
       cg_frame_clone(frame_before_then_else, arena);
 
-  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   // Add a nop to ensure the `<else branch>` has at least one instruction, so
   // that the corresponding, second, stack map frame can be unconditionally
   // emitted with an offset delta >= 1.
   cf_asm_nop(&gen->code->code, arena);
+  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
   pg_assert(pg_array_len(frame_after_then->stack) ==
             pg_array_len(gen->frame->stack));
   gen->frame->max_stack =
