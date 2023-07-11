@@ -1204,18 +1204,32 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_array_drop_last(frame->stack);
 }
 
-static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
+                          cf_type_kind_t type_kind, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_BIPUSH, arena);
+  cf_code_array_push_u8(code, value, arena);
+
+  pg_array_append(frame->stack, type_kind, arena);
+  frame->max_stack =
+      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+}
+
+static void cf_asm_ixor(u8 **code, cg_frame_t *frame, cf_type_kind_t type_kind,
+                        arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IXOR, arena);
 
-  pg_array_drop_last(frame->stack);
+  pg_array_drop_last_n(frame->stack, 2);
+  pg_array_append(frame->stack, type_kind, arena);
 }
 
 static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -4702,7 +4716,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // TODO: Something smarter.
 // TODO: Find a better name.
-static bool ty_type_eq(const par_type_t *types, u32 lhs_i, u32 rhs_i,
+static bool ty_merge_types(const par_type_t *types, u32 lhs_i, u32 rhs_i,
                        u32 *result_i) {
   pg_assert(types != NULL);
   pg_assert(lhs_i < pg_array_len(types));
@@ -4829,7 +4843,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
-    if (!ty_type_eq(parser->types, lhs_i, rhs_i, &node->type_i)) {
+    if (!ty_merge_types(parser->types, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -5051,13 +5065,12 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   return (u32)-1;
 }
 
-static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                         cf_class_file_t *class_file, u32 node_i,
-                         arena_t *arena);
+static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                       cf_class_file_t *class_file, u32 node_i, arena_t *arena);
 
 static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
                                  cf_class_file_t *class_file, u32 node_i,
-                                 u8 conditional_jump_opcode, arena_t *arena) {
+                                 arena_t *arena) {
   // clang-format off
   //
   //               IF 
@@ -5098,7 +5111,10 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node->rhs < pg_array_len(parser->nodes));
 
   // Emit condition.
-  cg_emit_node(gen, parser, class_file, node->lhs, arena);
+  u8 conditional_jump_opcode =
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+  if (conditional_jump_opcode == 0)
+    conditional_jump_opcode = BYTECODE_IFEQ;
 
   const u16 jump_conditionally_from_i = cf_asm_jump_conditionally(
       &gen->code->code, gen->frame, conditional_jump_opcode, arena);
@@ -5165,10 +5181,11 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   }
 }
 
-static void
-cg_emit_synthetic_if_then_else(cg_generator_t *gen, par_parser_t *parser,
-                               cf_class_file_t *class_file, u32 node_i,
-                               u8 conditional_jump_opcode, arena_t *arena) {
+static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
+                                           par_parser_t *parser,
+                                           cf_class_file_t *class_file,
+                                           u32 condition_node_i,
+                                           arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(gen->frame != NULL);
@@ -5176,8 +5193,8 @@ cg_emit_synthetic_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(gen->frame->stack != NULL);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
-  const par_ast_node_t *const node = &parser->nodes[node_i];
-  pg_assert(node->lhs < pg_array_len(parser->nodes));
+  pg_assert(condition_node_i < pg_array_len(parser->nodes));
+  const par_ast_node_t *const condition_node = &parser->nodes[condition_node_i];
 
   const par_ast_node_t true_node = {
       .kind = AST_KIND_BOOL,
@@ -5195,21 +5212,19 @@ cg_emit_synthetic_if_then_else(cg_generator_t *gen, par_parser_t *parser,
       .kind = AST_KIND_BINARY,
       .lhs = true_node_i,
       .rhs = false_node_i,
-      .main_token_i = node->main_token_i,
   };
   const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
 
   const par_ast_node_t if_node = {
       .kind = AST_KIND_IF,
-      .lhs = node->lhs,
+      .lhs = condition_node->lhs,
       .rhs = binary_node_i,
   };
   const u32 if_node_i = par_add_node(parser, &if_node, arena);
 
   ty_resolve_types(parser, class_file, if_node_i, arena);
 
-  cg_emit_if_then_else(gen, parser, class_file, if_node_i,
-                       conditional_jump_opcode, arena);
+  cg_emit_if_then_else(gen, parser, class_file, if_node_i, arena);
 
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->locals != NULL);
@@ -5217,9 +5232,9 @@ cg_emit_synthetic_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 }
 
-static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                         cf_class_file_t *class_file, u32 node_i,
-                         arena_t *arena) {
+static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                       cf_class_file_t *class_file, u32 node_i,
+                       arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5231,13 +5246,13 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   if (node_i == 0)
-    return;
+    return 0;
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    return;
+    return 0;
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
@@ -5456,9 +5471,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
-                                     BYTECODE_IFNE, arena);
-      break;
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+
+      cf_asm_bipush(&gen->code->code, gen->frame, 1, TYPE_BOOL, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, TYPE_BOOL, arena);
+
+      return BYTECODE_IFEQ;
     default:
       pg_assert(0 && "unimplemented");
     }
@@ -5490,14 +5508,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
-                                     BYTECODE_IFEQ, arena);
+      return BYTECODE_IFEQ;
       break;
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, parser, class_file, node_i,
-                                     BYTECODE_IFNE, arena);
+      return BYTECODE_IFNE;
       break;
 
     case TOKEN_KIND_EQUAL:
@@ -5581,12 +5597,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_IF: {
-    cg_emit_if_then_else(gen, parser, class_file, node_i, BYTECODE_IFEQ, arena);
+    cg_emit_if_then_else(gen, parser, class_file, node_i, arena);
     break;
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
+
+  return 0;
 }
 
 static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
