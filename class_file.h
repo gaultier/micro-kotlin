@@ -5043,6 +5043,10 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
+// TODO: interleaved stack map frames are real!
+// We need to first store all of the stack map frames absolute offset locations
+// (aka: jump targets) *and then* sort them and compute all the delta data and
+// delta offsets in the right order.
 static void stack_map_add_frame(const cg_frame_t *first_method_frame,
                                 const cg_frame_t *frame,
                                 cf_stack_map_frame_t **stack_map_frames,
