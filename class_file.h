@@ -2620,10 +2620,8 @@ cf_write_verification_info(FILE *file,
   pg_assert(file != NULL);
   pg_assert(verification_info.kind <= 8);
 
-  if (verification_info.kind < 7) {
-    file_write_u8(file, verification_info.kind);
-  } else {
-    pg_assert(0 && "todo");
+  if (verification_info.kind >= 7) {
+    file_write_be_u16(file, verification_info.extra_data);
   }
 }
 
@@ -4916,7 +4914,6 @@ static void stack_map_add_frame(const cg_frame_t *first_method_frame,
           : first_method_frame;
   const i32 diff_stack =
       pg_array_len(frame->stack) - pg_array_len(previous_frame->stack);
-  pg_assert(diff_stack >= 0); // Not sure?
 
   u8 added_locals_len = 0;
   cf_verification_info_t added_locals[256] = {0};
@@ -5120,8 +5117,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)((u16)jump_offset & 0x00ff) >> 0;
 
-    stack_map_add_frame(gen->first_method_frame, frame_before_else, &gen->stack_map_frames,
-                        jump_from_i + 2, arena);
+    stack_map_add_frame(gen->first_method_frame, frame_before_else,
+                        &gen->stack_map_frames, jump_from_i + 2, arena);
   }
   // Patch second, unconditional, jump.
   {
@@ -5131,8 +5128,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
     // This stack map frame covers the unconditional jump, i.e. the `then`
     // branch.
-    stack_map_add_frame(gen->first_method_frame, frame_after_then, &gen->stack_map_frames, jump_to_i,
-                        arena);
+    stack_map_add_frame(gen->first_method_frame, frame_after_then,
+                        &gen->stack_map_frames, jump_to_i, arena);
   }
 }
 
@@ -5306,9 +5303,20 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
     cg_frame_init(gen->frame, arena);
 
+    const u16 function_args_string = cf_add_constant_cstring(
+        &class_file->constant_pool, "[Ljava/lang/String;");
+
+    const cf_constant_t functions_args_class = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {
+            .class_name = function_args_string,
+        }};
+    const u16 functions_args_class_i = cf_constant_array_push(
+        &class_file->constant_pool, &functions_args_class);
+
     cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = 0, // FIXME
+        .extra_data = functions_args_class_i,
     };
     const cf_variable_t arg0 = {
         .type_i = main_argument_types_i,
