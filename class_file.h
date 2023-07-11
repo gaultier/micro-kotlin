@@ -1636,7 +1636,6 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
   const u16 len = buf_read_be_u16(buf, buf_len, current);
   cf_stack_map_frame_t *stack_map_frames = NULL;
   pg_array_init_reserve(stack_map_frames, len, arena);
-  LOG("fact=new stack map frame attribute count=%hu", len);
 
   for (u16 i = 0; i < len; i++) {
     cf_stack_map_frame_t stack_map_frame = {
@@ -1646,17 +1645,11 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
     if (stack_map_frame.kind <= 63) // same_frame
     {
       stack_map_frame.offset_delta = stack_map_frame.kind;
-      LOG("fact=new stack map frame kind=same_frame offset_delta=%hu",
-          stack_map_frame.offset_delta);
     } else if (64 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 127) { // same_locals_1_stack_item_frame
       stack_map_frame.offset_delta = stack_map_frame.kind - 64;
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
-
-      LOG("fact=new stack map frame kind=same_locals_1_stack_item_frame "
-          "offset_delta=%hu",
-          stack_map_frame.offset_delta);
 
     } else if (128 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 246) { // reserved
@@ -1667,22 +1660,14 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(buf, buf_len,
                                                                current, 1);
-      LOG("fact=new stack map frame "
-          "kind=same_locals_1_stack_item_frame_extended "
-          "offset_delta=%hu",
-          stack_map_frame.offset_delta);
 
     } else if (248 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 250) { // chop_frame
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
-      LOG("fact=new stack map frame kind=chop_frame offset_delta=%hu",
-          stack_map_frame.offset_delta);
 
     } else if (251 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 251) { // same_frame_extended
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
-      LOG("fact=new stack map frame kind=same_frame_extended offset_delta=%hu",
-          stack_map_frame.offset_delta);
 
     } else if (252 <= stack_map_frame.kind &&
                stack_map_frame.kind <= 254) { // append_frame
@@ -1690,8 +1675,6 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       const u16 verification_info_count = stack_map_frame.kind - 251;
       cf_buf_read_stack_map_table_attribute_verification_infos(
           buf, buf_len, current, verification_info_count);
-      LOG("fact=new stack map frame kind=append_frame offset_delta=%hu",
-          stack_map_frame.offset_delta);
 
     } else { // full_frame_attribute
       stack_map_frame.offset_delta = buf_read_be_u16(buf, buf_len, current);
@@ -1701,8 +1684,6 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
       const u16 stack_items_count = buf_read_be_u16(buf, buf_len, current);
       cf_buf_read_stack_map_table_attribute_verification_infos(
           buf, buf_len, current, stack_items_count);
-      LOG("fact=new stack map frame kind=full_frame offset_delta=%hu",
-          stack_map_frame.offset_delta);
     }
     pg_array_append(stack_map_frames, stack_map_frame, arena);
   }
@@ -2656,6 +2637,8 @@ cf_write_verification_info(FILE *file,
                            cf_verification_info_t verification_info) {
   pg_assert(file != NULL);
   pg_assert(verification_info.kind <= 8);
+
+  file_write_u8(file, verification_info.kind);
 
   if (verification_info.kind >= 7) {
     file_write_be_u16(file, verification_info.extra_data);
