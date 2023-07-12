@@ -6,7 +6,7 @@
 [.] Call functions generically (no builtin) from the same class file
 [.] Call functions generically (no builtin) from other class files
 [x] Define functions
-[.] Generate stack map tables
+[x] Generate stack map tables
 [x] Use latest jvm version
 [x] Makefile/build.sh
 [x] Log memory used in arena
@@ -29,7 +29,7 @@
 [x] Logical operator !
 [x] Comparison operators <,<=,>,>=,==,!=
 [x] Logical operators (and, or)
-[ ] Control flow: While
+[.] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
 [ ] Control flow: For (?)
