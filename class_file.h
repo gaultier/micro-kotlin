@@ -2926,7 +2926,7 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
-  pg_array_init_reserve(code->code, 64, arena);
+  pg_array_init_reserve(code->code, 512, arena);
   pg_array_init_reserve(code->attributes, 4, arena);
   pg_array_init_reserve(code->exceptions, 0, arena);
 }
@@ -5599,6 +5599,9 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   if (node_i == 0)
     return 0;
 
+  if (gen->frame != NULL)
+    LOG("node_i=%u stack_len=%lu", node_i, pg_array_len(gen->frame->stack));
+
   const par_ast_node_t *const node = &parser->nodes[node_i];
 
   switch (node->kind) {
@@ -5640,6 +5643,7 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_BUILTIN_PRINTLN: {
     pg_assert(gen->out_field_ref_i > 0);
+    pg_assert(pg_array_len(gen->frame->stack) == 0);
 
     cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame,
                       arena);
@@ -5682,6 +5686,7 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cf_asm_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method,
                           arena);
+    pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
@@ -5953,8 +5958,11 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_begin_scope(gen);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++){
+    pg_assert(pg_array_len(gen->frame->stack) == 0);
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
+    pg_assert(pg_array_len(gen->frame->stack) == 0);
+    }
 
     cg_end_scope(gen);
     break;
