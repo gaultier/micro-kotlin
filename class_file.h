@@ -566,16 +566,12 @@ struct cg_frame_t;
 typedef struct cg_frame_t cg_frame_t;
 typedef struct {
   u8 kind;
-  // TODO: We do not have to memoize this field, it is redundant with `kind`.
-  // Remove!
   u8 offset_delta;
   u16 pc;
-  bool tombstone;
+  bool tombstone; // Skip in case of duplicates.
   pg_pad(3);
   cg_frame_t *frame; // Immutable clone of the frame when the stack map
                      // frame was created.
-  // TODO: Pretty sure we can remove those two and just use the `frame` locals
-  // and stack.
   cf_verification_info_t *locals;
   cf_verification_info_t *stack;
 } cf_stack_map_frame_t;
@@ -4198,7 +4194,6 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   par_declare_variable(parser, variable_name, node_i, arena);
   return node_i;
 }
-
 
 static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
   pg_assert(parser != NULL);
