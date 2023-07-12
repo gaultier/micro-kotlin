@@ -5483,9 +5483,9 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     const u16 jump_offset =
         (conditional_jump_target_absolute) - (jump_conditionally_from_i - 1);
     gen->code->code[jump_conditionally_from_i + 0] =
-        (u8)((u16)jump_offset & 0xff00) >> 8;
+        (u8)(((u16)(jump_offset & 0xff00)) >> 8);
     gen->code->code[jump_conditionally_from_i + 1] =
-        (u8)((u16)jump_offset & 0x00ff) >> 0;
+        (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
 
     stack_map_record_frame_at_pc(frame_before_else, &gen->stack_map_frames,
                                  conditional_jump_target_absolute, arena);
@@ -6019,8 +6019,13 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
     const u16 unconditional_jump =
         cf_asm_jump(&gen->code->code, gen->frame, arena);
-    gen->code->code[unconditional_jump + 0] = (u8)((u16)pc_start & 0xff00) >> 8;
-    gen->code->code[unconditional_jump + 1] = (u8)((u16)pc_start & 0x00ff) >> 0;
+
+    const i16 unconditional_jump_delta = -(unconditional_jump - 1 - pc_start);
+    gen->code->code[unconditional_jump + 0] =
+        (u8)(((u16)(unconditional_jump_delta & 0xff00)) >> 8);
+    gen->code->code[unconditional_jump + 1] =
+        (u8)(((u16)(unconditional_jump_delta & 0x00ff)) >> 0);
+
     const u16 pc_end = pg_array_len(gen->code->code);
 
     // This stack map frame covers the unconditional jump.
