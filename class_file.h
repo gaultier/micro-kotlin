@@ -525,6 +525,8 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IAND = 0x7e,
   BYTECODE_IOR = 0x80,
   BYTECODE_IXOR = 0x82,
+  BYTECODE_I2L = 0x85,
+  BYTECODE_LCMP = 0x94,
   BYTECODE_IFEQ = 0x99,
   BYTECODE_IFNE = 0x9a,
   BYTECODE_IF_ICMPEQ = 0x9f,
@@ -1193,6 +1195,19 @@ static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
             *pg_array_last(frame->stack) == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_INEG, arena);
+}
+
+static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_I2L, arena);
+
+  pg_array_drop_last(frame->stack);
+  pg_array_append(frame->stack, TYPE_LONG, arena);
+  frame->max_stack =
+      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
 
 static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
@@ -3330,7 +3345,7 @@ static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
   char *end_quote = memchr(current, '"', buf_len - start_offset);
   pg_assert(end_quote != NULL);
 
-  return end_quote - current - 1;
+  return end_quote - current ;
 }
 
 static u32 lex_identifier_length(const char *buf, u32 buf_len,
@@ -5887,12 +5902,16 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_irem(&gen->code->code, gen->frame, arena);
+      LOG("after node_i=%u stack_len=%lu", node_i,
+          pg_array_len(gen->frame->stack));
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_iand(&gen->code->code, gen->frame, arena);
+      LOG("after node_i=%u stack_len=%lu", node_i,
+          pg_array_len(gen->frame->stack));
       break;
 
     case TOKEN_KIND_PIPE_PIPE:
@@ -5903,7 +5922,20 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cf_asm_i2l(&gen->code->code, gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_i2l(&gen->code->code, gen->frame, arena);
+
+      pg_array_append(gen->code->code, BYTECODE_LCMP, arena);
+      pg_array_drop_last(gen->frame->stack);
+      pg_array_drop_last(gen->frame->stack);
+      pg_array_append(gen->frame->stack, TYPE_INT, arena);
+
+      cf_asm_bipush(&gen->code->code, gen->frame, 1, TYPE_INT, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, TYPE_BOOL, arena);
+
+      LOG("after node_i=%u stack_len=%lu", node_i,
+          pg_array_len(gen->frame->stack));
       return BYTECODE_IF_ICMPNE;
 
     case TOKEN_KIND_LE:
@@ -5958,10 +5990,10 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_begin_scope(gen);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++){
-    pg_assert(pg_array_len(gen->frame->stack) == 0);
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      pg_assert(pg_array_len(gen->frame->stack) == 0);
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
-    pg_assert(pg_array_len(gen->frame->stack) == 0);
+      pg_assert(pg_array_len(gen->frame->stack) == 0);
     }
 
     cg_end_scope(gen);
