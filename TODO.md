@@ -26,7 +26,7 @@
 [ ] Double, Float
 [x] Control flow: If
 [x] Logical operator !
-[.] Comparison operators <,<=,>,>=,==,!=
+[x] Comparison operators <,<=,>,>=,==,!=
 [ ] Logical operators (and, or)
 [ ] Control flow: While
 [ ] Control flow: Continue

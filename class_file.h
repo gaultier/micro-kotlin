@@ -519,6 +519,9 @@ typedef enum __attribute__((packed)) {
   BYTECODE_ISTORE = 0x36,
   BYTECODE_IADD = 0x60,
   BYTECODE_IMUL = 0x68,
+  BYTECODE_IDIV = 0x6c,
+  BYTECODE_IREM = 0x70,
+  BYTECODE_INEG = 0x74,
   BYTECODE_IXOR = 0x82,
   BYTECODE_IFEQ = 0x99,
   BYTECODE_IFNE = 0x9a,
@@ -1163,6 +1166,17 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_array_drop_last(frame->stack);
 }
 
+static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) >= 1);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(*pg_array_last(frame->stack) == TYPE_INT);
+
+  cf_code_array_push_u8(code, BYTECODE_INEG, arena);
+}
+
 static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
                           cf_type_kind_t type_kind, arena_t *arena) {
   pg_assert(code != NULL);
@@ -1201,6 +1215,34 @@ static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
+
+  pg_array_drop_last(frame->stack);
+}
+
+static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+
+  cf_code_array_push_u8(code, BYTECODE_IDIV, arena);
+
+  pg_array_drop_last(frame->stack);
+}
+
+static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+
+  cf_code_array_push_u8(code, BYTECODE_IREM, arena);
 
   pg_array_drop_last(frame->stack);
 }
@@ -3041,7 +3083,10 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_NONE,
   TOKEN_KIND_NUMBER,
   TOKEN_KIND_PLUS,
+  TOKEN_KIND_MINUS,
   TOKEN_KIND_STAR,
+  TOKEN_KIND_SLASH,
+  TOKEN_KIND_PERCENT,
   TOKEN_KIND_LEFT_PAREN,
   TOKEN_KIND_RIGHT_PAREN,
   TOKEN_KIND_LEFT_BRACE,
@@ -3428,9 +3473,36 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case '-': {
+      const lex_token_t token = {
+          .kind = TOKEN_KIND_MINUS,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
     case '*': {
       const lex_token_t token = {
           .kind = TOKEN_KIND_STAR,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '/': {
+      const lex_token_t token = {
+          .kind = TOKEN_KIND_SLASH,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
+      };
+      pg_array_append(lexer->tokens, token, arena);
+      lex_advance(buf, buf_len, current);
+      break;
+    }
+    case '%': {
+      const lex_token_t token = {
+          .kind = TOKEN_KIND_PERCENT,
           .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
       pg_array_append(lexer->tokens, token, arena);
@@ -3539,7 +3611,10 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_NONE:
     return 0;
   case TOKEN_KIND_PLUS:
+  case TOKEN_KIND_MINUS:
   case TOKEN_KIND_STAR:
+  case TOKEN_KIND_SLASH:
+  case TOKEN_KIND_PERCENT:
   case TOKEN_KIND_LEFT_PAREN:
   case TOKEN_KIND_RIGHT_PAREN:
   case TOKEN_KIND_LEFT_BRACE:
@@ -4351,7 +4426,9 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   const u32 node_i = par_parse_as_expression(parser, arena);
-  if (!par_match_token(parser, TOKEN_KIND_STAR))
+  if (!(par_match_token(parser, TOKEN_KIND_STAR) ||
+        par_match_token(parser, TOKEN_KIND_SLASH) ||
+        par_match_token(parser, TOKEN_KIND_PERCENT)))
     return node_i;
 
   const par_ast_node_t node = {
@@ -4374,7 +4451,8 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   const u32 node_i = par_parse_multiplicative_expression(parser, arena);
-  if (!par_match_token(parser, TOKEN_KIND_PLUS))
+  if (!(par_match_token(parser, TOKEN_KIND_PLUS) ||
+        par_match_token(parser, TOKEN_KIND_MINUS)))
     return node_i;
 
   const par_ast_node_t node = {
@@ -5521,10 +5599,29 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cf_asm_iadd(&gen->code->code, gen->frame, arena);
       break;
 
+    case TOKEN_KIND_MINUS:
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_ineg(&gen->code->code, gen->frame, arena);
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cf_asm_iadd(&gen->code->code, gen->frame, arena);
+      break;
+
     case TOKEN_KIND_STAR:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_imul(&gen->code->code, gen->frame, arena);
+      break;
+
+    case TOKEN_KIND_SLASH:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_idiv(&gen->code->code, gen->frame, arena);
+      break;
+
+    case TOKEN_KIND_PERCENT:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_irem(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
