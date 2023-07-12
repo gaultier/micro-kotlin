@@ -3345,7 +3345,7 @@ static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
   char *end_quote = memchr(current, '"', buf_len - start_offset);
   pg_assert(end_quote != NULL);
 
-  return end_quote - current ;
+  return end_quote - current;
 }
 
 static u32 lex_identifier_length(const char *buf, u32 buf_len,
@@ -5327,6 +5327,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     pg_assert(0 && "unreachable");
   }
 }
+
 // --------------------------------- Code generation
 
 typedef struct {
@@ -5407,8 +5408,61 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   return (u32)-1;
 }
 
-static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                       cf_class_file_t *class_file, u32 node_i, arena_t *arena);
+static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                         cf_class_file_t *class_file, u32 node_i,
+                         arena_t *arena);
+
+// TODO: Make a primitive emerge to use here and in cg_emit_if_then_else.
+static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
+                                           u8 conditional_jump_opcode,
+                                           arena_t *arena) {
+  // Assume the condition is already on the stack
+
+  cf_code_array_push_u8(&gen->code->code, conditional_jump_opcode, arena);
+  cf_code_array_push_u8(&gen->code->code, 0, arena);
+  cf_code_array_push_u8(&gen->code->code, 3 + 2 + 3, arena);
+
+  switch (conditional_jump_opcode) {
+  case BYTECODE_IF_ICMPEQ:
+  case BYTECODE_IF_ICMPNE:
+  case BYTECODE_IF_ICMPLT:
+  case BYTECODE_IF_ICMPGE:
+  case BYTECODE_IF_ICMPGT:
+  case BYTECODE_IF_ICMPLE:
+    pg_array_drop_last_n(gen->frame->stack, 2);
+    break;
+  case BYTECODE_IFEQ:
+  case BYTECODE_IFNE:
+    pg_array_drop_last_n(gen->frame->stack, 1);
+    break;
+  default:
+    pg_assert(0 && "unreachable/unimplemented");
+  }
+
+  const cg_frame_t *const frame_before_then_else =
+      cg_frame_clone(gen->frame, arena);
+
+  cf_asm_bipush(&gen->code->code, gen->frame, true, TYPE_BOOL, arena); // Then.
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
+  cf_code_array_push_u8(&gen->code->code, 0, arena);
+  cf_code_array_push_u8(&gen->code->code, 3 + 2, arena);
+
+  const cg_frame_t *const frame_after_then = cg_frame_clone(gen->frame, arena);
+
+  gen->frame = cg_frame_clone(frame_before_then_else, arena);
+  cg_frame_t *const frame_before_else =
+      cg_frame_clone(frame_before_then_else, arena);
+
+  const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
+  cf_asm_bipush(&gen->code->code, gen->frame, false, TYPE_BOOL, arena); // Else.
+
+  const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
+
+  stack_map_record_frame_at_pc(frame_before_then_else, &gen->stack_map_frames,
+                               conditional_jump_target_absolute, arena);
+  stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
+                               unconditional_jump_target_absolute, arena);
+}
 
 static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
                                  cf_class_file_t *class_file, u32 node_i,
@@ -5453,13 +5507,10 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node->rhs < pg_array_len(parser->nodes));
 
   // Emit condition.
-  u8 conditional_jump_opcode =
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-  if (conditional_jump_opcode == 0)
-    conditional_jump_opcode = BYTECODE_IFEQ;
+  cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
   const u16 jump_conditionally_from_i = cf_asm_jump_conditionally(
-      &gen->code->code, gen->frame, conditional_jump_opcode, arena);
+      &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
 
   pg_assert(node->rhs > 0);
   const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
@@ -5505,7 +5556,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
     gen->code->code[jump_conditionally_from_i + 1] =
         (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
 
-    stack_map_record_frame_at_pc(frame_before_else, &gen->stack_map_frames,
+    stack_map_record_frame_at_pc(frame_before_then_else, &gen->stack_map_frames,
                                  conditional_jump_target_absolute, arena);
   }
   // Patch second, unconditional, jump.
@@ -5598,9 +5649,9 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
   }
 }
 
-static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                       cf_class_file_t *class_file, u32 node_i,
-                       arena_t *arena) {
+static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
+                         cf_class_file_t *class_file, u32 node_i,
+                         arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5611,9 +5662,6 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(class_file != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
 
-  if (node_i == 0)
-    return 0;
-
   if (gen->frame != NULL)
     LOG("node_i=%u stack_len=%lu", node_i, pg_array_len(gen->frame->stack));
 
@@ -5621,7 +5669,7 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    return 0;
+    return;
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
@@ -5852,7 +5900,7 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cf_asm_bipush(&gen->code->code, gen->frame, 1, TYPE_BOOL, arena);
       cf_asm_ixor(&gen->code->code, gen->frame, TYPE_BOOL, arena);
 
-      return BYTECODE_IFEQ;
+      break;
     default:
       pg_assert(0 && "unimplemented");
     }
@@ -5922,46 +5970,39 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cf_asm_i2l(&gen->code->code, gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_i2l(&gen->code->code, gen->frame, arena);
-
-      pg_array_append(gen->code->code, BYTECODE_LCMP, arena);
-      pg_array_drop_last(gen->frame->stack);
-      pg_array_drop_last(gen->frame->stack);
-      pg_array_append(gen->frame->stack, TYPE_INT, arena);
-
-      cf_asm_bipush(&gen->code->code, gen->frame, 1, TYPE_INT, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, TYPE_BOOL, arena);
-
-      LOG("after node_i=%u stack_len=%lu", node_i,
-          pg_array_len(gen->frame->stack));
-      return BYTECODE_IF_ICMPNE;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+      break;
 
     case TOKEN_KIND_LE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IF_ICMPGT;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
+      break;
 
     case TOKEN_KIND_LT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IF_ICMPGE;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
+      break;
 
     case TOKEN_KIND_GT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IF_ICMPLE;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
+      break;
 
     case TOKEN_KIND_GE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IF_ICMPLT;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
+      break;
 
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      return BYTECODE_IF_ICMPEQ;
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+      break;
 
     case TOKEN_KIND_EQUAL:
       pg_assert(node->lhs > 0);
@@ -6055,10 +6096,10 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cg_frame_t *const frame_before_loop =
         cg_frame_clone(gen->frame, arena);
 
-    const u8 jump_opcode =
-        cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
+    cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
+    cf_asm_bipush(&gen->code->code, gen->frame, true, TYPE_BOOL, arena);
     const u16 conditional_jump = cf_asm_jump_conditionally(
-        &gen->code->code, gen->frame, jump_opcode, arena);
+        &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
     const u16 unconditional_jump =
         cf_asm_jump(&gen->code->code, gen->frame, arena);
@@ -6108,8 +6149,6 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
-
-  return 0;
 }
 
 static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
