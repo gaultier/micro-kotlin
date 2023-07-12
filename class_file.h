@@ -3169,6 +3169,7 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_KEYWORD_VAR,
   TOKEN_KIND_KEYWORD_IF,
   TOKEN_KIND_KEYWORD_ELSE,
+  TOKEN_KIND_KEYWORD_WHILE,
   TOKEN_KIND_IDENTIFIER,
   TOKEN_KIND_EQUAL,
   TOKEN_KIND_COMMA,
@@ -3396,6 +3397,12 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   } else if (mem_eq_c(identifier, identifier_len, "else")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_KEYWORD_ELSE,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token, arena);
+  } else if (mem_eq_c(identifier, identifier_len, "while")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_WHILE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
@@ -3751,6 +3758,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_KEYWORD_ELSE:
     return 4;
   case TOKEN_KIND_KEYWORD_FALSE:
+  case TOKEN_KIND_KEYWORD_WHILE:
     return 5;
   case TOKEN_KIND_BUILTIN_PRINTLN:
     return 7;
@@ -3777,6 +3785,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_VAR_REFERENCE,
   AST_KIND_IF,
   AST_KIND_LIST,
+  AST_KIND_WHILE_LOOP,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -3786,12 +3795,13 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_BOOL] = "BOOL",
     [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
+    [AST_KIND_BINARY] = "BINARY",
+    [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
     [AST_KIND_IF] = "IF",
-    [AST_KIND_BINARY] = "BINARY",
-    [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_LIST] = "LIST",
+    [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
 };
 
 typedef struct {
@@ -4441,11 +4451,45 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   return lhs_i;
 }
 
+// whileStatement:
+//     'while'
+//     {NL}
+//     '('
+//     expression
+//     ')'
+//     {NL}
+//     (controlStructureBody | ';')
+static u32 par_parse_while_statement(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  const u32 main_token_i = parser->tokens_i - 1;
+  par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
+                   "Expect left parenthesis after the while keyword");
+
+  const u32 condition_i = par_parse_expression(parser, arena);
+
+  par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
+                   "Expect right parenthesis after the while condition");
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_WHILE_LOOP,
+      .main_token_i = main_token_i,
+      .lhs = condition_i,
+  };
+  const u32 node_i = par_add_node(parser, &node, arena);
+
+  parser->nodes[node_i].rhs = par_parse_control_structure_body(parser, arena);
+
+  return node_i;
+}
+
 static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
-  // TODO
+  if (par_match_token(parser, TOKEN_KIND_KEYWORD_WHILE))
+    return par_parse_while_statement(parser, arena);
 
   return 0;
 }
@@ -4466,10 +4510,10 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
   }
 
   u32 node_i = 0;
-  if ((node_i = par_parse_declaration(parser, arena)) != 0)
+  if ((node_i = par_parse_loop_statement(parser, arena)) != 0)
     return node_i;
 
-  if ((node_i = par_parse_loop_statement(parser, arena)) != 0)
+  if ((node_i = par_parse_declaration(parser, arena)) != 0)
     return node_i;
 
   if ((node_i = par_parse_assignment(parser, arena)) != 0)
@@ -5182,6 +5226,33 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     return node->type_i = type_then_else_i;
   }
+  case AST_KIND_WHILE_LOOP: {
+    pg_assert(node->lhs > 0);
+    pg_assert(node->lhs < pg_array_len(parser->nodes));
+    pg_assert(node->rhs > 0);
+    pg_assert(node->rhs < pg_array_len(parser->nodes));
+
+    const u32 type_condition_i =
+        ty_resolve_types(parser, class_files, node->lhs, arena);
+
+    if (parser->types[type_condition_i].kind != TYPE_BOOL) {
+      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error,
+                            "incompatible types, expect Boolean, got: ", arena);
+
+      const string_t type_inferred_string =
+          ty_type_to_human_string(parser->types, type_condition_i, arena);
+      string_append_string(&error, type_inferred_string, arena);
+      par_error(parser, token, error.value);
+    }
+
+    ty_resolve_types(parser, class_files, node->rhs, arena);
+
+    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID}, arena);
+    const u32 void_type_i = pg_array_last_index(parser->types);
+    return node->type_i = void_type_i;
+  }
 
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
@@ -5883,6 +5954,46 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_IF: {
     cg_emit_if_then_else(gen, parser, class_file, node_i, arena);
+    break;
+  }
+  case AST_KIND_WHILE_LOOP: {
+    const u16 pc_start = pg_array_len(gen->code->code);
+  const cg_frame_t *const frame_before_loop =
+      cg_frame_clone(gen->frame, arena);
+
+    const u8 jump_opcode =
+        cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
+    const u16 conditional_jump = cf_asm_jump_conditionally(
+        &gen->code->code, gen->frame, jump_opcode, arena);
+    cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
+    const u16 unconditional_jump =
+        cf_asm_jump(&gen->code->code, gen->frame, arena);
+
+  // Patch first, conditional, jump.
+  {
+    const u16 jump_offset =
+        (conditional_jump_target_absolute) - (conditional_jump - 1);
+    gen->code->code[jump_conditionally_from_i + 0] =
+        (u8)((u16)jump_offset & 0xff00) >> 8;
+    gen->code->code[jump_conditionally_from_i + 1] =
+        (u8)((u16)jump_offset & 0x00ff) >> 0;
+
+    stack_map_record_frame_at_pc(frame_before_else, &gen->stack_map_frames,
+                                 conditional_jump_target_absolute, arena);
+  }
+  // Patch second, unconditional, jump.
+  {
+    const u16 jump_offset =
+        (unconditional_jump_target_absolute) - (jump_from_i - 1);
+    gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
+    gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
+
+    // This stack map frame covers the unconditional jump, i.e. the `then`
+    // branch.
+    stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
+                                 unconditional_jump_target_absolute, arena);
+  }
+
     break;
   }
   case AST_KIND_MAX:
