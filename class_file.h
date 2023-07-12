@@ -524,6 +524,10 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IFNE = 0x9a,
   BYTECODE_IF_ICMPEQ = 0x9f,
   BYTECODE_IF_ICMPNE = 0xa0,
+  BYTECODE_IF_ICMPLT = 0xa1,
+  BYTECODE_IF_ICMPGE = 0xa2,
+  BYTECODE_IF_ICMPGT = 0xa3,
+  BYTECODE_IF_ICMPLE = 0xa4,
   BYTECODE_GOTO = 0xa7,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
   BYTECODE_IMPDEP1 = 0xfe,
@@ -1073,6 +1077,10 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   switch (jump_opcode) {
   case BYTECODE_IF_ICMPEQ:
   case BYTECODE_IF_ICMPNE:
+  case BYTECODE_IF_ICMPLT:
+  case BYTECODE_IF_ICMPGE:
+  case BYTECODE_IF_ICMPGT:
+  case BYTECODE_IF_ICMPLE:
     pg_array_drop_last_n(frame->stack, 2);
     break;
   case BYTECODE_IFEQ:
@@ -4450,7 +4458,20 @@ static u32 par_parse_comparison(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return par_parse_generic_call_like_comparison(parser, arena);
+  const u32 node_i = par_parse_generic_call_like_comparison(parser, arena);
+  if (!(par_match_token(parser, TOKEN_KIND_LT) ||
+        par_match_token(parser, TOKEN_KIND_GT) ||
+        par_match_token(parser, TOKEN_KIND_LE) ||
+        par_match_token(parser, TOKEN_KIND_GE)))
+    return node_i;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = node_i,
+      .main_token_i = parser->tokens_i - 1,
+      .rhs = par_parse_comparison(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
 }
 
 // equality:
@@ -4853,6 +4874,10 @@ static u32 ty_resolve_types(par_parser_t *parser,
     }
 
     switch (token.kind) {
+    case TOKEN_KIND_LT:
+    case TOKEN_KIND_LE:
+    case TOKEN_KIND_GT:
+    case TOKEN_KIND_GE:
     case TOKEN_KIND_EQUAL_EQUAL: {
       pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
       return node->type_i = pg_array_last_index(parser->types);
@@ -5485,29 +5510,52 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+
     switch (token.kind) {
     case TOKEN_KIND_NONE:
       break; // Nothing to do.
+
     case TOKEN_KIND_PLUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_iadd(&gen->code->code, gen->frame, arena);
       break;
+
     case TOKEN_KIND_STAR:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_imul(&gen->code->code, gen->frame, arena);
       break;
+
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       return BYTECODE_IF_ICMPNE;
-      break;
+
+    case TOKEN_KIND_LE:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      return BYTECODE_IF_ICMPGT;
+
+    case TOKEN_KIND_LT:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      return BYTECODE_IF_ICMPGE;
+
+    case TOKEN_KIND_GT:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      return BYTECODE_IF_ICMPLE;
+
+    case TOKEN_KIND_GE:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      return BYTECODE_IF_ICMPLT;
+
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       return BYTECODE_IF_ICMPEQ;
-      break;
 
     case TOKEN_KIND_EQUAL:
       pg_assert(node->lhs > 0);
