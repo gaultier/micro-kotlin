@@ -5603,8 +5603,6 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
 
     const cg_frame_t *const previous_frame =
         i > 0 ? stack_map_frames[i - 1].frame : first_method_frame;
-    const i32 diff_stack =
-        pg_array_len(frame->stack) - pg_array_len(previous_frame->stack);
 
     i16 locals_delta =
         pg_array_len(frame->locals) - pg_array_len(previous_frame->locals);
@@ -5623,22 +5621,24 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
     pg_assert(offset_delta >= 0);
     pg_assert(offset_delta <= UINT16_MAX);
 
-    if (diff_stack == 0 && locals_delta == 0 && offset_delta <= 63) {
+    const u8 stack_count = pg_array_len(frame->stack);
+
+    if (stack_count == 0 && locals_delta == 0 && offset_delta <= 63) {
       stack_map_fill_same_frame(stack_map_frame, offset_delta);
-    } else if (diff_stack == 0 && locals_delta == 0 && offset_delta > 63) {
+    } else if (stack_count == 0 && locals_delta == 0 && offset_delta > 63) {
       pg_assert(0 && "todo"); // same_frame_extended
-    } else if (diff_stack == 1 && locals_delta == 0 && offset_delta <= 63) {
+    } else if (stack_count == 1 && locals_delta == 0 && offset_delta <= 63) {
       cf_verification_info_t verification_info = {
           .kind = cf_type_kind_to_verification_info_kind(
               *pg_array_last(frame->stack)),
       };
       stack_map_fill_same_locals_1_stack_item_frame(
           stack_map_frame, verification_info, offset_delta, arena);
-    } else if (diff_stack == 1 && locals_delta == 0 && offset_delta <= 63) {
+    } else if (stack_count == 1 && locals_delta == 0 && offset_delta <= 63) {
       pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
-    } else if (diff_stack == 0 && locals_delta == 1 && offset_delta <= 3) {
+    } else if (stack_count == 0 && locals_delta == 1 && offset_delta <= 3) {
       pg_assert(0 && "todo"); // append_frame
-    } else if (diff_stack == 0 &&
+    } else if (stack_count == 0 &&
                (locals_delta == -1 || locals_delta == -2 ||
                 locals_delta == -3) &&
                offset_delta <= 3) {
