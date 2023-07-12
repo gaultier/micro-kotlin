@@ -3325,6 +3325,7 @@ static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
 
   const u32 start_offset = current_offset;
   const char *current = &buf[current_offset];
+  pg_assert(*(current - 1) == '"');
 
   char *end_quote = memchr(current, '"', buf_len - start_offset);
   pg_assert(end_quote != NULL);
@@ -3713,10 +3714,12 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
 
       const lex_token_t token = {
           .kind = TOKEN_KIND_STRING_LITERAL,
-          .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+          .source_offset = lex_get_current_offset(buf, buf_len, current),
       };
+      pg_assert(buf[token.source_offset - 1] == '"');
 
       while (!lex_match(buf, buf_len, current, '"')) {
+        lex_advance(buf, buf_len, current);
       }
       pg_array_append(lexer->tokens, token, arena);
       break;
@@ -6047,7 +6050,19 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_STRING: {
-    pg_assert(0 && "todo");
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+    const u32 length =
+        lex_string_length(parser->buf, parser->buf_len, token.source_offset);
+    const string_t s = {
+        .value = parser->buf + token.source_offset,
+        .len = length,
+    };
+    const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s);
+    const u16 jstring_i = cf_add_constant_jstring(&class_file->constant_pool, string_i);
+    cf_asm_load_constant(&gen->code->code, jstring_i, gen->frame, TYPE_STRING,
+                         arena);
+
+    break;
   }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");

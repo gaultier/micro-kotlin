@@ -29,7 +29,7 @@
 [x] Logical operator !
 [x] Comparison operators <,<=,>,>=,==,!=
 [x] Logical operators (and, or)
-[.] Control flow: While
+[x] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
 [ ] Control flow: For (?)
