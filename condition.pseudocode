@@ -1,1 +1,0 @@
-a == b <=> if_cmpne(a,b) then push(0) else push(1)
