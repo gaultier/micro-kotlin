@@ -23,11 +23,12 @@
 [ ] Grouping
 [ ] Casts
 [ ] Long
+[ ] Byte, Char, Short
 [ ] Double, Float
 [x] Control flow: If
 [x] Logical operator !
 [x] Comparison operators <,<=,>,>=,==,!=
-[ ] Logical operators (and, or)
+[x] Logical operators (and, or)
 [ ] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
