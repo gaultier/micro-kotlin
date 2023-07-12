@@ -522,6 +522,8 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IDIV = 0x6c,
   BYTECODE_IREM = 0x70,
   BYTECODE_INEG = 0x74,
+  BYTECODE_IAND = 0x7e,
+  BYTECODE_IOR = 0x80,
   BYTECODE_IXOR = 0x82,
   BYTECODE_IFEQ = 0x99,
   BYTECODE_IFNE = 0x9a,
@@ -1158,8 +1160,14 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_IADD, arena);
 
@@ -1172,7 +1180,10 @@ static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(*pg_array_last(frame->stack) == TYPE_INT);
+  pg_assert(*pg_array_last(frame->stack) == TYPE_INT ||
+            *pg_array_last(frame->stack) == TYPE_SHORT ||
+            *pg_array_last(frame->stack) == TYPE_BYTE ||
+            *pg_array_last(frame->stack) == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_INEG, arena);
 }
@@ -1198,6 +1209,10 @@ static void cf_asm_ixor(u8 **code, cg_frame_t *frame, cf_type_kind_t type_kind,
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IXOR, arena);
 
@@ -1211,8 +1226,14 @@ static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
 
@@ -1225,8 +1246,14 @@ static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_IDIV, arena);
 
@@ -1239,12 +1266,52 @@ static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
+            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
 
   cf_code_array_push_u8(code, BYTECODE_IREM, arena);
 
   pg_array_drop_last(frame->stack);
+}
+
+static void cf_asm_iand(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
+
+  cf_code_array_push_u8(code, BYTECODE_IAND, arena);
+
+  pg_array_drop_last_n(frame->stack, 2);
+  pg_array_append(frame->stack, TYPE_BOOL, arena);
+}
+
+static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) >= 2);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
+                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
+
+  cf_code_array_push_u8(code, BYTECODE_IOR, arena);
+
+  pg_array_drop_last_n(frame->stack, 2);
+  pg_array_append(frame->stack, TYPE_BOOL, arena);
 }
 
 static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
@@ -3087,6 +3154,10 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_STAR,
   TOKEN_KIND_SLASH,
   TOKEN_KIND_PERCENT,
+  TOKEN_KIND_AMPERSAND,
+  TOKEN_KIND_AMPERSAND_AMPERSAND,
+  TOKEN_KIND_PIPE,
+  TOKEN_KIND_PIPE_PIPE,
   TOKEN_KIND_LEFT_PAREN,
   TOKEN_KIND_RIGHT_PAREN,
   TOKEN_KIND_LEFT_BRACE,
@@ -3518,6 +3589,42 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       lex_advance(buf, buf_len, current);
       break;
     }
+    case '&': {
+      lex_advance(buf, buf_len, current);
+
+      if (lex_match(buf, buf_len, current, '&')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_AMPERSAND_AMPERSAND,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_AMPERSAND,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
+      break;
+    }
+    case '|': {
+      lex_advance(buf, buf_len, current);
+
+      if (lex_match(buf, buf_len, current, '|')) {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_PIPE_PIPE,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 2,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_PIPE,
+            .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
+      break;
+    }
     case '=': {
       lex_advance(buf, buf_len, current);
 
@@ -3626,12 +3733,16 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_EQUAL:
   case TOKEN_KIND_LT:
   case TOKEN_KIND_GT:
+  case TOKEN_KIND_AMPERSAND:
+  case TOKEN_KIND_PIPE:
     return 1;
   case TOKEN_KIND_KEYWORD_IF:
   case TOKEN_KIND_NOT_EQUAL:
   case TOKEN_KIND_LE:
   case TOKEN_KIND_GE:
   case TOKEN_KIND_EQUAL_EQUAL:
+  case TOKEN_KIND_AMPERSAND_AMPERSAND:
+  case TOKEN_KIND_PIPE_PIPE:
     return 2;
   case TOKEN_KIND_KEYWORD_FUN:
   case TOKEN_KIND_KEYWORD_VAR:
@@ -4583,8 +4694,19 @@ static u32 par_parse_conjunction(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return par_parse_equality(parser, arena);
+  const u32 node_i = par_parse_equality(parser, arena);
+  if (!par_match_token(parser, TOKEN_KIND_AMPERSAND_AMPERSAND))
+    return node_i;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = node_i,
+      .main_token_i = parser->tokens_i - 1,
+      .rhs = par_parse_conjunction(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
 }
+
 // disjunction:
 //     conjunction {{NL} '||' {NL} conjunction}
 static u32 par_parse_disjunction(par_parser_t *parser, arena_t *arena) {
@@ -4594,8 +4716,19 @@ static u32 par_parse_disjunction(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return par_parse_conjunction(parser, arena);
+  const u32 node_i = par_parse_conjunction(parser, arena);
+  if (!par_match_token(parser, TOKEN_KIND_PIPE_PIPE))
+    return node_i;
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_BINARY,
+      .lhs = node_i,
+      .main_token_i = parser->tokens_i - 1,
+      .rhs = par_parse_disjunction(parser, arena),
+  };
+  return par_add_node(parser, &node, arena);
 }
+
 // expression:
 //     disjunction
 static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
@@ -4956,6 +5089,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
     case TOKEN_KIND_LE:
     case TOKEN_KIND_GT:
     case TOKEN_KIND_GE:
+    case TOKEN_KIND_AMPERSAND_AMPERSAND:
+    case TOKEN_KIND_PIPE_PIPE:
     case TOKEN_KIND_EQUAL_EQUAL: {
       pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
       return node->type_i = pg_array_last_index(parser->types);
@@ -5622,6 +5757,18 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_irem(&gen->code->code, gen->frame, arena);
+      break;
+
+    case TOKEN_KIND_AMPERSAND_AMPERSAND:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_iand(&gen->code->code, gen->frame, arena);
+      break;
+
+    case TOKEN_KIND_PIPE_PIPE:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cf_asm_ior(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
