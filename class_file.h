@@ -6058,7 +6058,8 @@ static u8 cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .len = length,
     };
     const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s);
-    const u16 jstring_i = cf_add_constant_jstring(&class_file->constant_pool, string_i);
+    const u16 jstring_i =
+        cf_add_constant_jstring(&class_file->constant_pool, string_i);
     cf_asm_load_constant(&gen->code->code, jstring_i, gen->frame, TYPE_STRING,
                          arena);
 

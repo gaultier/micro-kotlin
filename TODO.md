@@ -19,7 +19,7 @@
 [x] Local variable mutation
 [ ] Function definition
 [ ] Field access
-[ ] String
+[x] String literals
 [ ] Grouping
 [ ] Casts
 [ ] Long
