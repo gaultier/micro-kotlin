@@ -5951,24 +5951,28 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cf_asm_ixor(&gen->code->code, gen->frame, arena);
       break;
 
+      // FIXME: lcmp
     case TOKEN_KIND_LE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
       break;
 
+      // FIXME: lcmp
     case TOKEN_KIND_LT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
       break;
 
+      // FIXME: lcmp
     case TOKEN_KIND_GT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
       break;
 
+      // FIXME: lcmp
     case TOKEN_KIND_GE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
