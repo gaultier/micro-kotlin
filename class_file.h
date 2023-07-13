@@ -517,6 +517,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_LDC_W = 0x13,
   BYTECODE_ILOAD = 0x15,
   BYTECODE_ISTORE = 0x36,
+  BYTECODE_POP = 0x57,
   BYTECODE_IADD = 0x60,
   BYTECODE_IMUL = 0x68,
   BYTECODE_IDIV = 0x6c,
@@ -1086,6 +1087,18 @@ static u16 cf_asm_jump(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cf_code_array_push_u8(code, BYTECODE_IMPDEP2, arena);
 
   return from_location;
+}
+
+static void cf_asm_pop(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(code, BYTECODE_POP, arena);
+
+  cg_frame_stack_pop(frame);
 }
 
 static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
@@ -3528,7 +3541,7 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
         pg_array_append(lexer->tokens, token, arena);
       } else {
         const lex_token_t token = {
-            .kind = TOKEN_KIND_EQUAL,
+            .kind = TOKEN_KIND_NOT,
             .source_offset = lex_get_current_offset(buf, buf_len, current) - 1,
         };
         pg_array_append(lexer->tokens, token, arena);
@@ -5994,7 +6007,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       pg_assert(pg_array_len(gen->frame->stack) == 0);
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
-      pg_assert(pg_array_len(gen->frame->stack) == 0);
+
+      // If the 'statement' was in fact an expression, we need to pop it out.
+      while (gen->frame->stack_count > 0)
+        cf_asm_pop(&gen->code->code, gen->frame, arena);
     }
 
     cg_end_scope(gen);
