@@ -733,12 +733,12 @@ cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
   case VERIFICATION_INFO_TOP:
   case VERIFICATION_INFO_INT:
   case VERIFICATION_INFO_FLOAT:
-  case VERIFICATION_INFO_DOUBLE:
-  case VERIFICATION_INFO_LONG:
   case VERIFICATION_INFO_NULL:
-    return 1;
   case VERIFICATION_INFO_OBJECT:
   case VERIFICATION_INFO_UNINITIALIZED:
+    return 1;
+  case VERIFICATION_INFO_DOUBLE:
+  case VERIFICATION_INFO_LONG:
     return 2;
   }
   pg_assert(0 && "unreachable");
@@ -762,13 +762,12 @@ static void cg_frame_stack_push(cg_frame_t *frame,
 
 static void cg_frame_stack_pop(cg_frame_t *frame) {
   pg_assert(frame != NULL);
-
   pg_assert(pg_array_len(frame->stack) >= 1);
 
   const u64 word_count =
       cf_verification_info_kind_word_count(pg_array_last(frame->stack)->kind);
 
-  pg_assert(frame->stack_count >= word_count);
+  pg_assert(pg_array_len(frame->stack) >= word_count);
   pg_assert(frame->max_stack >= word_count);
 
   pg_array_drop_last_n(frame->stack, word_count);
@@ -1098,10 +1097,7 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_assert(pg_array_len(frame->stack) > 0);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
 
-  pg_assert(pg_array_len(frame->locals) >
-            var_i); // FIXME: variable size. Also do we need to expand the
-                    // local variable array automatically?
-
+  pg_assert(var_i < frame->locals_count);
   pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
             VERIFICATION_INFO_INT);
 
@@ -1118,7 +1114,7 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   pg_assert(frame->locals != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_assert(var_i < pg_array_len(frame->locals)); // FIXME: local variable size
+  pg_assert(var_i < frame->locals_count);
   pg_assert(pg_array_len(frame->locals) > 0);
 
   cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
@@ -2580,25 +2576,43 @@ static u32 cf_compute_verification_infos_size(
     return 0;
   } else if (252 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 254) { // append_frame
-    const u64 count = 255 - stack_map_frame->kind;
+    u64 count = 255 - stack_map_frame->kind;
 
     u32 size = 0;
-    for (u64 i = 1; i <= count; i++) {
-      const u64 j = pg_array_len(stack_map_frame->frame->locals) - i;
-      size += cf_compute_verification_info_size(
-          stack_map_frame->frame->locals[j].verification_info);
+    for (i64 i = stack_map_frame->frame->locals_count - 1;
+         i >= 0 && count > 0;) {
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->locals[i].verification_info;
+      const u64 word_count =
+          cf_verification_info_kind_word_count(verification_info.kind);
+      size += cf_compute_verification_info_size(verification_info);
+
+      i -= word_count;
+      count -= 1;
     }
 
     return size;
   } else { // full_frame
     u32 size = 0;
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++)
-      size += cf_compute_verification_info_size(
-          stack_map_frame->frame->locals[i].verification_info);
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals);) {
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->locals[i].verification_info;
+      const u64 word_count =
+          cf_verification_info_kind_word_count(verification_info.kind);
+      size += cf_compute_verification_info_size(verification_info);
 
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++)
-      size +=
-          cf_compute_verification_info_size(stack_map_frame->frame->stack[i]);
+      i -= word_count;
+    }
+
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack);) {
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->stack[i];
+      const u64 word_count =
+          cf_verification_info_kind_word_count(verification_info.kind);
+      size += cf_compute_verification_info_size(verification_info);
+
+      i -= word_count;
+    }
 
     return size;
   }
@@ -5491,6 +5505,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
       pg_max(frame_after_then->max_stack, gen->frame->max_stack);
   gen->frame->max_locals =
       pg_max(frame_after_then->max_locals, gen->frame->max_locals);
+  // TODO: assert that the stack/locals count is the same?
 
   // Patch first, conditional, jump.
   {
@@ -5774,17 +5789,16 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 functions_args_class_i = cf_constant_array_push(
         &class_file->constant_pool, &functions_args_class);
 
-    cf_verification_info_t verification_info = {
-        .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = functions_args_class_i,
-    };
     const cf_variable_t arg0 = {
         .type_i = main_argument_types_i,
         .scope_depth = gen->frame->scope_depth,
-        .verification_info = verification_info,
+        .verification_info =
+            {
+                .kind = VERIFICATION_INFO_OBJECT,
+                .extra_data = functions_args_class_i,
+            },
     };
-    pg_array_append(gen->frame->locals, arg0, arena);
-    gen->frame->max_locals = pg_array_len(gen->frame->locals);
+    cg_frame_locals_push(gen->frame, &arg0, arena);
 
     gen->first_method_frame = cg_frame_clone(gen->frame, arena);
 
