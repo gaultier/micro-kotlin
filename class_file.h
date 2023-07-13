@@ -2594,24 +2594,16 @@ static u32 cf_compute_verification_infos_size(
     return size;
   } else { // full_frame
     u32 size = 0;
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals);) {
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->locals[i].verification_info;
-      const u64 word_count =
-          cf_verification_info_kind_word_count(verification_info.kind);
       size += cf_compute_verification_info_size(verification_info);
-
-      i -= word_count;
     }
 
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack);) {
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack);i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->stack[i];
-      const u64 word_count =
-          cf_verification_info_kind_word_count(verification_info.kind);
       size += cf_compute_verification_info_size(verification_info);
-
-      i -= word_count;
     }
 
     return size;
