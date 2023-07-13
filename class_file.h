@@ -1166,6 +1166,20 @@ static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
+static void cf_asm_lcmp(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_LCMP, arena);
+
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
+}
+
 static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
                           arena_t *arena) {
   pg_assert(code != NULL);
@@ -2600,7 +2614,7 @@ static u32 cf_compute_verification_infos_size(
       size += cf_compute_verification_info_size(verification_info);
     }
 
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack);i++) {
+    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->stack[i];
       size += cf_compute_verification_info_size(verification_info);
@@ -5466,7 +5480,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
   const u16 jump_conditionally_from_i = cf_asm_jump_conditionally(
-      &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
+      &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
   const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
@@ -5917,7 +5931,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, arena);
+      cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_LE:
@@ -5947,7 +5963,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_EQUAL:
