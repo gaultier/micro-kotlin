@@ -728,7 +728,7 @@ static void stack_map_fill_same_locals_1_stack_item_frame(
 }
 
 static u16
-cf_verification_info_kind_stack_slots_count(cf_verification_info_kind_t kind) {
+cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
   switch (kind) {
   case VERIFICATION_INFO_TOP:
   case VERIFICATION_INFO_INT:
@@ -744,17 +744,53 @@ cf_verification_info_kind_stack_slots_count(cf_verification_info_kind_t kind) {
   pg_assert(0 && "unreachable");
 }
 
+static void cg_frame_stack_push(cg_frame_t *frame,
+                                cf_verification_info_t verification_info,
+                                arena_t *arena) {
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
 
-static u16 cg_compute_stack_size(const cf_verification_info_t *stack) {
-  pg_assert(stack != NULL);
-  pg_assert(pg_array_len(stack) <= UINT16_MAX);
+  pg_assert(frame->stack_count +
+                cf_verification_info_kind_word_count(verification_info.kind) <
+            UINT16_MAX);
+  pg_array_append(frame->stack, verification_info, arena);
 
-  u16 size = 0;
-  for (u16 i = 0; i < pg_array_len(stack); i++) {
-    size += cf_verification_info_kind_stack_slots_count(stack[i].kind);
-  }
-  pg_assert(size >= pg_array_len(stack));
-  return size;
+  frame->stack_count +=
+      cf_verification_info_kind_word_count(verification_info.kind);
+  frame->max_stack = pg_max(frame->max_stack, frame->stack_count);
+}
+
+static void cg_frame_stack_pop(cg_frame_t *frame) {
+  pg_assert(frame != NULL);
+
+  pg_assert(pg_array_len(frame->stack) >= 1);
+
+  const u64 word_count =
+      cf_verification_info_kind_word_count(pg_array_last(frame->stack)->kind);
+
+  pg_assert(frame->stack_count >= word_count);
+  pg_assert(frame->max_stack >= word_count);
+
+  pg_array_drop_last_n(frame->stack, word_count);
+
+  frame->stack_count -= word_count;
+}
+
+// Probably should not behave like a FIFO and rather like an array.
+static void cg_frame_locals_push(cg_frame_t *frame,
+                                 const cf_variable_t *variable,
+                                 arena_t *arena) {
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  pg_assert(frame->locals_count + cf_verification_info_kind_word_count(
+                                      variable->verification_info.kind) <
+            UINT16_MAX);
+  pg_array_append(frame->locals, *variable, arena);
+
+  frame->locals_count +=
+      cf_verification_info_kind_word_count(variable->verification_info.kind);
+  frame->max_locals = pg_max(frame->max_locals, frame->locals_count);
 }
 
 static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena);
@@ -889,15 +925,14 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
   dst->max_stack = src->max_stack;
   dst->max_locals = src->max_locals;
   dst->scope_depth = src->scope_depth;
+  dst->stack_count = src->stack_count;
+  dst->locals_count = src->locals_count;
 
   for (u64 i = 0; i < pg_array_len(src->locals); i++)
     pg_array_append(dst->locals, src->locals[i], arena);
 
   for (u64 i = 0; i < pg_array_len(src->stack); i++)
     pg_array_append(dst->stack, src->stack[i], arena);
-
-  pg_assert(dst->stack != NULL);
-  pg_assert(dst->locals != NULL);
 
   pg_assert(pg_array_len(dst->locals) == pg_array_len(src->locals));
   pg_assert(pg_array_len(dst->stack) == pg_array_len(src->stack));
@@ -1025,11 +1060,12 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   case BYTECODE_IF_ICMPGE:
   case BYTECODE_IF_ICMPGT:
   case BYTECODE_IF_ICMPLE:
-    pg_array_drop_last_n(frame->stack, 2);
+    cg_frame_stack_pop(frame);
+    cg_frame_stack_pop(frame);
     break;
   case BYTECODE_IFEQ:
   case BYTECODE_IFNE:
-    pg_array_drop_last_n(frame->stack, 1);
+    cg_frame_stack_pop(frame);
     break;
   default:
     pg_assert(0 && "unreachable/unimplemented");
@@ -1072,7 +1108,7 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cf_code_array_push_u8(code, BYTECODE_ISTORE, arena);
   cf_code_array_push_u8(code, var_i, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
 }
 
 static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
@@ -1088,11 +1124,8 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
   cf_code_array_push_u8(code, var_i, arena);
 
-  const cf_verification_info_t verification_info = {.kind =
-                                                        VERIFICATION_INFO_INT};
-  pg_array_append(frame->stack, verification_info, arena);
-  frame->max_stack =
-      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1108,7 +1141,7 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IADD, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
 }
 
 static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1129,20 +1162,12 @@ static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_I2L, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
 
-  {
-    const cf_verification_info_t verification_info = {
-        .kind = VERIFICATION_INFO_TOP};
-    pg_array_append(frame->stack, verification_info, arena);
-  }
-  {
-    const cf_verification_info_t verification_info = {
-        .kind = VERIFICATION_INFO_LONG};
-    pg_array_append(frame->stack, verification_info, arena);
-  }
-  frame->max_stack =
-      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP}, arena);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
 static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
@@ -1154,11 +1179,8 @@ static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
   cf_code_array_push_u8(code, BYTECODE_BIPUSH, arena);
   cf_code_array_push_u8(code, value, arena);
 
-  const cf_verification_info_t verification_info = {.kind =
-                                                        VERIFICATION_INFO_INT};
-  pg_array_append(frame->stack, verification_info, arena);
-  frame->max_stack =
-      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1174,7 +1196,10 @@ static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IXOR, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1190,7 +1215,10 @@ static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1206,7 +1234,10 @@ static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IDIV, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1222,7 +1253,10 @@ static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IREM, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_iand(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1238,7 +1272,10 @@ static void cf_asm_iand(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IAND, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1254,7 +1291,10 @@ static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
 
   cf_code_array_push_u8(code, BYTECODE_IOR, arena);
 
-  pg_array_drop_last(frame->stack);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_pop(frame);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
 static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
@@ -1271,9 +1311,7 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
 
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
 
-  pg_array_append(frame->stack, verification_info, arena);
-  frame->max_stack =
-      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+  cg_frame_stack_push(frame, verification_info, arena);
 }
 
 static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
@@ -1289,11 +1327,8 @@ static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
   cf_code_array_push_u8(code, BYTECODE_INVOKE_VIRTUAL, arena);
   cf_code_array_push_u16(code, method_ref_i, arena);
 
-  // FIXME: long, double takes 2 spots on the stack!
-  const u16 pop_size = 1 /* objectref */ + method_type->argument_count;
-  pg_assert(pg_array_len(frame->stack) >= pop_size);
-
-  pg_array_drop_last_n(frame->stack, pop_size);
+  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
+    cg_frame_stack_pop(frame);
 }
 
 static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
@@ -1303,6 +1338,7 @@ static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(arena != NULL);
 
   cf_code_array_push_u8(code, BYTECODE_GET_STATIC, arena);
   cf_code_array_push_u16(code, field_i, arena);
@@ -1310,33 +1346,35 @@ static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
   const cf_verification_info_t verification_info = {
       .kind = VERIFICATION_INFO_OBJECT};
-  pg_array_append(frame->stack, verification_info, arena);
-  frame->max_stack =
-      pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
+  cg_frame_stack_push(frame, verification_info, arena);
 }
 
 static void cf_asm_return(u8 **code, arena_t *arena) {
-  cf_code_array_push_u8(code, BYTECODE_RETURN, arena);
+  pg_assert(code != NULL);
+  pg_assert(*code != NULL);
+  pg_assert(arena != NULL);
 
-  // TODO: pop the current frame.
+  cf_code_array_push_u8(code, BYTECODE_RETURN, arena);
 }
 
+#if 0
 static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
                                   const par_type_method_t *method_type,
                                   arena_t *arena) {
   pg_assert(code != NULL);
+  pg_assert(*code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+  pg_assert(arena != NULL);
 
   cf_code_array_push_u8(code, BYTECODE_INVOKE_SPECIAL, arena);
   cf_code_array_push_u16(code, method_ref_i, arena);
 
-  // FIXME: long, double takes 2 spots on the stack!
-  pg_assert(pg_array_len(frame->stack) >= method_type->argument_count);
-  pg_array_drop_last_n(frame->stack, method_type->argument_count);
+  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
+    cg_frame_stack_pop(frame);
 }
 
 static void cf_asm_call_superclass_constructor(
@@ -1356,6 +1394,7 @@ static void cf_asm_call_superclass_constructor(
   cf_asm_invoke_special(code, super_class_constructor_i, frame, method_type,
                         arena);
 }
+#endif
 
 typedef struct cf_attribute_t cf_attribute_t;
 
@@ -5409,7 +5448,6 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(gen->frame->locals != NULL);
   pg_assert(gen->frame->stack != NULL);
   pg_assert(gen->stack_map_frames != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
   pg_assert(node->type_i > 0);
@@ -5447,8 +5485,6 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
 
   cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
-  pg_assert(pg_array_len(frame_after_then->stack) ==
-            pg_array_len(gen->frame->stack));
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   gen->frame->max_stack =
@@ -5530,20 +5566,22 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
     pg_assert(offset_delta >= 0);
     pg_assert(offset_delta <= UINT16_MAX);
 
-    const u8 stack_count = pg_array_len(frame->stack);
-
-    if (stack_count == 0 && locals_delta == 0 && offset_delta <= 63) {
+    if (frame->stack_count == 0 && locals_delta == 0 && offset_delta <= 63) {
       stack_map_fill_same_frame(stack_map_frame, offset_delta);
-    } else if (stack_count == 0 && locals_delta == 0 && offset_delta > 63) {
+    } else if (frame->stack_count == 0 && locals_delta == 0 &&
+               offset_delta > 63) {
       pg_assert(0 && "todo"); // same_frame_extended
-    } else if (stack_count == 1 && locals_delta == 0 && offset_delta <= 63) {
+    } else if (frame->stack_count == 1 && locals_delta == 0 &&
+               offset_delta <= 63) {
       stack_map_fill_same_locals_1_stack_item_frame(stack_map_frame,
                                                     offset_delta);
-    } else if (stack_count == 1 && locals_delta == 0 && offset_delta <= 63) {
+    } else if (frame->stack_count == 1 && locals_delta == 0 &&
+               offset_delta <= 63) {
       pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
-    } else if (stack_count == 0 && locals_delta == 1 && offset_delta <= 3) {
+    } else if (frame->stack_count == 0 && locals_delta == 1 &&
+               offset_delta <= 3) {
       pg_assert(0 && "todo"); // append_frame
-    } else if (stack_count == 0 &&
+    } else if (frame->stack_count == 0 &&
                (locals_delta == -1 || locals_delta == -2 ||
                 locals_delta == -3) &&
                offset_delta <= 3) {
@@ -5566,9 +5604,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(pg_array_len(parser->nodes) > 0);
   pg_assert(class_file != NULL);
   pg_assert(node_i < pg_array_len(parser->nodes));
-
-  if (gen->frame != NULL)
-    LOG("node_i=%u stack_len=%lu", node_i, pg_array_len(gen->frame->stack));
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
 
@@ -5816,8 +5851,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_BINARY: {
     pg_assert(gen->frame != NULL);
     pg_assert(gen->frame->locals != NULL);
-    pg_assert(gen->frame->stack != NULL);
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
@@ -5932,8 +5965,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     if (gen->code != NULL) {
       pg_assert(gen->frame != NULL);
       pg_assert(gen->frame->locals != NULL);
-      pg_assert(gen->frame->stack != NULL);
-      pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
     }
 
     cg_begin_scope(gen);
@@ -5950,12 +5981,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_VAR_DEFINITION: {
     pg_assert(gen->frame != NULL);
     pg_assert(gen->frame->locals != NULL);
-    pg_assert(gen->frame->stack != NULL);
-    pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
     pg_assert(node->type_i > 0);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
     const par_type_t *const type = &parser->types[node->type_i];
     if (type->kind == TYPE_LONG) {
@@ -5997,7 +6025,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
             .scope_depth = gen->frame->scope_depth,
             .verification_info = verification_info,
         };
-        pg_array_append(gen->frame->locals, variable, arena);
+        cg_frame_locals_push(gen->frame, &variable, arena);
       }
       {
         cf_verification_info_t verification_info = {
@@ -6010,7 +6038,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
             .scope_depth = gen->frame->scope_depth,
             .verification_info = verification_info,
         };
-        pg_array_append(gen->frame->locals, variable, arena);
+        cg_frame_locals_push(gen->frame, &variable, arena);
       }
 
     } else {
@@ -6042,13 +6070,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
           .scope_depth = gen->frame->scope_depth,
           .verification_info = verification_info,
       };
-      pg_array_append(gen->frame->locals, variable, arena);
+      cg_frame_locals_push(gen->frame, &variable, arena);
     }
-
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-    gen->frame->max_locals =
-        pg_max(gen->frame->max_locals, pg_array_len(gen->frame->locals));
-    pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
     cf_asm_store_variable_int(&gen->code->code, gen->frame,
                               pg_array_last_index(gen->frame->locals), arena);
