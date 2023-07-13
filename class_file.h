@@ -4599,7 +4599,9 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
   if (par_match_token(parser, TOKEN_KIND_NOT)) {
     const par_ast_node_t node = {
         .kind = AST_KIND_UNARY,
-        .lhs = par_parse_postfix_unary_expression(parser, arena),
+        // Departure from the official grammer but I believe it must be (!?)
+        // to allow for `!!true`
+        .lhs = par_parse_prefix_unary_expression(parser, arena),
         .main_token_i = parser->tokens_i - 1,
     };
     return par_add_node(parser, &node, arena);
