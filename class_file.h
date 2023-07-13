@@ -576,13 +576,15 @@ typedef struct {
 struct cg_frame_t;
 typedef struct cg_frame_t cg_frame_t;
 typedef struct {
-  u8 kind;
-  u8 offset_delta;
   u16 pc;
+  // TODO: Should we actually memoize this or not?
+  u16 offset_delta;
   bool tombstone; // Skip in case of duplicates.
-  pg_pad(3);
-  cg_frame_t *frame; // Immutable clone of the frame when the stack map
-                     // frame was created.
+  u8 kind;
+  pg_pad(2);
+  // Immutable clone of the frame when the stack map
+  // frame was created.
+  cg_frame_t *frame;
 } cf_stack_map_frame_t;
 
 enum __attribute__((packed)) cf_type_kind_t {
@@ -742,27 +744,6 @@ cf_verification_info_kind_stack_slots_count(cf_verification_info_kind_t kind) {
   pg_assert(0 && "unreachable");
 }
 
-static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
-  switch (kind) {
-  case TYPE_ANY:
-  case TYPE_METHOD:
-  case TYPE_CONSTRUCTOR:
-  case TYPE_VOID:
-    pg_assert(0 && "unreachable");
-  case TYPE_BYTE:
-  case TYPE_CHAR:
-  case TYPE_FLOAT:
-  case TYPE_SHORT:
-  case TYPE_BOOL:
-  case TYPE_INT:
-    return TYPE_INT;
-  case TYPE_ARRAY_REFERENCE:
-  case TYPE_INSTANCE_REFERENCE:
-    return kind;
-  default:
-    return kind;
-  }
-}
 
 static u16 cg_compute_stack_size(const cf_verification_info_t *stack) {
   pg_assert(stack != NULL);
