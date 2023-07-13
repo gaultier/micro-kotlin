@@ -611,7 +611,7 @@ struct cg_frame_t {
   u16 max_locals;
   u32 scope_depth;
   cf_variable_t *locals;
-  cf_type_kind_t *stack;
+  cf_verification_info_t *stack;
 };
 
 struct par_type_t;
@@ -698,10 +698,8 @@ static void stack_map_fill_full_frame(cf_stack_map_frame_t *stack_map_frame,
   pg_array_init_reserve(stack_map_frame->stack,
                         pg_array_len(stack_map_frame->frame->stack), arena);
   for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-    cf_verification_info_t verification_info = {
-        .kind = cf_type_kind_to_verification_info_kind(
-            stack_map_frame->frame->stack[i])};
-    pg_array_append(stack_map_frame->stack, verification_info, arena);
+    pg_array_append(stack_map_frame->stack, stack_map_frame->frame->stack[i],
+                    arena);
   }
 }
 
@@ -770,27 +768,21 @@ static void stack_map_fill_same_locals_1_stack_item_frame(
   pg_assert(stack_map_frame->kind <= 127);
 }
 
-static u16 cf_type_kind_stack_size(cf_type_kind_t kind) {
+static u16
+cf_verification_info_kind_stack_slots_count(cf_verification_info_kind_t kind) {
   switch (kind) {
-  case TYPE_ANY:
-  case TYPE_METHOD:
-  case TYPE_CONSTRUCTOR:
-  case TYPE_VOID:
-    pg_assert(0 && "unreachable");
-  case TYPE_BYTE:
-  case TYPE_CHAR:
-  case TYPE_FLOAT:
-  case TYPE_SHORT:
-  case TYPE_BOOL:
-  case TYPE_INT:
-  case TYPE_INSTANCE_REFERENCE:
-  case TYPE_STRING:
-  case TYPE_ARRAY_REFERENCE:
+  case VERIFICATION_INFO_TOP:
+  case VERIFICATION_INFO_INT:
+  case VERIFICATION_INFO_FLOAT:
+  case VERIFICATION_INFO_DOUBLE:
+  case VERIFICATION_INFO_LONG:
+  case VERIFICATION_INFO_NULL:
     return 1;
-  case TYPE_LONG:
-  case TYPE_DOUBLE:
+  case VERIFICATION_INFO_OBJECT:
+  case VERIFICATION_INFO_UNINITIALIZED:
     return 2;
   }
+  pg_assert(0 && "unreachable");
 }
 
 static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
@@ -815,13 +807,13 @@ static u16 cf_stack_type_dumbbed_down_for_jvm(cf_type_kind_t kind) {
   }
 }
 
-static u16 cg_compute_stack_size(const cf_type_kind_t *stack) {
+static u16 cg_compute_stack_size(const cf_verification_info_t *stack) {
   pg_assert(stack != NULL);
   pg_assert(pg_array_len(stack) <= UINT16_MAX);
 
   u16 size = 0;
   for (u16 i = 0; i < pg_array_len(stack); i++) {
-    size += cf_type_kind_stack_size(stack[i]);
+    size += cf_verification_info_kind_stack_slots_count(stack[i].kind);
   }
   pg_assert(size >= pg_array_len(stack));
   return size;
@@ -1136,8 +1128,8 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
             var_i); // FIXME: variable size. Also do we need to expand the
                     // local variable array automatically?
 
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_ISTORE, arena);
   cf_code_array_push_u8(code, var_i, arena);
@@ -1146,7 +1138,7 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
 }
 
 static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                     cf_type_kind_t type_kind, arena_t *arena) {
+                                     arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1158,7 +1150,9 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
   cf_code_array_push_u8(code, var_i, arena);
 
-  pg_array_append(frame->stack, type_kind, arena);
+  const cf_verification_info_t verification_info = {.kind =
+                                                        VERIFICATION_INFO_INT};
+  pg_array_append(frame->stack, verification_info, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
@@ -1169,14 +1163,10 @@ static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IADD, arena);
 
@@ -1189,10 +1179,7 @@ static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(*pg_array_last(frame->stack) == TYPE_INT ||
-            *pg_array_last(frame->stack) == TYPE_SHORT ||
-            *pg_array_last(frame->stack) == TYPE_BYTE ||
-            *pg_array_last(frame->stack) == TYPE_CHAR);
+  pg_assert(pg_array_last(frame->stack)->kind == VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_INEG, arena);
 }
@@ -1205,13 +1192,16 @@ static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cf_code_array_push_u8(code, BYTECODE_I2L, arena);
 
   pg_array_drop_last(frame->stack);
-  pg_array_append(frame->stack, TYPE_LONG, arena);
+
+  const cf_verification_info_t verification_info = {.kind =
+                                                        VERIFICATION_INFO_LONG};
+  pg_array_append(frame->stack, verification_info, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
 
 static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
-                          cf_type_kind_t type_kind, arena_t *arena) {
+                          arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -1219,27 +1209,27 @@ static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
   cf_code_array_push_u8(code, BYTECODE_BIPUSH, arena);
   cf_code_array_push_u8(code, value, arena);
 
-  pg_array_append(frame->stack, type_kind, arena);
+  const cf_verification_info_t verification_info = {.kind =
+                                                        VERIFICATION_INFO_INT};
+  pg_array_append(frame->stack, verification_info, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
 
-static void cf_asm_ixor(u8 **code, cg_frame_t *frame, cf_type_kind_t type_kind,
-                        arena_t *arena) {
+static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IXOR, arena);
 
-  pg_array_drop_last_n(frame->stack, 2);
-  pg_array_append(frame->stack, type_kind, arena);
+  pg_array_drop_last(frame->stack);
 }
 
 static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1248,14 +1238,10 @@ static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
 
@@ -1268,14 +1254,10 @@ static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IDIV, arena);
 
@@ -1288,14 +1270,10 @@ static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 1] == TYPE_CHAR);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2] == TYPE_INT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_SHORT ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_BYTE ||
-            frame->stack[pg_array_len(frame->stack) - 2] == TYPE_CHAR);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IREM, arena);
 
@@ -1308,15 +1286,14 @@ static void cf_asm_iand(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IAND, arena);
 
-  pg_array_drop_last_n(frame->stack, 2);
-  pg_array_append(frame->stack, TYPE_BOOL, arena);
+  pg_array_drop_last(frame->stack);
 }
 
 static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -1325,19 +1302,19 @@ static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 1]) == TYPE_INT);
-  pg_assert(cf_stack_type_dumbbed_down_for_jvm(
-                frame->stack[pg_array_len(frame->stack) - 2]) == TYPE_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(code, BYTECODE_IOR, arena);
 
-  pg_array_drop_last_n(frame->stack, 2);
-  pg_array_append(frame->stack, TYPE_BOOL, arena);
+  pg_array_drop_last(frame->stack);
 }
 
 static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
-                                 cf_type_kind_t type_kind, arena_t *arena) {
+                                 cf_verification_info_t verification_info,
+                                 arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -1348,7 +1325,8 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
   cf_code_array_push_u16(code, constant_i, arena);
 
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_array_append(frame->stack, type_kind, arena);
+
+  pg_array_append(frame->stack, verification_info, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
@@ -1385,7 +1363,9 @@ static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
   cf_code_array_push_u16(code, field_i, arena);
 
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_array_append(frame->stack, TYPE_INSTANCE_REFERENCE, arena);
+  const cf_verification_info_t verification_info = {
+      .kind = VERIFICATION_INFO_OBJECT};
+  pg_array_append(frame->stack, verification_info, arena);
   frame->max_stack =
       pg_max(frame->max_stack, cg_compute_stack_size(frame->stack));
 }
@@ -5442,7 +5422,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   const cg_frame_t *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
-  cf_asm_bipush(&gen->code->code, gen->frame, true, TYPE_BOOL, arena); // Then.
+  cf_asm_bipush(&gen->code->code, gen->frame, true, arena); // Then.
   cf_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
   cf_code_array_push_u8(&gen->code->code, 0, arena);
   cf_code_array_push_u8(&gen->code->code, 3 + 2, arena);
@@ -5454,7 +5434,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
       cg_frame_clone(frame_before_then_else, arena);
 
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
-  cf_asm_bipush(&gen->code->code, gen->frame, false, TYPE_BOOL, arena); // Else.
+  cf_asm_bipush(&gen->code->code, gen->frame, false, arena); // Else.
 
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
@@ -5629,8 +5609,7 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
       pg_assert(0 && "todo"); // same_frame_extended
     } else if (stack_count == 1 && locals_delta == 0 && offset_delta <= 63) {
       cf_verification_info_t verification_info = {
-          .kind = cf_type_kind_to_verification_info_kind(
-              *pg_array_last(frame->stack)),
+          .kind = pg_array_last(frame->stack)->kind,
       };
       stack_map_fill_same_locals_1_stack_item_frame(
           stack_map_frame, verification_info, offset_delta, arena);
@@ -5681,9 +5660,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->code->code != NULL);
     pg_assert(gen->frame != NULL);
 
-    const par_type_t *const type = &parser->types[node->type_i];
-    cf_asm_load_constant(&gen->code->code, number_i, gen->frame, type->kind,
-                         arena);
+    const cf_verification_info_t verification_info = {
+        .kind = VERIFICATION_INFO_INT};
+    cf_asm_load_constant(&gen->code->code, number_i, gen->frame,
+                         verification_info, arena);
     break;
   }
   case AST_KIND_NUM: {
@@ -5699,9 +5679,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->code->code != NULL);
     pg_assert(gen->frame != NULL);
 
-    const par_type_t *const type = &parser->types[node->type_i];
-    cf_asm_load_constant(&gen->code->code, number_i, gen->frame, type->kind,
-                         arena);
+    const cf_verification_info_t verification_info = {
+        .kind = VERIFICATION_INFO_INT}; // FIXME: Long?
+    cf_asm_load_constant(&gen->code->code, number_i, gen->frame,
+                         verification_info, arena);
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
@@ -5897,8 +5878,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_NOT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
-      cf_asm_bipush(&gen->code->code, gen->frame, 1, TYPE_BOOL, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, TYPE_BOOL, arena);
+      cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+      cf_asm_ixor(&gen->code->code, gen->frame, arena);
 
       break;
     default:
@@ -6082,9 +6063,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
-    const cf_type_kind_t type_kind = parser->types[node->type_i].kind;
-    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, type_kind,
-                             arena);
+    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
     break;
   }
   case AST_KIND_IF: {
@@ -6097,7 +6076,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         cg_frame_clone(gen->frame, arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
-    cf_asm_bipush(&gen->code->code, gen->frame, true, TYPE_BOOL, arena);
+    cf_asm_bipush(&gen->code->code, gen->frame, true, arena);
     const u16 conditional_jump = cf_asm_jump_conditionally(
         &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
@@ -6141,7 +6120,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s);
     const u16 jstring_i =
         cf_add_constant_jstring(&class_file->constant_pool, string_i);
-    cf_asm_load_constant(&gen->code->code, jstring_i, gen->frame, TYPE_STRING,
+  const cf_verification_info_t verification_info = {.kind =
+                                                        VERIFICATION_INFO_OBJECT, .extra_data=jstring_i,};
+    cf_asm_load_constant(&gen->code->code, jstring_i, gen->frame, verification_info,
                          arena);
 
     break;
