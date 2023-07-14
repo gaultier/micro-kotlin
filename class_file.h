@@ -6147,7 +6147,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
     const u16 conditional_jump = cf_asm_jump_conditionally(
-        &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
+        &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
     const u16 unconditional_jump =
         cf_asm_jump(&gen->code->code, gen->frame, arena);
