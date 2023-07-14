@@ -604,7 +604,7 @@ enum __attribute__((packed)) cf_type_kind_t {
   TYPE_ARRAY_REFERENCE,
   TYPE_METHOD,
   TYPE_CONSTRUCTOR,
-} kind;
+};
 typedef enum cf_type_kind_t cf_type_kind_t;
 
 struct cg_frame_t {
@@ -771,12 +771,12 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(frame->stack_count >= 1);
+  pg_assert(frame->max_stack >= 1);
 
   const u64 word_count =
       cf_verification_info_kind_word_count(pg_array_last(frame->stack)->kind);
 
   pg_assert(pg_array_len(frame->stack) >= word_count);
-  pg_assert(frame->max_stack >= word_count);
 
   pg_array_drop_last_n(frame->stack, word_count);
 
@@ -2096,7 +2096,7 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
   }
 }
 
-// Return the number of incoming slots to skip:
+// Returns the number of incoming slots to skip:
 // - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
 // - `0` otherwise
 static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
@@ -2475,8 +2475,11 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   pg_assert(remaining == 0);
 }
 
-static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
-                              const cf_constant_t *constant) {
+// Returns the number of incoming slots to skip:
+// - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
+// - `0` otherwise
+static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
+                            const cf_constant_t *constant) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
   pg_assert(constant != NULL);
@@ -2496,7 +2499,7 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   case CONSTANT_POOL_KIND_LONG:
   case CONSTANT_POOL_KIND_DOUBLE:
     file_write_be_u64(file, constant->v.number);
-    break;
+    return 1;
   case CONSTANT_POOL_KIND_CLASS_INFO:
     file_write_be_u16(file, constant->v.class_name);
     break;
@@ -2537,33 +2540,37 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   default:
     pg_assert(0 && "unreachable/unimplemented");
   }
+  return 0;
+}
+
+static u16 cf_constant_pool_logical_count(const cf_class_file_t *class_file) {
+  pg_assert(class_file != NULL);
+
+  u64 count = 0;
+  for (u64 i = 0; i < class_file->constant_pool.len; i++) {
+    count += 1;
+
+    cp_info_kind_t kind = class_file->constant_pool.values[i].kind;
+    if (kind == CONSTANT_POOL_KIND_LONG || kind == CONSTANT_POOL_KIND_DOUBLE)
+      i += 1;
+  }
+  return count;
 }
 
 static void cf_write_constant_pool(const cf_class_file_t *class_file,
                                    FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
-
-  u16 count = 1;
-  for (u64 i = 0; i < class_file->constant_pool.len; i++) {
-    pg_assert(count <= UINT16_MAX);
-    count += 1;
-
-    const cp_info_kind_t kind = class_file->constant_pool.values[i].kind;
-
-    if (kind == CONSTANT_POOL_KIND_LONG ||
-        kind == CONSTANT_POOL_KIND_DOUBLE) // Skip next entry in that case
-      i++;
-  }
-  file_write_be_u16(file, count);
+  file_write_be_u16(file, class_file->constant_pool.len + 1);
 
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
     pg_assert(class_file->constant_pool.values != NULL);
     pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
-    cf_write_constant(class_file, file, constant);
-    // FIXME: Long
+    LOG("fact=cf_write_constant i=%lu/%lu kind=%hu", i+1,
+        class_file->constant_pool.len, constant->kind);
+    i += cf_write_constant(class_file, file, constant);
   }
 }
 static void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
@@ -5712,6 +5719,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant);
+    if (pool_kind == CONSTANT_POOL_KIND_LONG ||
+        pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
+      const cf_constant_t dummy = {0};
+      cf_constant_array_push(&class_file->constant_pool, &dummy);
+    }
 
     cf_asm_load_constant(
         &gen->code->code, number_i, gen->frame,
