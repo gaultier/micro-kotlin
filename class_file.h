@@ -5092,6 +5092,12 @@ static string_t ty_know_type_aliases(string_t type_literal) {
     return string_make_from_c_no_alloc("java/lang/Char");
   if (string_eq_c(type_literal, "Boolean"))
     return string_make_from_c_no_alloc("java/lang/Boolean");
+  if (string_eq_c(type_literal, "Long"))
+    return string_make_from_c_no_alloc("java/lang/Long");
+  if (string_eq_c(type_literal, "Float"))
+    return string_make_from_c_no_alloc("java/lang/Float");
+  if (string_eq_c(type_literal, "Double"))
+    return string_make_from_c_no_alloc("java/lang/Double");
 
   return string_make_from_c_no_alloc("");
 }
