@@ -3380,13 +3380,6 @@ static u32 lex_number_length(const char *buf, u32 buf_len, u32 current_offset) {
   return len;
 }
 
-static bool lex_has_number_long_suffix(const char *buf, u32 buf_len,
-                                       lex_token_t token) {
-  pg_assert(token.kind == TOKEN_KIND_NUMBER);
-  const u32 length = lex_number_length(buf, buf_len, token.source_offset);
-  return buf[token.source_offset + length - 1] == 'L';
-}
-
 static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -4214,7 +4207,8 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
   }
 }
 
-static const u8 NUMBER_FLAGS_LONG = 0x1;
+static const u8 NUMBER_FLAGS_OVERFLOW = 0x1;
+static const u8 NUMBER_FLAGS_LONG = 0x2;
 
 static u64 par_number(const par_parser_t *parser, lex_token_t token,
                       u8 *number_flags) {
@@ -4249,7 +4243,13 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token,
       continue;
     }
 
-    number += ten_unit * (c - '0');
+    const u64 delta = ten_unit * (c - '0');
+    i64 number_i64 = (i64)number;
+    if (__builtin_add_overflow((i64)number_i64, delta, &number_i64)) {
+      *number_flags |= NUMBER_FLAGS_OVERFLOW;
+      return 0;
+    }
+    number += delta;
     ten_unit *= 10;
   }
 
@@ -5244,8 +5244,23 @@ static u32 ty_resolve_types(par_parser_t *parser,
     cf_type_kind_t kind = TYPE_INT;
 
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
-    if (lex_has_number_long_suffix(parser->buf, parser->buf_len, token))
+
+    u8 number_flags = 0;
+    // TODO: should we memoize this to avoid parsing it twice?
+    const u64 number = par_number(parser, token, &number_flags);
+    if (number_flags & NUMBER_FLAGS_OVERFLOW) {
+      par_error(parser, token,
+                "Long literal is too big (> 9223372036854775807)");
+      return 0;
+
+    } else if (number_flags & NUMBER_FLAGS_LONG) {
       kind = TYPE_LONG;
+    } else {
+      if (number > INT32_MAX) {
+        par_error(parser, token, "Integer literal is too big (> 2147483647)");
+        return 0;
+      }
+    }
 
     pg_array_append(parser->types, (par_type_t){.kind = kind},
                     arena); // TODO: something smarter.
@@ -5486,6 +5501,8 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
 
     if (variable->verification_info.kind == VERIFICATION_INFO_INT)
       return (u32)i;
+    // Long/Double takes up 2 slots: [Top, Long|Double], and we need to return
+    // the first slot.
     else if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
              variable->verification_info.kind == VERIFICATION_INFO_DOUBLE)
       return (u32)i - 1;
@@ -5775,8 +5792,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     if (number_flags & NUMBER_FLAGS_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
-    } else {
-      // TODO: check number <= UINT32_MAX
     }
     // TODO: Float, Double, etc.
 
@@ -6198,7 +6213,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         VERIFICATION_INFO_INT)
       cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
     else if (gen->frame->locals[var_i].verification_info.kind ==
-             VERIFICATION_INFO_TOP&&gen->frame->locals[var_i+1].verification_info.kind ==VERIFICATION_INFO_LONG)
+                 VERIFICATION_INFO_TOP &&
+             gen->frame->locals[var_i + 1].verification_info.kind ==
+                 VERIFICATION_INFO_LONG)
       cf_asm_load_variable_long(&gen->code->code, gen->frame, var_i, arena);
     else
       pg_assert(0 && "todo");
