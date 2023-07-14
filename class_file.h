@@ -515,6 +515,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_BIPUSH = 0x10,
   BYTECODE_LDC = 0x12,
   BYTECODE_LDC_W = 0x13,
+  BYTECODE_LDC2_W = 0x14,
   BYTECODE_ILOAD = 0x15,
   BYTECODE_ISTORE = 0x36,
   BYTECODE_POP = 0x57,
@@ -751,9 +752,10 @@ static void cg_frame_stack_push(cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  pg_assert(frame->stack_count +
-                cf_verification_info_kind_word_count(verification_info.kind) <
-            UINT16_MAX);
+  const u64 word_count =
+      cf_verification_info_kind_word_count(verification_info.kind);
+
+  pg_assert(frame->stack_count + word_count < UINT16_MAX);
 
   if (verification_info.kind == VERIFICATION_INFO_LONG ||
       verification_info.kind == VERIFICATION_INFO_DOUBLE) {
@@ -763,7 +765,7 @@ static void cg_frame_stack_push(cg_frame_t *frame,
   }
   pg_array_append(frame->stack, verification_info, arena);
 
-  frame->stack_count += 1;
+  frame->stack_count += word_count;
   frame->max_stack = pg_max(frame->max_stack, frame->stack_count);
 }
 
@@ -780,7 +782,7 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
 
   pg_array_drop_last_n(frame->stack, word_count);
 
-  frame->stack_count -= 1;
+  frame->stack_count -= word_count;
 }
 
 // Probably should not behave like a FIFO and rather like an array.
@@ -790,13 +792,12 @@ static void cg_frame_locals_push(cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  pg_assert(frame->locals_count + cf_verification_info_kind_word_count(
-                                      variable->verification_info.kind) <
-            UINT16_MAX);
+  const u64 word_count =
+      cf_verification_info_kind_word_count(variable->verification_info.kind);
+  pg_assert(frame->locals_count + word_count < UINT16_MAX);
   pg_array_append(frame->locals, *variable, arena);
 
-  frame->locals_count +=
-      cf_verification_info_kind_word_count(variable->verification_info.kind);
+  frame->locals_count += word_count;
   frame->max_locals = pg_max(frame->max_locals, frame->locals_count);
 }
 
@@ -1329,7 +1330,8 @@ static void cf_asm_ior(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
+static void
+cf_asm_load_constant_single_word(u8 **code, u16 constant_i, cg_frame_t *frame,
                                  cf_verification_info_t verification_info,
                                  arena_t *arena) {
   pg_assert(code != NULL);
@@ -1337,8 +1339,28 @@ static void cf_asm_load_constant(u8 **code, u16 constant_i, cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
+  pg_assert(cf_verification_info_kind_word_count(verification_info.kind) == 1);
 
   cf_code_array_push_u8(code, BYTECODE_LDC_W, arena);
+  cf_code_array_push_u16(code, constant_i, arena);
+
+  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
+
+  cg_frame_stack_push(frame, verification_info, arena);
+}
+
+static void
+cf_asm_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
+                                 cf_verification_info_t verification_info,
+                                 arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(constant_i > 0);
+  pg_assert(frame != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
+  pg_assert(cf_verification_info_kind_word_count(verification_info.kind) == 2);
+
+  cf_code_array_push_u8(code, BYTECODE_LDC2_W, arena);
   cf_code_array_push_u16(code, constant_i, arena);
 
   pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
@@ -2543,20 +2565,6 @@ static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   return 0;
 }
 
-static u16 cf_constant_pool_logical_count(const cf_class_file_t *class_file) {
-  pg_assert(class_file != NULL);
-
-  u64 count = 0;
-  for (u64 i = 0; i < class_file->constant_pool.len; i++) {
-    count += 1;
-
-    cp_info_kind_t kind = class_file->constant_pool.values[i].kind;
-    if (kind == CONSTANT_POOL_KIND_LONG || kind == CONSTANT_POOL_KIND_DOUBLE)
-      i += 1;
-  }
-  return count;
-}
-
 static void cf_write_constant_pool(const cf_class_file_t *class_file,
                                    FILE *file) {
   pg_assert(class_file != NULL);
@@ -2568,8 +2576,6 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
     pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
-    LOG("fact=cf_write_constant i=%lu/%lu kind=%hu", i+1,
-        class_file->constant_pool.len, constant->kind);
     i += cf_write_constant(class_file, file, constant);
   }
 }
@@ -5696,8 +5702,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_INT};
-    cf_asm_load_constant(&gen->code->code, number_i, gen->frame,
-                         verification_info, arena);
+    cf_asm_load_constant_single_word(&gen->code->code, number_i, gen->frame,
+                                     verification_info, arena);
     break;
   }
   case AST_KIND_NUMBER: {
@@ -5723,11 +5729,15 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
       const cf_constant_t dummy = {0};
       cf_constant_array_push(&class_file->constant_pool, &dummy);
-    }
 
-    cf_asm_load_constant(
-        &gen->code->code, number_i, gen->frame,
-        (cf_verification_info_t){.kind = verification_info_kind}, arena);
+      cf_asm_load_constant_double_word(
+          &gen->code->code, number_i, gen->frame,
+          (cf_verification_info_t){.kind = verification_info_kind}, arena);
+    } else {
+      cf_asm_load_constant_single_word(
+          &gen->code->code, number_i, gen->frame,
+          (cf_verification_info_t){.kind = verification_info_kind}, arena);
+    }
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
@@ -6250,8 +6260,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jstring_i,
     };
-    cf_asm_load_constant(&gen->code->code, jstring_i, gen->frame,
-                         verification_info, arena);
+    cf_asm_load_constant_single_word(&gen->code->code, jstring_i, gen->frame,
+                                     verification_info, arena);
 
     break;
   }
