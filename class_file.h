@@ -2096,9 +2096,12 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
   }
 }
 
-static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
-                                 cf_class_file_t *class_file,
-                                 u16 constant_pool_count) {
+// Return the number of incoming slots to skip:
+// - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
+// - `0` otherwise
+static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
+                               cf_class_file_t *class_file,
+                               u16 constant_pool_count) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
   if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT ||
@@ -2159,11 +2162,9 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
-
-    // Read and ignore next slot.
-    cf_buf_read_constant(buf, buf_len, current, class_file,
-                         constant_pool_count);
-    break;
+    const cf_constant_t dummy = {0};
+    cf_constant_array_push(&class_file->constant_pool, &dummy);
+    return 1;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
     const u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
@@ -2253,7 +2254,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const u16 reference_i = buf_read_be_u16(buf, buf_len, current);
     pg_unused(reference_i);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2262,7 +2263,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(descriptor > 0);
     pg_assert(descriptor <= constant_pool_count);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2275,7 +2276,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_count);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2288,7 +2289,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_count);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2297,7 +2298,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2306,22 +2307,26 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
   default:
     pg_assert(0 && "unreachable");
   }
+  return 0;
 }
 
 static void cf_buf_read_constants(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
                                   u16 constant_pool_count) {
-  for (u64 i = 1; i <= constant_pool_count; i++) {
-    cf_buf_read_constant(buf, buf_len, current, class_file,
-                         constant_pool_count);
+  for (u64 i = 0; i < constant_pool_count; i++) {
+    pg_assert((u64)(*current - buf) < buf_len);
+    i += cf_buf_read_constant(buf, buf_len, current, class_file,
+                              constant_pool_count);
+    pg_assert((u64)(*current - buf) <= buf_len);
   }
+  pg_assert(constant_pool_count <= class_file->constant_pool.len);
 }
 
 static void cf_buf_read_method(char *buf, u64 buf_len, char **current,
@@ -2558,11 +2563,7 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
     cf_write_constant(class_file, file, constant);
-
-    if (constant->kind == CONSTANT_POOL_KIND_LONG ||
-        constant->kind ==
-            CONSTANT_POOL_KIND_DOUBLE) // Skip next entry in that case
-      i++;
+    // FIXME: Long
   }
 }
 static void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
@@ -5711,19 +5712,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant);
-
-    if (pool_kind == CONSTANT_POOL_KIND_LONG ||
-        pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
-      // Quote from
-      // https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.4:
-      // If a CONSTANT_Long_info or CONSTANT_Double_info structure is the item
-      // in the constant_pool table at index n, then the next usable item in the
-      // pool is located at index n+2. The constant_pool index n+1 must be valid
-      // but is considered unusable. In retrospect, making 8-byte constants take
-      // two constant pool entries was a poor choice.
-      const cf_constant_t dummy = {.kind = CONSTANT_POOL_KIND_INT};
-      cf_constant_array_push(&class_file->constant_pool, &dummy);
-    }
 
     cf_asm_load_constant(
         &gen->code->code, number_i, gen->frame,
