@@ -517,7 +517,9 @@ typedef enum __attribute__((packed)) {
   BYTECODE_LDC_W = 0x13,
   BYTECODE_LDC2_W = 0x14,
   BYTECODE_ILOAD = 0x15,
+  BYTECODE_LLOAD = 0x16,
   BYTECODE_ISTORE = 0x36,
+  BYTECODE_LSTORE = 0x37,
   BYTECODE_POP = 0x57,
   BYTECODE_IADD = 0x60,
   BYTECODE_IMUL = 0x68,
@@ -786,19 +788,31 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
 }
 
 // Probably should not behave like a FIFO and rather like an array.
-static void cg_frame_locals_push(cg_frame_t *frame,
-                                 const cf_variable_t *variable,
-                                 arena_t *arena) {
+static u16 cg_frame_locals_push(cg_frame_t *frame,
+                                const cf_variable_t *variable, arena_t *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
   const u64 word_count =
       cf_verification_info_kind_word_count(variable->verification_info.kind);
   pg_assert(frame->locals_count + word_count < UINT16_MAX);
+
+  const u16 result_index = pg_array_len(frame->locals);
+
+  if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
+      variable->verification_info.kind == VERIFICATION_INFO_DOUBLE) {
+    cf_variable_t top_variable = *variable;
+    top_variable.verification_info =
+        (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP};
+
+    pg_array_append(frame->locals, top_variable, arena);
+  }
   pg_array_append(frame->locals, *variable, arena);
 
   frame->locals_count += word_count;
   frame->max_locals = pg_max(frame->max_locals, frame->locals_count);
+
+  return result_index;
 }
 
 static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena);
@@ -1130,6 +1144,25 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cg_frame_stack_pop(frame);
 }
 
+static void cf_asm_store_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
+                                       arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) > 0);
+  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
+
+  pg_assert(var_i < frame->locals_count);
+  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
+            VERIFICATION_INFO_LONG);
+
+  cf_code_array_push_u8(code, BYTECODE_LSTORE, arena);
+  cf_code_array_push_u8(code, var_i, arena);
+
+  cg_frame_stack_pop(frame);
+}
+
 static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
                                      arena_t *arena) {
   pg_assert(code != NULL);
@@ -1145,6 +1178,23 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
 
   cg_frame_stack_push(
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
+}
+
+static void cf_asm_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
+                                      arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(frame->locals != NULL);
+  pg_assert(frame->stack != NULL);
+  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
+  pg_assert(var_i < frame->locals_count);
+  pg_assert(pg_array_len(frame->locals) > 0);
+
+  cf_code_array_push_u8(code, BYTECODE_LLOAD, arena);
+  cf_code_array_push_u8(code, var_i, arena);
+
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
 static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -5431,8 +5481,16 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
 
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
     const cf_variable_t *const variable = &frame->locals[i];
-    if (variable->node_i == node_i)
+    if (variable->node_i != node_i)
+      continue;
+
+    if (variable->verification_info.kind == VERIFICATION_INFO_INT)
       return (u32)i;
+    else if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
+             variable->verification_info.kind == VERIFICATION_INFO_DOUBLE)
+      return (u32)i - 1;
+    else
+      pg_assert(0 && "todo");
   }
 
   return (u32)-1;
@@ -6098,96 +6156,32 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
     const par_type_t *const type = &parser->types[node->type_i];
+    cf_verification_info_t verification_info = {.kind = VERIFICATION_INFO_INT};
     if (type->kind == TYPE_LONG) {
-      {
-        cf_verification_info_t verification_info = {
-            .kind = VERIFICATION_INFO_TOP,
-        };
-
-        const cf_variable_t variable = {
-            .node_i = node_i,
-            .type_i = node->type_i,
-            .scope_depth = gen->frame->scope_depth,
-            .verification_info = verification_info,
-        };
-        pg_array_append(gen->frame->locals, variable, arena);
-      }
-      {
-        cf_verification_info_t verification_info = {
-            .kind = VERIFICATION_INFO_LONG,
-        };
-
-        const cf_variable_t variable = {
-            .node_i = node_i,
-            .type_i = node->type_i,
-            .scope_depth = gen->frame->scope_depth,
-            .verification_info = verification_info,
-        };
-        pg_array_append(gen->frame->locals, variable, arena);
-      }
+      verification_info.kind = VERIFICATION_INFO_LONG;
     } else if (type->kind == TYPE_DOUBLE) {
-      {
-        cf_verification_info_t verification_info = {
-            .kind = VERIFICATION_INFO_TOP,
-        };
-
-        const cf_variable_t variable = {
-            .node_i = node_i,
-            .type_i = node->type_i,
-            .scope_depth = gen->frame->scope_depth,
-            .verification_info = verification_info,
-        };
-        cg_frame_locals_push(gen->frame, &variable, arena);
-      }
-      {
-        cf_verification_info_t verification_info = {
-            .kind = VERIFICATION_INFO_DOUBLE,
-        };
-
-        const cf_variable_t variable = {
-            .node_i = node_i,
-            .type_i = node->type_i,
-            .scope_depth = gen->frame->scope_depth,
-            .verification_info = verification_info,
-        };
-        cg_frame_locals_push(gen->frame, &variable, arena);
-      }
-
-    } else {
-      cf_verification_info_t verification_info = {
-          .kind = VERIFICATION_INFO_DOUBLE,
-      };
-      switch (type->kind) {
-      case TYPE_BOOL:
-      case TYPE_SHORT:
-      case TYPE_BYTE:
-      case TYPE_CHAR:
-      case TYPE_INT:
-        verification_info.kind = VERIFICATION_INFO_INT;
-        break;
-      case TYPE_FLOAT:
-        verification_info.kind = VERIFICATION_INFO_FLOAT;
-        break;
-      case TYPE_ARRAY_REFERENCE:
-      case TYPE_INSTANCE_REFERENCE:
-        verification_info.kind = VERIFICATION_INFO_OBJECT;
-        break;
-      default:
-        pg_assert(0 && "todo");
-      }
-
-      const cf_variable_t variable = {
-          .node_i = node_i,
-          .type_i = node->type_i,
-          .scope_depth = gen->frame->scope_depth,
-          .verification_info = verification_info,
-      };
-      cg_frame_locals_push(gen->frame, &variable, arena);
+      verification_info.kind = VERIFICATION_INFO_DOUBLE;
+    } else if (type->kind == TYPE_FLOAT) {
+      verification_info.kind = VERIFICATION_INFO_FLOAT;
+    } else if (type->kind == TYPE_ARRAY_REFERENCE ||
+               type->kind == TYPE_INSTANCE_REFERENCE) {
+      verification_info.kind = VERIFICATION_INFO_OBJECT;
     }
+    const cf_variable_t variable = {
+        .node_i = node_i,
+        .type_i = node->type_i,
+        .scope_depth = gen->frame->scope_depth,
+        .verification_info = verification_info,
+    };
+    const u16 local_i = cg_frame_locals_push(gen->frame, &variable, arena);
 
-    cf_asm_store_variable_int(&gen->code->code, gen->frame,
-                              pg_array_last_index(gen->frame->locals), arena);
-
+    if (verification_info.kind == VERIFICATION_INFO_INT) {
+      cf_asm_store_variable_int(&gen->code->code, gen->frame, local_i, arena);
+    } else if (verification_info.kind == VERIFICATION_INFO_LONG) {
+      cf_asm_store_variable_long(&gen->code->code, gen->frame, local_i, arena);
+    } else {
+      pg_assert(0 && "todo");
+    }
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
@@ -6200,7 +6194,15 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
-    cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
+    if (gen->frame->locals[var_i].verification_info.kind ==
+        VERIFICATION_INFO_INT)
+      cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
+    else if (gen->frame->locals[var_i].verification_info.kind ==
+             VERIFICATION_INFO_TOP&&gen->frame->locals[var_i+1].verification_info.kind ==VERIFICATION_INFO_LONG)
+      cf_asm_load_variable_long(&gen->code->code, gen->frame, var_i, arena);
+    else
+      pg_assert(0 && "todo");
+
     break;
   }
   case AST_KIND_IF: {
