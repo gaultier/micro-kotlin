@@ -23,6 +23,7 @@
 [ ] Grouping
 [ ] Casts
 [.] Long
+[ ] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
 [ ] Byte, Char, Short
 [ ] Double, Float
 [x] Control flow: If
