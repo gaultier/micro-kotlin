@@ -3,8 +3,8 @@
 [x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
 [x] Semantic opcode generation functions
 [x] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
-[.] Call functions generically (no builtin) from the same class file
-[.] Call functions generically (no builtin) from other class files
+[ ] Call functions generically (no builtin) from the same class file
+[ ] Call functions generically (no builtin) from other class files
 [x] Define functions
 [x] Generate stack map tables
 [x] Use latest jvm version
@@ -22,7 +22,7 @@
 [x] String literals
 [ ] Grouping
 [ ] Casts
-[ ] Long
+[.] Long
 [ ] Byte, Char, Short
 [ ] Double, Float
 [x] Control flow: If
