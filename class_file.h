@@ -5417,11 +5417,12 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   case BYTECODE_IF_ICMPGE:
   case BYTECODE_IF_ICMPGT:
   case BYTECODE_IF_ICMPLE:
-    pg_array_drop_last_n(gen->frame->stack, 2);
+    cg_frame_stack_pop(gen->frame);
+    cg_frame_stack_pop(gen->frame);
     break;
   case BYTECODE_IFEQ:
   case BYTECODE_IFNE:
-    pg_array_drop_last_n(gen->frame->stack, 1);
+    cg_frame_stack_pop(gen->frame);
     break;
   default:
     pg_assert(0 && "unreachable/unimplemented");
@@ -6145,7 +6146,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         cg_frame_clone(gen->frame, arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
-    cf_asm_bipush(&gen->code->code, gen->frame, true, arena);
     const u16 conditional_jump = cf_asm_jump_conditionally(
         &gen->code->code, gen->frame, BYTECODE_IFNE, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
