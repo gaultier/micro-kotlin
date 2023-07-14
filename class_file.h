@@ -3227,7 +3227,7 @@ static bool lex_is_at_end(const char *buf, u32 buf_len,
   return lex_get_current_offset(buf, buf_len, current) == buf_len;
 }
 
-static u8 lex_peek(const char *buf, u32 buf_len, const char *const *current) {
+static char lex_peek(const char *buf, u32 buf_len, const char *const *current) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -3263,28 +3263,10 @@ static bool lex_match(const char *buf, u32 buf_len, const char **current,
   return false;
 }
 
-static bool lex_is_digit(const char *buf, u32 buf_len,
-                         const char *const *current) {
-  pg_assert(buf != NULL);
-  pg_assert(buf_len > 0);
-  pg_assert(current != NULL);
-  pg_assert(*current != NULL);
-  pg_assert(*current - buf <= buf_len);
+static bool lex_is_digit(char c) { return ('0' <= c && c <= '9'); }
 
-  return ('0' <= **current && **current <= '9');
-}
-
-static bool lex_is_identifier_char(const char *buf, u32 buf_len,
-                                   const char *const *current) {
-  pg_assert(buf != NULL);
-  pg_assert(buf_len > 0);
-  pg_assert(current != NULL);
-  pg_assert(*current != NULL);
-  pg_assert(*current - buf <= buf_len);
-
-  return ut_char_is_alphabetic(**current) ||
-         lex_is_digit(buf, buf_len, current) ||
-         lex_peek(buf, buf_len, current) == '_';
+static bool lex_is_identifier_char(char c) {
+  return ut_char_is_alphabetic(c) || lex_is_digit(c) || c == '_';
 }
 
 static u32 lex_number_length(const char *buf, u32 buf_len, u32 current_offset) {
@@ -3294,20 +3276,17 @@ static u32 lex_number_length(const char *buf, u32 buf_len, u32 current_offset) {
 
   const u32 start_offset = current_offset;
   const char *current = &buf[current_offset];
-  pg_assert(lex_is_digit(buf, buf_len, &current));
+  pg_assert(lex_is_digit(lex_peek(buf, buf_len, &current)));
 
   lex_advance(buf, buf_len, &current);
 
   while (!lex_is_at_end(buf, buf_len, &current)) {
-    lex_peek(buf, buf_len, &current);
+    const char c = lex_peek(buf, buf_len, &current);
 
-    if (!lex_is_digit(buf, buf_len, &current))
+    if (!(lex_is_digit(c) || c == '_' || c == 'L'))
       break;
     lex_advance(buf, buf_len, &current);
   }
-
-  pg_assert(!lex_is_at_end(buf, buf_len, &current));
-  pg_assert(!lex_is_digit(buf, buf_len, &current));
 
   const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, &current);
   pg_assert(end_offset_excl > start_offset);
@@ -3347,15 +3326,15 @@ static u32 lex_identifier_length(const char *buf, u32 buf_len,
   lex_advance(buf, buf_len, &current);
 
   while (!lex_is_at_end(buf, buf_len, &current)) {
-    lex_peek(buf, buf_len, &current);
+    const char c = lex_peek(buf, buf_len, &current);
 
-    if (!lex_is_identifier_char(buf, buf_len, &current))
+    if (!lex_is_identifier_char(c))
       break;
     lex_advance(buf, buf_len, &current);
   }
 
   pg_assert(!lex_is_at_end(buf, buf_len, &current));
-  pg_assert(!lex_is_identifier_char(buf, buf_len, &current));
+  pg_assert(!lex_is_identifier_char(lex_peek(buf, buf_len, &current)));
 
   const u32 end_offset_excl = lex_get_current_offset(buf, buf_len, &current);
   pg_assert(end_offset_excl > start_offset);
@@ -3448,22 +3427,22 @@ static void lex_number(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
   pg_assert(*current - buf <= buf_len);
-  pg_assert(lex_is_digit(buf, buf_len, current));
+  pg_assert(lex_is_digit(lex_peek(buf, buf_len, current)));
 
   const u32 start_offset = lex_get_current_offset(buf, buf_len, current);
 
   lex_advance(buf, buf_len, current);
 
   while (!lex_is_at_end(buf, buf_len, current)) {
-    lex_peek(buf, buf_len, current);
+    const char c = lex_peek(buf, buf_len, current);
 
-    if (!lex_is_digit(buf, buf_len, current))
+    if (!(lex_is_digit(c) || c == '_'))
       break;
     lex_advance(buf, buf_len, current);
   }
 
-  pg_assert(!lex_is_at_end(buf, buf_len, current));
-  pg_assert(!lex_is_digit(buf, buf_len, current));
+  if (lex_match(buf, buf_len, current, 'L')) { // Long suffix.
+  }
 
   const lex_token_t token = {
       .kind = TOKEN_KIND_NUMBER,
@@ -3739,9 +3718,9 @@ static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
       break;
     }
     default: {
-      if (ut_char_is_alphabetic(**current)) {
+      if (ut_char_is_alphabetic(c)) {
         lex_identifier(lexer, buf, buf_len, current, arena);
-      } else if (lex_is_digit(buf, buf_len, current)) {
+      } else if (lex_is_digit(c)) {
         lex_number(lexer, buf, buf_len, current, arena);
       } else {
         pg_assert(0 && "unimplemented");
