@@ -885,7 +885,6 @@ typedef struct {
   u64 len;
   u64 cap;
   cf_constant_t *values;
-  arena_t *arena;
 } cf_constant_array_t;
 
 static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
@@ -895,12 +894,11 @@ static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
       .len = 0,
       .cap = cap,
       .values = arena_alloc(arena, cap, sizeof(cf_constant_t)),
-      .arena = arena,
   };
 }
 
 static u16 cf_constant_array_push(cf_constant_array_t *array,
-                                  const cf_constant_t *x) {
+                                  const cf_constant_t *x, arena_t *arena) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -911,7 +909,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
     cf_constant_t *const new_array =
-        arena_alloc(array->arena, new_cap, sizeof(cf_constant_t));
+        arena_alloc(arena, new_cap, sizeof(cf_constant_t));
     pg_assert(new_array != NULL);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
@@ -2077,7 +2075,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
   const u32 size = buf_read_be_u32(buf, buf_len, current);
   pg_assert(*current + size <= buf + buf_len);
 
-  if ((flags & READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES) == 0){
+  if ((flags & READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES) == 0) {
     buf_read_n_u8(buf, buf_len, NULL, size, current);
     return;
   }
@@ -2184,7 +2182,7 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
 // - `0` otherwise
 static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
                                cf_class_file_t *class_file,
-                               u16 constant_pool_count) {
+                               u16 constant_pool_count, arena_t *arena) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
   if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT ||
@@ -2216,7 +2214,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
                               .v = {.s = {.len = len, .value = s}}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     break;
   }
@@ -2225,7 +2223,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_unused(value);
 
     const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_FLOAT: {
@@ -2233,7 +2231,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_unused(value);
 
     const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_DOUBLE:
@@ -2244,9 +2242,9 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_unused(low);
 
     const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     const cf_constant_t dummy = {0};
-    cf_constant_array_push(&class_file->constant_pool, &dummy);
+    cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
     return 1;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
@@ -2256,7 +2254,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                     .v = {.class_name = class_name_i}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_STRING: {
@@ -2266,7 +2264,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_STRING,
                                     .v = {.string_utf8_i = utf8_i}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_FIELD_REF: {
@@ -2281,7 +2279,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
         .v = {.field_ref = {.name = name_i, .type_descriptor = descriptor_i}}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
@@ -2297,7 +2295,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
         .v = {.method_ref = {.name_and_type = name_and_type_i,
                              .class = class_i}}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF: {
@@ -2312,7 +2310,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
     }; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
@@ -2328,7 +2326,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
                                 .type_descriptor = descriptor_i}}};
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_HANDLE: {
@@ -2338,7 +2336,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_unused(reference_i);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_TYPE: {
@@ -2347,7 +2345,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(descriptor <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_DYNAMIC: {
@@ -2360,7 +2358,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_and_type_index <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_INVOKE_DYNAMIC: {
@@ -2373,7 +2371,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_and_type_index <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_MODULE: {
@@ -2382,7 +2380,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_i <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_PACKAGE: {
@@ -2391,7 +2389,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     pg_assert(name_i <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = kind}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
+    cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   default:
@@ -2402,11 +2400,11 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
 static void cf_buf_read_constants(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
-                                  u16 constant_pool_count) {
+                                  u16 constant_pool_count, arena_t *arena) {
   for (u64 i = 0; i < constant_pool_count; i++) {
     pg_assert((u64)(*current - buf) < buf_len);
     i += cf_buf_read_constant(buf, buf_len, current, class_file,
-                              constant_pool_count);
+                              constant_pool_count, arena);
     pg_assert((u64)(*current - buf) <= buf_len);
   }
   pg_assert(constant_pool_count <= class_file->constant_pool.len);
@@ -2536,7 +2534,8 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   pg_assert(class_file->constant_pool.values != NULL);
   pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
-  cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_count);
+  cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_count,
+                        arena);
 
   class_file->access_flags = buf_read_be_u16(buf, buf_len, current);
 
@@ -3035,17 +3034,17 @@ static void cf_method_init(cf_method_t *method, arena_t *arena) {
 }
 
 static u16 cf_add_constant_string(cf_constant_array_t *constant_pool,
-                                  string_t s) {
+                                  string_t s, arena_t *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(s.value != NULL);
 
   const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
                                   .v = {.s = s}};
-  return cf_constant_array_push(constant_pool, &constant);
+  return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
-static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool,
-                                   char *s) {
+static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
+                                   arena_t *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
 
@@ -3054,18 +3053,18 @@ static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool,
                                             .len = strlen(s),
                                             .value = s,
                                         }}};
-  return cf_constant_array_push(constant_pool, &constant);
+  return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
 static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
-                                   u16 constant_utf8_i) {
+                                   u16 constant_utf8_i, arena_t *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(constant_utf8_i > 0);
 
   const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_STRING,
                                   .v = {.string_utf8_i = constant_utf8_i}};
 
-  return cf_constant_array_push(constant_pool, &constant);
+  return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
@@ -5784,7 +5783,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = node->lhs}};
     const u16 number_i =
-        cf_constant_array_push(&class_file->constant_pool, &constant);
+        cf_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     pg_assert(gen->code != NULL);
     pg_assert(gen->code->code != NULL);
@@ -5812,11 +5811,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
-        cf_constant_array_push(&class_file->constant_pool, &constant);
+        cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     if (pool_kind == CONSTANT_POOL_KIND_LONG ||
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
       const cf_constant_t dummy = {0};
-      cf_constant_array_push(&class_file->constant_pool, &dummy);
+      cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
 
       cf_asm_load_constant_double_word(
           &gen->code->code, number_i, gen->frame,
@@ -5845,31 +5844,31 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(method->descriptor.value != NULL);
     pg_assert(method->descriptor.len > 0);
     const u16 descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, method->descriptor);
+        cf_add_constant_string(&class_file->constant_pool, method->descriptor,arena);
     const u16 name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "println");
+        cf_add_constant_cstring(&class_file->constant_pool, "println",arena);
 
     const cf_constant_t name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
                                 .type_descriptor = descriptor_i}}};
-    const u16 name_and_type_i =
-        cf_constant_array_push(&class_file->constant_pool, &name_and_type);
+    const u16 name_and_type_i = cf_constant_array_push(
+        &class_file->constant_pool, &name_and_type, arena);
 
     const u16 printstream_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/io/PrintStream");
+        &class_file->constant_pool, "java/io/PrintStream",arena);
 
     const cf_constant_t printstream_class = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {.class_name = printstream_name_i}};
-    const u16 printstream_class_i =
-        cf_constant_array_push(&class_file->constant_pool, &printstream_class);
+    const u16 printstream_class_i = cf_constant_array_push(
+        &class_file->constant_pool, &printstream_class, arena);
     const cf_constant_t method_ref = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
         .v = {.method_ref = {.class = printstream_class_i,
                              .name_and_type = name_and_type_i}}};
     const u16 method_ref_i =
-        cf_constant_array_push(&class_file->constant_pool, &method_ref);
+        cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
 
     cf_asm_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method,
                           arena);
@@ -5888,7 +5887,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .value = &parser->buf[token_name.source_offset],
     };
     const u16 method_name_i =
-        cf_add_constant_string(&class_file->constant_pool, method_name);
+        cf_add_constant_string(&class_file->constant_pool, method_name,arena);
 
     // FIXME: hardcoded type.
 
@@ -5930,7 +5929,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cf_fill_type_descriptor_string(parser->types, main_type_i, &type_descriptor,
                                    arena);
     const u16 descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, type_descriptor);
+        cf_add_constant_string(&class_file->constant_pool, type_descriptor,arena);
 
     cf_method_t method = {
         .access_flags = CAF_ACC_STATIC | CAF_ACC_PUBLIC /* FIXME */,
@@ -5946,7 +5945,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_frame_init(gen->frame, arena);
 
     const u16 function_args_string = cf_add_constant_cstring(
-        &class_file->constant_pool, "[Ljava/lang/String;");
+        &class_file->constant_pool, "[Ljava/lang/String;",arena);
 
     const cf_constant_t functions_args_class = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
@@ -5954,7 +5953,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
             .class_name = function_args_string,
         }};
     const u16 functions_args_class_i = cf_constant_array_push(
-        &class_file->constant_pool, &functions_args_class);
+        &class_file->constant_pool, &functions_args_class, arena);
 
     const cf_variable_t arg0 = {
         .type_i = main_argument_types_i,
@@ -5987,7 +5986,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cf_attribute_t attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = cf_add_constant_cstring(&class_file->constant_pool,
-                                        "StackMapTable"),
+                                        "StackMapTable",arena),
         .v = {.stack_map_table = NULL}};
     pg_array_init_reserve(attribute_stack_map_frames.v.stack_map_table,
                           pg_array_len(gen->stack_map_frames), arena);
@@ -6002,7 +6001,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
-        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code"),
+        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code",arena),
         .v = {.code = code}};
     pg_array_append(method.attributes, attribute_code, arena);
 
@@ -6283,9 +6282,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .value = parser->buf + token.source_offset,
         .len = length,
     };
-    const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s);
+    const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s,arena);
     const u16 jstring_i =
-        cf_add_constant_jstring(&class_file->constant_pool, string_i);
+        cf_add_constant_jstring(&class_file->constant_pool, string_i,arena);
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jstring_i,
@@ -6334,30 +6333,30 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
   // FIXME: System.out for println.
   {
     const u16 out_name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "out");
+        cf_add_constant_cstring(&class_file->constant_pool, "out",arena);
     const u16 out_descriptor_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "Ljava/io/PrintStream;");
+        &class_file->constant_pool, "Ljava/io/PrintStream;",arena);
 
     const cf_constant_t out_name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = out_name_i,
                                 .type_descriptor = out_descriptor_i}}};
-    const u16 out_name_and_type_i =
-        cf_constant_array_push(&class_file->constant_pool, &out_name_and_type);
+    const u16 out_name_and_type_i = cf_constant_array_push(
+        &class_file->constant_pool, &out_name_and_type, arena);
 
     const u16 system_name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/System");
+        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/System",arena);
     const cf_constant_t system_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                         .v = {.class_name = system_name_i}};
-    const u16 system_class_i =
-        cf_constant_array_push(&class_file->constant_pool, &system_class);
+    const u16 system_class_i = cf_constant_array_push(
+        &class_file->constant_pool, &system_class, arena);
 
     const cf_constant_t out_field_ref = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
         .v = {.field_ref = {.name = system_class_i,
                             .type_descriptor = out_name_and_type_i}}};
-    const u16 out_field_ref_i =
-        cf_constant_array_push(&class_file->constant_pool, &out_field_ref);
+    const u16 out_field_ref_i = cf_constant_array_push(
+        &class_file->constant_pool, &out_field_ref, arena);
 
     gen->out_field_ref_i = out_field_ref_i;
   }
@@ -6366,20 +6365,20 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
     const string_t class_name =
         cg_make_class_name_from_path(class_file->file_path, arena);
     const u16 this_class_name_i =
-        cf_add_constant_string(&class_file->constant_pool, class_name);
+        cf_add_constant_string(&class_file->constant_pool, class_name,arena);
 
     const cf_constant_t this_class_info = {.kind =
                                                CONSTANT_POOL_KIND_CLASS_INFO,
                                            .v = {
                                                .class_name = this_class_name_i,
                                            }};
-    class_file->this_class =
-        cf_constant_array_push(&class_file->constant_pool, &this_class_info);
+    class_file->this_class = cf_constant_array_push(&class_file->constant_pool,
+                                                    &this_class_info, arena);
   }
 
   { // Super class
     const u16 constant_java_lang_object_string_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/Object");
+        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/Object",arena);
 
     const cf_constant_t super_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
@@ -6387,8 +6386,8 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
             .class_name = constant_java_lang_object_string_i,
         }};
 
-    class_file->super_class =
-        cf_constant_array_push(&class_file->constant_pool, &super_class_info);
+    class_file->super_class = cf_constant_array_push(&class_file->constant_pool,
+                                                     &super_class_info, arena);
   }
 }
 
