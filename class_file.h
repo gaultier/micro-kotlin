@@ -3109,6 +3109,7 @@ static void cf_read_class_files(char *path, u64 path_len,
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
+    const u64 arena_before = arena->current_offset;
     char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
@@ -3118,10 +3119,15 @@ static void cf_read_class_files(char *path, u64 path_len,
     cf_class_file_t class_file = {
         .file_path = string_make_from_c(path, arena),
     };
-    const u8 read_class_file_flags = 0;
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file,
-                           read_class_file_flags, arena);
+                           0, arena);
     pg_array_append(*class_files, class_file, arena);
+
+    const u64 arena_after = arena->current_offset;
+    const u64 delta = arena_after - arena_before;
+    LOG("cf_read_class_files path=%s count=%lu arena_delta=%lu "
+        "delta-file_size=%lu",
+        path, pg_array_len(*class_files), delta, delta - st.st_size);
     return;
   }
   if (!S_ISDIR(st.st_mode))
@@ -5843,10 +5849,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_assert(method->descriptor.value != NULL);
     pg_assert(method->descriptor.len > 0);
-    const u16 descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, method->descriptor,arena);
+    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
+                                                    method->descriptor, arena);
     const u16 name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "println",arena);
+        cf_add_constant_cstring(&class_file->constant_pool, "println", arena);
 
     const cf_constant_t name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
@@ -5856,7 +5862,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         &class_file->constant_pool, &name_and_type, arena);
 
     const u16 printstream_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/io/PrintStream",arena);
+        &class_file->constant_pool, "java/io/PrintStream", arena);
 
     const cf_constant_t printstream_class = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
@@ -5887,7 +5893,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .value = &parser->buf[token_name.source_offset],
     };
     const u16 method_name_i =
-        cf_add_constant_string(&class_file->constant_pool, method_name,arena);
+        cf_add_constant_string(&class_file->constant_pool, method_name, arena);
 
     // FIXME: hardcoded type.
 
@@ -5928,8 +5934,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     string_t type_descriptor = string_reserve(64, arena);
     cf_fill_type_descriptor_string(parser->types, main_type_i, &type_descriptor,
                                    arena);
-    const u16 descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, type_descriptor,arena);
+    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
+                                                    type_descriptor, arena);
 
     cf_method_t method = {
         .access_flags = CAF_ACC_STATIC | CAF_ACC_PUBLIC /* FIXME */,
@@ -5945,7 +5951,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_frame_init(gen->frame, arena);
 
     const u16 function_args_string = cf_add_constant_cstring(
-        &class_file->constant_pool, "[Ljava/lang/String;",arena);
+        &class_file->constant_pool, "[Ljava/lang/String;", arena);
 
     const cf_constant_t functions_args_class = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
@@ -5986,7 +5992,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cf_attribute_t attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = cf_add_constant_cstring(&class_file->constant_pool,
-                                        "StackMapTable",arena),
+                                        "StackMapTable", arena),
         .v = {.stack_map_table = NULL}};
     pg_array_init_reserve(attribute_stack_map_frames.v.stack_map_table,
                           pg_array_len(gen->stack_map_frames), arena);
@@ -6001,7 +6007,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
-        .name = cf_add_constant_cstring(&class_file->constant_pool, "Code",arena),
+        .name =
+            cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
     pg_array_append(method.attributes, attribute_code, arena);
 
@@ -6282,9 +6289,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .value = parser->buf + token.source_offset,
         .len = length,
     };
-    const u16 string_i = cf_add_constant_string(&class_file->constant_pool, s,arena);
+    const u16 string_i =
+        cf_add_constant_string(&class_file->constant_pool, s, arena);
     const u16 jstring_i =
-        cf_add_constant_jstring(&class_file->constant_pool, string_i,arena);
+        cf_add_constant_jstring(&class_file->constant_pool, string_i, arena);
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jstring_i,
@@ -6333,9 +6341,9 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
   // FIXME: System.out for println.
   {
     const u16 out_name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "out",arena);
+        cf_add_constant_cstring(&class_file->constant_pool, "out", arena);
     const u16 out_descriptor_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "Ljava/io/PrintStream;",arena);
+        &class_file->constant_pool, "Ljava/io/PrintStream;", arena);
 
     const cf_constant_t out_name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
@@ -6344,8 +6352,8 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
     const u16 out_name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &out_name_and_type, arena);
 
-    const u16 system_name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/System",arena);
+    const u16 system_name_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "java/lang/System", arena);
     const cf_constant_t system_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                         .v = {.class_name = system_name_i}};
     const u16 system_class_i = cf_constant_array_push(
@@ -6365,7 +6373,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
     const string_t class_name =
         cg_make_class_name_from_path(class_file->file_path, arena);
     const u16 this_class_name_i =
-        cf_add_constant_string(&class_file->constant_pool, class_name,arena);
+        cf_add_constant_string(&class_file->constant_pool, class_name, arena);
 
     const cf_constant_t this_class_info = {.kind =
                                                CONSTANT_POOL_KIND_CLASS_INFO,
@@ -6377,8 +6385,8 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
   }
 
   { // Super class
-    const u16 constant_java_lang_object_string_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "java/lang/Object",arena);
+    const u16 constant_java_lang_object_string_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "java/lang/Object", arena);
 
     const cf_constant_t super_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
