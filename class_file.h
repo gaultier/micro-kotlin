@@ -5947,9 +5947,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, arena);
-      cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, arena);
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
       break;
 
       // FIXME: lcmp
@@ -5983,7 +5981,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, arena);
+      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
       break;
 
     case TOKEN_KIND_EQUAL:
