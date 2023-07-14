@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
       cf_class_file_t class_file_verify = {.file_path = class_file.file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                             &tmp_arena);
+                             READ_CLASS_FILE_FLAG_ALL, &tmp_arena);
     }
   }
 }

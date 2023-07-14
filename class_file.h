@@ -1682,9 +1682,14 @@ cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
   return constant->v.s;
 }
 
+static const u8 READ_CLASS_FILE_FLAG_ALL_CONSTANTS = 0x1;
+static const u8 READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES = 0x2;
+static const u8 READ_CLASS_FILE_FLAG_ALL = 0xff;
+
 static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
                                    cf_class_file_t *class_file,
-                                   cf_attribute_t **attributes, arena_t *arena);
+                                   cf_attribute_t **attributes, u8 flags,
+                                   arena_t *arena);
 
 static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
                                              char **current,
@@ -1775,7 +1780,7 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
   cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
                                         &code.exceptions, arena);
 
-  cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
+  cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes, 0,
                          arena);
 
   cf_attribute_t attribute = {
@@ -2058,7 +2063,8 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
 
 static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
-                                  cf_attribute_t **attributes, arena_t *arena) {
+                                  cf_attribute_t **attributes, u8 flags,
+                                  arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
   pg_assert(current != NULL);
@@ -2069,8 +2075,12 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
   const u16 name_i = buf_read_be_u16(buf, buf_len, current);
   pg_assert(name_i > 0);
   const u32 size = buf_read_be_u32(buf, buf_len, current);
-
   pg_assert(*current + size <= buf + buf_len);
+
+  if ((flags & READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES) == 0){
+    buf_read_n_u8(buf, buf_len, NULL, size, current);
+    return;
+  }
 
   pg_assert(name_i <= class_file->constant_pool.len);
   const string_t attribute_name =
@@ -2151,7 +2161,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
 
 static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
                                    cf_class_file_t *class_file,
-                                   cf_attribute_t **attributes,
+                                   cf_attribute_t **attributes, u8 flags,
                                    arena_t *arena) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -2164,7 +2174,8 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
   pg_array_init_reserve(*attributes, attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
-    cf_buf_read_attribute(buf, buf_len, current, class_file, attributes, arena);
+    cf_buf_read_attribute(buf, buf_len, current, class_file, attributes, flags,
+                          arena);
   }
 }
 
@@ -2402,7 +2413,8 @@ static void cf_buf_read_constants(char *buf, u64 buf_len, char **current,
 }
 
 static void cf_buf_read_method(char *buf, u64 buf_len, char **current,
-                               cf_class_file_t *class_file, arena_t *arena) {
+                               cf_class_file_t *class_file, u8 flags,
+                               arena_t *arena) {
   cf_method_t method = {0};
   method.access_flags = buf_read_be_u16(buf, buf_len, current);
   method.name = buf_read_be_u16(buf, buf_len, current);
@@ -2414,19 +2426,20 @@ static void cf_buf_read_method(char *buf, u64 buf_len, char **current,
   pg_assert(method.descriptor <= class_file->constant_pool.len);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
-                         arena);
+                         flags, arena);
 
   pg_array_append(class_file->methods, method, arena);
 }
 
 static void cf_buf_read_methods(char *buf, u64 buf_len, char **current,
-                                cf_class_file_t *class_file, arena_t *arena) {
+                                cf_class_file_t *class_file, u8 flags,
+                                arena_t *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, buf_len, current);
   pg_array_init_reserve(class_file->methods, methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
-    cf_buf_read_method(buf, buf_len, current, class_file, arena);
+    cf_buf_read_method(buf, buf_len, current, class_file, flags, arena);
   }
 }
 
@@ -2479,7 +2492,7 @@ static void cf_buf_read_field(char *buf, u64 buf_len, char **current,
   pg_assert(field.descriptor <= class_file->constant_pool.len);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &field.attributes,
-                         arena);
+                         0, arena);
 
   pg_array_append(class_file->fields, field, arena);
 }
@@ -2496,7 +2509,7 @@ static void cf_buf_read_fields(char *buf, u64 buf_len, char **current,
 }
 
 static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
-                                   cf_class_file_t *class_file,
+                                   cf_class_file_t *class_file, u8 flags,
                                    arena_t *arena) {
 
   pg_assert(buf != NULL);
@@ -2538,10 +2551,10 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
 
   cf_buf_read_fields(buf, buf_len, current, class_file, arena);
 
-  cf_buf_read_methods(buf, buf_len, current, class_file, arena);
+  cf_buf_read_methods(buf, buf_len, current, class_file, flags, arena);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file,
-                         &class_file->attributes, arena);
+                         &class_file->attributes, flags, arena);
 
   const u64 remaining = buf + buf_len - *current;
   pg_assert(remaining == 0);
@@ -3106,7 +3119,9 @@ static void cf_read_class_files(char *path, u64 path_len,
     cf_class_file_t class_file = {
         .file_path = string_make_from_c(path, arena),
     };
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
+    const u8 read_class_file_flags = 0;
+    cf_buf_read_class_file(buf, read_bytes, &current, &class_file,
+                           read_class_file_flags, arena);
     pg_array_append(*class_files, class_file, arena);
     return;
   }
