@@ -754,16 +754,23 @@ static void cg_frame_stack_push(cg_frame_t *frame,
   pg_assert(frame->stack_count +
                 cf_verification_info_kind_word_count(verification_info.kind) <
             UINT16_MAX);
+
+  if (verification_info.kind == VERIFICATION_INFO_LONG ||
+      verification_info.kind == VERIFICATION_INFO_DOUBLE) {
+    pg_array_append(frame->stack,
+                    (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP},
+                    arena);
+  }
   pg_array_append(frame->stack, verification_info, arena);
 
-  frame->stack_count +=
-      cf_verification_info_kind_word_count(verification_info.kind);
+  frame->stack_count += 1;
   frame->max_stack = pg_max(frame->max_stack, frame->stack_count);
 }
 
 static void cg_frame_stack_pop(cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
+  pg_assert(frame->stack_count >= 1);
 
   const u64 word_count =
       cf_verification_info_kind_word_count(pg_array_last(frame->stack)->kind);
@@ -773,7 +780,7 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
 
   pg_array_drop_last_n(frame->stack, word_count);
 
-  frame->stack_count -= word_count;
+  frame->stack_count -= 1;
 }
 
 // Probably should not behave like a FIFO and rather like an array.
@@ -856,6 +863,8 @@ typedef struct cf_constant_method_ref_t cf_constant_method_ref_t;
 typedef struct cf_constant_name_and_type_t cf_constant_name_and_type_t;
 
 typedef struct cf_constant_field_ref_t cf_constant_field_ref_t;
+
+typedef enum cp_info_kind_t cp_info_kind_t;
 
 typedef struct {
   u64 len;
@@ -1532,6 +1541,18 @@ static void file_write_be_u32(FILE *file, u32 x) {
   fwrite(x_be, sizeof(x_be), 1, file);
 }
 
+static void file_write_be_u64(FILE *file, u64 x) {
+  pg_assert(file != NULL);
+
+  const u8 x_be[8] = {
+      (x & 0xfff0000000000000) >> 56, (x & 0x00ff000000000000) >> 48,
+      (x & 0x0000ff0000000000) >> 40, (x & 0x000000ff00000000) >> 32,
+      (x & 0x00000000ff000000) >> 24, (x & 0x0000000000ff0000) >> 16,
+      (x & 0x000000000000ff00) >> 8,  (x & 0x00000000000000ff) >> 0,
+  };
+  fwrite(x_be, sizeof(x_be), 1, file);
+}
+
 static u16 buf_read_be_u16(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
@@ -2076,8 +2097,8 @@ static void cf_buf_read_attributes(char *buf, u64 buf_len, char **current,
 }
 
 static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
-                                 cf_class_file_t *class_file, u64 *i,
-                                 u16 constant_pool_len) {
+                                 cf_class_file_t *class_file,
+                                 u16 constant_pool_count) {
   u8 kind = buf_read_u8(buf, buf_len, current);
 
   if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT ||
@@ -2117,7 +2138,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const u32 value = buf_read_be_u32(buf, buf_len, current);
     pg_unused(value);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
@@ -2125,39 +2146,29 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const u32 value = buf_read_be_u32(buf, buf_len, current);
     pg_unused(value);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
     break;
   }
+  case CONSTANT_POOL_KIND_DOUBLE:
   case CONSTANT_POOL_KIND_LONG: {
     const u32 high = buf_read_be_u32(buf, buf_len, current);
     pg_unused(high);
     const u32 low = buf_read_be_u32(buf, buf_len, current);
     pg_unused(low);
 
-    const cf_constant_t constant = {0}; // FIXME
+    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
-    cf_constant_array_push(&class_file->constant_pool, &constant);
-    *i += 1;
-    break;
-  }
-  case CONSTANT_POOL_KIND_DOUBLE: {
-    const u32 high = buf_read_be_u32(buf, buf_len, current);
-    pg_unused(high);
-    const u32 low = buf_read_be_u32(buf, buf_len, current);
-    pg_unused(low);
 
-    const cf_constant_t constant = {0}; // FIXME
-    cf_constant_array_push(&class_file->constant_pool, &constant);
-    cf_constant_array_push(&class_file->constant_pool, &constant);
-    *i += 1;
-
+    // Read and ignore next slot.
+    cf_buf_read_constant(buf, buf_len, current, class_file,
+                         constant_pool_count);
     break;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
     const u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_name_i > 0);
-    pg_assert(class_name_i <= constant_pool_len);
+    pg_assert(class_name_i <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                     .v = {.class_name = class_name_i}};
@@ -2167,7 +2178,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_STRING: {
     const u16 utf8_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(utf8_i > 0);
-    pg_assert(utf8_i <= constant_pool_len);
+    pg_assert(utf8_i <= constant_pool_count);
 
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_STRING,
                                     .v = {.string_utf8_i = utf8_i}};
@@ -2177,11 +2188,11 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_FIELD_REF: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
-    pg_assert(name_i <= constant_pool_len);
+    pg_assert(name_i <= constant_pool_count);
 
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor_i > 0);
-    pg_assert(descriptor_i <= constant_pool_len);
+    pg_assert(descriptor_i <= constant_pool_count);
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
@@ -2192,11 +2203,11 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_METHOD_REF: {
     const u16 class_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_i > 0);
-    pg_assert(class_i <= constant_pool_len);
+    pg_assert(class_i <= constant_pool_count);
 
     const u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_i > 0);
-    pg_assert(name_and_type_i <= constant_pool_len);
+    pg_assert(name_and_type_i <= constant_pool_count);
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
@@ -2208,11 +2219,11 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF: {
     const u16 class_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(class_i > 0);
-    pg_assert(class_i <= constant_pool_len);
+    pg_assert(class_i <= constant_pool_count);
 
     const u16 name_and_type_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_i > 0);
-    pg_assert(name_and_type_i <= constant_pool_len);
+    pg_assert(name_and_type_i <= constant_pool_count);
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
@@ -2223,11 +2234,11 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
-    pg_assert(name_i <= constant_pool_len);
+    pg_assert(name_i <= constant_pool_count);
 
     const u16 descriptor_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor_i > 0);
-    pg_assert(descriptor_i <= constant_pool_len);
+    pg_assert(descriptor_i <= constant_pool_count);
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
@@ -2249,7 +2260,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_METHOD_TYPE: {
     const u16 descriptor = buf_read_be_u16(buf, buf_len, current);
     pg_assert(descriptor > 0);
-    pg_assert(descriptor <= constant_pool_len);
+    pg_assert(descriptor <= constant_pool_count);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -2262,7 +2273,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_index > 0);
-    pg_assert(name_and_type_index <= constant_pool_len);
+    pg_assert(name_and_type_index <= constant_pool_count);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -2275,7 +2286,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const u16 name_and_type_index = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_and_type_index > 0);
-    pg_assert(name_and_type_index <= constant_pool_len);
+    pg_assert(name_and_type_index <= constant_pool_count);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -2284,7 +2295,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_MODULE: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
-    pg_assert(name_i <= constant_pool_len);
+    pg_assert(name_i <= constant_pool_count);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -2293,7 +2304,7 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
   case CONSTANT_POOL_KIND_PACKAGE: {
     const u16 name_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(name_i > 0);
-    pg_assert(name_i <= constant_pool_len);
+    pg_assert(name_i <= constant_pool_count);
 
     const cf_constant_t constant = {0}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant);
@@ -2306,10 +2317,10 @@ static void cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
 static void cf_buf_read_constants(char *buf, u64 buf_len, char **current,
                                   cf_class_file_t *class_file,
-                                  u16 constant_pool_len) {
-  for (u64 i = 1; i <= constant_pool_len; i++) {
-    cf_buf_read_constant(buf, buf_len, current, class_file, &i,
-                         constant_pool_len);
+                                  u16 constant_pool_count) {
+  for (u64 i = 1; i <= constant_pool_count; i++) {
+    cf_buf_read_constant(buf, buf_len, current, class_file,
+                         constant_pool_count);
   }
 }
 
@@ -2427,22 +2438,24 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   class_file->minor_version = buf_read_be_u16(buf, buf_len, current);
   class_file->major_version = buf_read_be_u16(buf, buf_len, current);
 
-  const u16 constant_pool_size = buf_read_be_u16(buf, buf_len, current) - 1;
-  pg_assert(constant_pool_size > 0);
-  class_file->constant_pool = cf_constant_array_make(constant_pool_size, arena);
+  const u16 constant_pool_count = buf_read_be_u16(buf, buf_len, current) - 1;
+  pg_assert(constant_pool_count > 0);
+  class_file->constant_pool = cf_constant_array_make(
+      constant_pool_count * 2,
+      arena); // Worst case: only LONG or DOUBLE entries which take 2 slots.
   pg_assert(class_file->constant_pool.values != NULL);
   pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
 
-  cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_size);
+  cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_count);
 
   class_file->access_flags = buf_read_be_u16(buf, buf_len, current);
 
   class_file->this_class = buf_read_be_u16(buf, buf_len, current);
   pg_assert(class_file->this_class > 0);
-  pg_assert(class_file->this_class <= constant_pool_size);
+  pg_assert(class_file->this_class <= constant_pool_count);
 
   class_file->super_class = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(class_file->super_class <= constant_pool_size);
+  pg_assert(class_file->super_class <= constant_pool_count);
 
   cf_buf_read_interfaces(buf, buf_len, current, class_file, arena);
 
@@ -2463,37 +2476,29 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   pg_assert(file != NULL);
   pg_assert(constant != NULL);
 
+  fwrite(&constant->kind, sizeof(u8), 1, file);
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_UTF8: {
-    fwrite(&constant->kind, sizeof(u8), 1, file);
     const string_t *const s = &constant->v.s;
     file_write_be_u16(file, s->len);
     fwrite(s->value, sizeof(u8), s->len, file);
     break;
   }
+  case CONSTANT_POOL_KIND_FLOAT:
   case CONSTANT_POOL_KIND_INT:
-    fwrite(&constant->kind, sizeof(u8), 1, file);
     file_write_be_u32(file, constant->v.number);
     break;
-  case CONSTANT_POOL_KIND_FLOAT:
-    pg_assert(0 && "unimplemented");
-    break;
   case CONSTANT_POOL_KIND_LONG:
-    pg_assert(0 && "unimplemented");
-    break;
   case CONSTANT_POOL_KIND_DOUBLE:
-    pg_assert(0 && "unimplemented");
+    file_write_be_u64(file, constant->v.number);
     break;
   case CONSTANT_POOL_KIND_CLASS_INFO:
-    fwrite(&constant->kind, sizeof(u8), 1, file);
     file_write_be_u16(file, constant->v.class_name);
     break;
   case CONSTANT_POOL_KIND_STRING:
-    fwrite(&constant->kind, sizeof(u8), 1, file);
     file_write_be_u16(file, constant->v.string_utf8_i);
     break;
   case CONSTANT_POOL_KIND_FIELD_REF: {
-    fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const cf_constant_field_ref_t *const field_ref = &constant->v.field_ref;
 
@@ -2502,7 +2507,6 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
-    fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const cf_constant_method_ref_t *const method_ref = &constant->v.method_ref;
 
@@ -2514,7 +2518,6 @@ static void cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     pg_assert(0 && "unimplemented");
     break;
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
-    fwrite(&constant->kind, sizeof(u8), 1, file);
 
     const cf_constant_name_and_type_t *const name_and_type =
         &constant->v.name_and_type;
@@ -2536,8 +2539,18 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  const u16 len = class_file->constant_pool.len + 1;
-  file_write_be_u16(file, len);
+  u16 count = 1;
+  for (u64 i = 0; i < class_file->constant_pool.len; i++) {
+    pg_assert(count <= UINT16_MAX);
+    count += 1;
+
+    const cp_info_kind_t kind = class_file->constant_pool.values[i].kind;
+
+    if (kind == CONSTANT_POOL_KIND_LONG ||
+        kind == CONSTANT_POOL_KIND_DOUBLE) // Skip next entry in that case
+      i++;
+  }
+  file_write_be_u16(file, count);
 
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
     pg_assert(class_file->constant_pool.values != NULL);
@@ -2545,6 +2558,11 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
     cf_write_constant(class_file, file, constant);
+
+    if (constant->kind == CONSTANT_POOL_KIND_LONG ||
+        constant->kind ==
+            CONSTANT_POOL_KIND_DOUBLE) // Skip next entry in that case
+      i++;
   }
 }
 static void cf_write_interfaces(const cf_class_file_t *class_file, FILE *file) {
@@ -3298,6 +3316,13 @@ static u32 lex_number_length(const char *buf, u32 buf_len, u32 current_offset) {
   return len;
 }
 
+static bool lex_has_number_long_suffix(const char *buf, u32 buf_len,
+                                       lex_token_t token) {
+  pg_assert(token.kind == TOKEN_KIND_NUMBER);
+  const u32 length = lex_number_length(buf, buf_len, token.source_offset);
+  return buf[token.source_offset + length - 1] == 'L';
+}
+
 static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
   pg_assert(buf != NULL);
   pg_assert(buf_len > 0);
@@ -3796,7 +3821,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 
 typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
-  AST_KIND_NUM,
+  AST_KIND_NUMBER,
   AST_KIND_BOOL,
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
@@ -3813,7 +3838,7 @@ typedef enum __attribute__((packed)) {
 
 static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = "NONE",
-    [AST_KIND_NUM] = "NUM",
+    [AST_KIND_NUMBER] = "NUMBER",
     [AST_KIND_BOOL] = "BOOL",
     [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
@@ -4125,12 +4150,16 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
   }
 }
 
-static u64 par_number(const par_parser_t *parser, lex_token_t token) {
+static const u8 NUMBER_FLAGS_LONG = 0x1;
+
+static u64 par_number(const par_parser_t *parser, lex_token_t token,
+                      u8 *number_flags) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(number_flags != NULL);
 
   pg_assert(token.kind == TOKEN_KIND_NUMBER);
 
@@ -4148,7 +4177,14 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token) {
     pg_assert(start <= position);
 
     const u8 c = parser->buf[position];
-    pg_assert('0' <= c && c <= '9');
+    pg_assert(lex_is_digit(c) || c == 'L' || c == '_');
+    if (c == '_')
+      continue;
+    if (c == 'L') {
+      *number_flags |= NUMBER_FLAGS_LONG;
+      continue;
+    }
+
     number += ten_unit * (c - '0');
     ten_unit *= 10;
   }
@@ -4316,7 +4352,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
   if (par_match_token(parser, TOKEN_KIND_NUMBER)) {
 
     const par_ast_node_t node = {
-        .kind = AST_KIND_NUM,
+        .kind = AST_KIND_NUMBER,
         .main_token_i = parser->tokens_i - 1,
     };
     return par_add_node(parser, &node, arena);
@@ -5140,10 +5176,17 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     return return_type_i;
   }
-  case AST_KIND_NUM:
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_INT},
+  case AST_KIND_NUMBER: {
+    cf_type_kind_t kind = TYPE_INT;
+
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+    if (lex_has_number_long_suffix(parser->buf, parser->buf_len, token))
+      kind = TYPE_LONG;
+
+    pg_array_append(parser->types, (par_type_t){.kind = kind},
                     arena); // TODO: something smarter.
     return node->type_i = pg_array_last_index(parser->types);
+  }
   case AST_KIND_UNARY:
     return node->type_i =
                ty_resolve_types(parser, class_files, node->lhs, arena);
@@ -5649,23 +5692,42 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                          verification_info, arena);
     break;
   }
-  case AST_KIND_NUM: {
+  case AST_KIND_NUMBER: {
     pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
     const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
-    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
-                                    .v = {.number = par_number(parser, token)}};
+    u8 number_flags = 0;
+    const u64 number = par_number(parser, token, &number_flags);
+    cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
+    cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
+    if (number_flags & NUMBER_FLAGS_LONG) {
+      pool_kind = CONSTANT_POOL_KIND_LONG;
+      verification_info_kind = VERIFICATION_INFO_LONG;
+    } else {
+      // TODO: check number <= UINT32_MAX
+    }
+    // TODO: Float, Double, etc.
+
+    const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant);
 
-    pg_assert(gen->code != NULL);
-    pg_assert(gen->code->code != NULL);
-    pg_assert(gen->frame != NULL);
+    if (pool_kind == CONSTANT_POOL_KIND_LONG ||
+        pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
+      // Quote from
+      // https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.4:
+      // If a CONSTANT_Long_info or CONSTANT_Double_info structure is the item
+      // in the constant_pool table at index n, then the next usable item in the
+      // pool is located at index n+2. The constant_pool index n+1 must be valid
+      // but is considered unusable. In retrospect, making 8-byte constants take
+      // two constant pool entries was a poor choice.
+      const cf_constant_t dummy = {.kind = CONSTANT_POOL_KIND_INT};
+      cf_constant_array_push(&class_file->constant_pool, &dummy);
+    }
 
-    const cf_verification_info_t verification_info = {
-        .kind = VERIFICATION_INFO_INT}; // FIXME: Long?
-    cf_asm_load_constant(&gen->code->code, number_i, gen->frame,
-                         verification_info, arena);
+    cf_asm_load_constant(
+        &gen->code->code, number_i, gen->frame,
+        (cf_verification_info_t){.kind = verification_info_kind}, arena);
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
@@ -5978,7 +6040,19 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       const u32 var_i = cf_find_variable(gen->frame, lhs->lhs);
       pg_assert(var_i != (u32)-1);
-      cf_asm_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
+
+      const par_type_t *const type = &parser->types[node->type_i];
+
+      switch (type->kind) {
+      case TYPE_INT:
+        cf_asm_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
+        break;
+      case TYPE_LONG:
+        pg_assert(0 && "todo");
+        break;
+      default:
+        pg_assert(0 && "todo");
+      }
       break;
 
     default:
