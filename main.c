@@ -67,9 +67,8 @@ int main(int argc, char *argv[]) {
 
     // Debug AST.
     {
-      const u64 arena_offset_before = arena.current_offset;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
-      arena.current_offset = arena_offset_before;
+      arena_t tmp_arena = arena;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
     }
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
@@ -89,9 +88,8 @@ int main(int argc, char *argv[]) {
 
     // Debug types.
     {
-      const u64 arena_offset_before = arena.current_offset;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &arena);
-      arena.current_offset = arena_offset_before;
+      arena_t tmp_arena = arena;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
     }
 
     if (parser.state != PARSER_STATE_OK)
@@ -120,6 +118,7 @@ int main(int argc, char *argv[]) {
 
     LOG("arena=%lu", arena.current_offset);
     {
+      arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
 
       int fd = open(class_file.file_path.value, O_RDONLY);
@@ -139,7 +138,7 @@ int main(int argc, char *argv[]) {
       pg_assert(st.st_size <= UINT32_MAX);
 
       const u32 buf_len = st.st_size;
-      char *const buf = arena_alloc(&arena, buf_len, sizeof(u8));
+      char *const buf = arena_alloc(&tmp_arena, buf_len, sizeof(u8));
 
       pg_assert(read(fd, buf, buf_len) == buf_len);
       close(fd);
@@ -147,7 +146,7 @@ int main(int argc, char *argv[]) {
       cf_class_file_t class_file_verify = {.file_path = class_file.file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                             &arena);
+                             &tmp_arena);
     }
   }
 }

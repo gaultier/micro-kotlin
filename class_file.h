@@ -6056,16 +6056,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_irem(&gen->code->code, gen->frame, arena);
-      LOG("after node_i=%u stack_len=%lu", node_i,
-          pg_array_len(gen->frame->stack));
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_iand(&gen->code->code, gen->frame, arena);
-      LOG("after node_i=%u stack_len=%lu", node_i,
-          pg_array_len(gen->frame->stack));
       break;
 
     case TOKEN_KIND_PIPE_PIPE:

@@ -38,6 +38,7 @@
 [ ] Multiple files
 [ ] Packages
 [ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
+[ ] Defend against integer overflows
 
 Later, nice to have:
 
