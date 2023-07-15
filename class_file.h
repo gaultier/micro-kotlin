@@ -524,6 +524,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IADD = 0x60,
   BYTECODE_LADD = 0x61,
   BYTECODE_IMUL = 0x68,
+  BYTECODE_LMUL = 0x69,
   BYTECODE_IDIV = 0x6c,
   BYTECODE_IREM = 0x70,
   BYTECODE_INEG = 0x74,
@@ -1308,23 +1309,37 @@ static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_imul(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_mul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
-            VERIFICATION_INFO_INT);
 
-  cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
+  const cf_verification_info_kind_t kind_a =
+      frame->stack[pg_array_len(frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(code, BYTECODE_LMUL, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
 
   cg_frame_stack_pop(frame);
   cg_frame_stack_pop(frame);
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
+  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
 static void cf_asm_idiv(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -6093,7 +6108,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_STAR:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_imul(&gen->code->code, gen->frame, arena);
+      cf_asm_mul(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_SLASH:
