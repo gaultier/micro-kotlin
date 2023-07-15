@@ -527,6 +527,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IDIV = 0x6c,
   BYTECODE_IREM = 0x70,
   BYTECODE_INEG = 0x74,
+  BYTECODE_LNEG = 0x75,
   BYTECODE_IAND = 0x7e,
   BYTECODE_IOR = 0x80,
   BYTECODE_IXOR = 0x82,
@@ -1226,15 +1227,24 @@ static void cf_asm_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_ineg(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_neg(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(pg_array_last(frame->stack)->kind == VERIFICATION_INFO_INT);
+  const cf_verification_info_kind_t kind = pg_array_last(frame->stack)->kind;
 
-  cf_code_array_push_u8(code, BYTECODE_INEG, arena);
+  switch (kind) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(code, BYTECODE_INEG, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(code, BYTECODE_LNEG, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
 }
 
 static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
@@ -4709,7 +4719,8 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  if (par_match_token(parser, TOKEN_KIND_NOT)) {
+  if (par_match_token(parser, TOKEN_KIND_NOT) ||
+      par_match_token(parser, TOKEN_KIND_MINUS)) {
     const par_ast_node_t node = {
         .kind = AST_KIND_UNARY,
         // Departure from the official grammer but I believe it must be (!?)
@@ -6039,11 +6050,15 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-
       cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
       cf_asm_ixor(&gen->code->code, gen->frame, arena);
-
       break;
+
+    case TOKEN_KIND_MINUS:
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cf_asm_neg(&gen->code->code, gen->frame, arena);
+      break;
+
     default:
       pg_assert(0 && "unimplemented");
     }
@@ -6070,7 +6085,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_ineg(&gen->code->code, gen->frame, arena);
+      cf_asm_neg(&gen->code->code, gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cf_asm_add(&gen->code->code, gen->frame, arena);
       break;
