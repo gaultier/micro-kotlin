@@ -1377,18 +1377,33 @@ static void cf_asm_div(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_irem(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
-            VERIFICATION_INFO_INT);
 
-  cf_code_array_push_u8(code, BYTECODE_IREM, arena);
+  const cf_verification_info_kind_t kind_a =
+      frame->stack[pg_array_len(frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(code, BYTECODE_IREM, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(code, BYTECODE_LREM, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
 
   cg_frame_stack_pop(frame);
   cg_frame_stack_pop(frame);
@@ -6136,7 +6151,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_PERCENT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_irem(&gen->code->code, gen->frame, arena);
+      cf_asm_rem(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
