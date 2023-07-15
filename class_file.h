@@ -1412,7 +1412,7 @@ static void cf_asm_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_bitwise_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1445,7 +1445,7 @@ static void cf_asm_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_bitwise_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -6186,13 +6186,15 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_and(&gen->code->code, gen->frame, arena);
+      // FIXME!
+      cf_asm_bitwise_and(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_PIPE_PIPE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_or(&gen->code->code, gen->frame, arena);
+      // FIXME!
+      cf_asm_bitwise_or(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
