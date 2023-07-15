@@ -522,6 +522,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_LSTORE = 0x37,
   BYTECODE_POP = 0x57,
   BYTECODE_IADD = 0x60,
+  BYTECODE_LADD = 0x61,
   BYTECODE_IMUL = 0x68,
   BYTECODE_IDIV = 0x6c,
   BYTECODE_IREM = 0x70,
@@ -1195,18 +1196,32 @@ static void cf_asm_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
-static void cf_asm_iadd(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cf_asm_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
   pg_assert(pg_array_len(frame->stack) >= 2);
   pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
-            VERIFICATION_INFO_INT);
+  const cf_verification_info_kind_t kind_a =
+      frame->stack[pg_array_len(frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
 
-  cf_code_array_push_u8(code, BYTECODE_IADD, arena);
+  const cf_verification_info_kind_t kind_b =
+      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(code, BYTECODE_IADD, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(code, BYTECODE_LADD, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
 
   cg_frame_stack_pop(frame);
 }
@@ -3119,8 +3134,7 @@ static void cf_read_class_files(char *path, u64 path_len,
     cf_class_file_t class_file = {
         .file_path = string_make_from_c(path, arena),
     };
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file,
-                           0, arena);
+    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
     pg_array_append(*class_files, class_file, arena);
 
     const u64 arena_after = arena->current_offset;
@@ -6051,14 +6065,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_PLUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_iadd(&gen->code->code, gen->frame, arena);
+      cf_asm_add(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       cf_asm_ineg(&gen->code->code, gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cf_asm_iadd(&gen->code->code, gen->frame, arena);
+      cf_asm_add(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_STAR:
