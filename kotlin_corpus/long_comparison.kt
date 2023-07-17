@@ -23,4 +23,17 @@ fun main() {
   } else {
     println(7)
   }
+
+  if (2L == 1L+1L){
+    println(8)
+  } else {
+    println(9)
+  }
+
+  if (3L != 1L+1L){
+    println(10)
+  } else {
+    println(11)
+  }
+
 }

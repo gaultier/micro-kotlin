@@ -4968,7 +4968,8 @@ static u32 par_parse_equality(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   const u32 node_i = par_parse_comparison(parser, arena);
-  if (!par_match_token(parser, TOKEN_KIND_EQUAL_EQUAL))
+  if (!(par_match_token(parser, TOKEN_KIND_EQUAL_EQUAL) ||
+        par_match_token(parser, TOKEN_KIND_NOT_EQUAL)))
     return node_i;
 
   const par_ast_node_t node = {
@@ -5414,6 +5415,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
     case TOKEN_KIND_GE:
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE:
+    case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
       pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
       return node->type_i = pg_array_last_index(parser->types);
@@ -5563,10 +5565,10 @@ static void cg_begin_scope(cg_generator_t *gen) {
 }
 
 // TODO: interleaved stack map frames are real! (?)
-// We need to first store all of the stack map frames absolute offset locations
-// (aka: jump targets) *and then* sort them (or perhaps insert in the right
-// sorted location in the first place) and compute all the delta data and delta
-// offsets in the right order.
+// We need to first store all of the stack map frames absolute offset
+// locations (aka: jump targets) *and then* sort them (or perhaps insert in
+// the right sorted location in the first place) and compute all the delta
+// data and delta offsets in the right order.
 static void
 stack_map_record_frame_at_pc(const cg_frame_t *frame,
                              cf_stack_map_frame_t **stack_map_frames, u16 pc,
@@ -5608,8 +5610,8 @@ static void cg_end_scope(cg_generator_t *gen) {
   gen->frame->scope_depth -= 1;
 }
 
-// TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable slot
-// number? Or use a lookup table?
+// TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable
+// slot number? Or use a lookup table?
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -5711,6 +5713,62 @@ static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
     cf_asm_lcmp(&gen->code->code, gen->frame, arena);
     cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
+static void cg_emit_ne(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IFEQ, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
+static void cg_emit_eq(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IFNE, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -5946,8 +6004,8 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
         i == 0 ? stack_map_frame->pc
                : (stack_map_frame->pc - stack_map_frames[i - 1].pc - 1);
 
-    if (offset_delta ==
-        -1) // Duplicate jump target, already has a valid stack map frame, skip.
+    if (offset_delta == -1) // Duplicate jump target, already has a valid
+                            // stack map frame, skip.
     {
       stack_map_frame->tombstone = true;
       continue;
@@ -6316,7 +6374,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+      cg_emit_eq(gen, arena);
       break;
 
     case TOKEN_KIND_LE:
@@ -6346,8 +6404,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      // FIXME
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+      cg_emit_ne(gen, arena);
       break;
 
     case TOKEN_KIND_EQUAL:
