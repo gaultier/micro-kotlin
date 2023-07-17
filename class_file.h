@@ -6421,6 +6421,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND: {
+      // Since the if_xxx opcodes always pop the condition off the stack,
+      // there is no simple way to push 0 on the stack if `lhs` is falsey.
+      // We have to use this contrived way, short of advanced CFG analysis. :(
+      //
       // clang-format off
       //
       // a && b
@@ -6430,9 +6434,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       // if (a) {
       //   if (b) {
       //     push 1 
-      //   } else  {
-      //     push 0
-      //   }
+      //   }  
       // } else {
       //   push 0
       // }
