@@ -5389,7 +5389,20 @@ static u32 ty_resolve_types(par_parser_t *parser,
   case AST_KIND_UNARY:
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      pg_assert(0 && "todo");
+      node->type_i = ty_resolve_types(parser, class_files, node->lhs, arena);
+      const par_type_t *const type = &parser->types[node->type_i];
+      if (type->kind != TYPE_BOOL) {
+        string_t error = string_reserve(256, arena);
+        string_append_cstring(&error, "incompatible types: got ", arena);
+        string_append_string(
+            &error, ty_type_to_human_string(parser->types, node->type_i, arena),
+            arena);
+        string_append_cstring(&error, ", expected Boolean ", arena);
+        par_error(parser, token, error.value);
+        return 0;
+      }
+
+      return node->type_i;
     case TOKEN_KIND_MINUS:
       return node->type_i =
                  ty_resolve_types(parser, class_files, node->lhs, arena);
@@ -6056,7 +6069,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
@@ -6320,7 +6333,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
-
 
     switch (token.kind) {
     case TOKEN_KIND_NONE:
