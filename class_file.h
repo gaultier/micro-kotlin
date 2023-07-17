@@ -2651,13 +2651,6 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
-static void cf_method_init(cf_method_t *method, arena_t *arena) {
-  pg_assert(method != NULL);
-  pg_assert(arena != NULL);
-
-  pg_array_init_reserve(method->attributes, 1024, arena);
-}
-
 static u16 cf_add_constant_string(cf_constant_array_t *constant_pool,
                                   string_t s, arena_t *arena) {
   pg_assert(constant_pool != NULL);
@@ -6284,7 +6277,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
-    pg_array_init_reserve(method.attributes, 8, arena);
+    pg_array_init_reserve(method.attributes, 1, arena);
 
     cf_attribute_code_t code = {0};
     cf_attribute_code_init(&code, arena);
