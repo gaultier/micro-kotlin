@@ -5571,7 +5571,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
 typedef struct {
   cf_attribute_code_t *code;
   cg_frame_t *frame;
-  cg_frame_t *first_method_frame;
   const cf_class_file_t *class_files;
   cf_stack_map_frame_t *stack_map_frames;
   u16 out_field_ref_i;
@@ -6267,7 +6266,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     };
     cg_frame_locals_push(gen->frame, &arg0, arena);
 
-    gen->first_method_frame = cg_frame_clone(gen->frame, arena);
+    cg_frame_t* const first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
     // TODO: Handle `lhs`.
@@ -6281,7 +6280,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals = gen->frame->max_locals;
 
-    stack_map_resolve_frames(gen->first_method_frame, gen->stack_map_frames,
+    stack_map_resolve_frames(first_method_frame, gen->stack_map_frames,
                              arena);
 
     cf_attribute_t attribute_stack_map_frames = {
