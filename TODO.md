@@ -23,13 +23,14 @@
 [ ] Grouping
 [ ] Casts
 [.] Long
-[ ] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
+[ ] Refactor/rename stuff
+[x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
 [ ] Byte, Char, Short
 [ ] Double, Float
 [x] Control flow: If
 [x] Logical operator !
 [x] Comparison operators <,<=,>,>=,==,!=
-[x] Logical operators (and, or)
+[.] Logical operators (and, or)
 [x] Control flow: While
 [ ] Control flow: Continue
 [ ] Control flow: Break
