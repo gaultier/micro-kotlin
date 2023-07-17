@@ -5688,6 +5688,122 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
                                unconditional_jump_target_absolute, arena);
 }
 
+static void cg_emit_if_cmp_gt(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
+static void cg_emit_if_cmp_ge(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cf_asm_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
+static void cg_emit_if_cmp_le(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
+static void cg_emit_if_cmp_lt(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen->frame != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cf_asm_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
 static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
                                  cf_class_file_t *class_file, u32 node_i,
                                  arena_t *arena) {
@@ -6203,37 +6319,34 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
       break;
 
-      // FIXME: lcmp
     case TOKEN_KIND_LE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
+      cg_emit_if_cmp_le(gen, arena);
       break;
 
-      // FIXME: lcmp
     case TOKEN_KIND_LT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
+      cg_emit_if_cmp_lt(gen, arena);
       break;
 
-      // FIXME: lcmp
     case TOKEN_KIND_GT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
+      cg_emit_if_cmp_gt(gen, arena);
       break;
 
-      // FIXME: lcmp
     case TOKEN_KIND_GE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
+      cg_emit_if_cmp_ge(gen, arena);
       break;
 
     case TOKEN_KIND_NOT_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      // FIXME
       cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
       break;
 
