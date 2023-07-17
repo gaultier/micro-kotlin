@@ -5310,6 +5310,8 @@ static u32 ty_resolve_types(par_parser_t *parser,
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   par_ast_node_t *const node = &parser->nodes[node_i];
+  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+
   switch (node->kind) {
   case AST_KIND_NONE:
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_ANY}, arena);
@@ -5346,7 +5348,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
     if (!cf_class_files_find_method_exactly(
             class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
             string_make_from_c_no_alloc("println"), descriptor)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -5363,8 +5364,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
   }
   case AST_KIND_NUMBER: {
     cf_type_kind_t kind = TYPE_INT;
-
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     u8 number_flags = 0;
     // TODO: should we memoize this to avoid parsing it twice?
@@ -5388,14 +5387,21 @@ static u32 ty_resolve_types(par_parser_t *parser,
     return node->type_i = pg_array_last_index(parser->types);
   }
   case AST_KIND_UNARY:
-    return node->type_i =
-               ty_resolve_types(parser, class_files, node->lhs, arena);
+    switch (token.kind) {
+    case TOKEN_KIND_NOT:
+      pg_assert(0 && "todo");
+    case TOKEN_KIND_MINUS:
+      return node->type_i =
+                 ty_resolve_types(parser, class_files, node->lhs, arena);
+
+    default:
+      pg_assert(0 && "todo");
+    }
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
     const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
     const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     if (!ty_merge_types(parser->types, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
@@ -5449,7 +5455,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     if (!cf_class_files_find_class_exactly(class_files, type_literal_string,
                                            alternate_type_string)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
       string_append_string(&error, type_literal_string, arena);
@@ -5465,7 +5470,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
         ty_type_to_human_string(parser->types, type_lhs_i, arena);
 
     if (!string_eq(type_literal_string, type_inferred_string)) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(&error, type_literal_string, arena);
@@ -5490,7 +5494,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
         ty_resolve_types(parser, class_files, node->lhs, arena);
 
     if (parser->types[type_condition_i].kind != TYPE_BOOL) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -5517,7 +5520,6 @@ static u32 ty_resolve_types(par_parser_t *parser,
         ty_resolve_types(parser, class_files, node->lhs, arena);
 
     if (parser->types[type_condition_i].kind != TYPE_BOOL) {
-      const lex_token_t token = parser->lexer->tokens[node->main_token_i];
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6054,6 +6056,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   pg_assert(node_i < pg_array_len(parser->nodes));
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
+    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
@@ -6077,7 +6080,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_NUMBER: {
     pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     u8 number_flags = 0;
     const u64 number = par_number(parser, token, &number_flags);
@@ -6295,7 +6297,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_UNARY: {
 
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
@@ -6320,7 +6321,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->lhs < pg_array_len(parser->nodes));
     pg_assert(node->rhs < pg_array_len(parser->nodes));
 
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
 
     switch (token.kind) {
     case TOKEN_KIND_NONE:
@@ -6558,7 +6558,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_STRING: {
-    const lex_token_t token = parser->lexer->tokens[node->main_token_i];
     const u32 length =
         lex_string_length(parser->buf, parser->buf_len, token.source_offset);
     const string_t s = {

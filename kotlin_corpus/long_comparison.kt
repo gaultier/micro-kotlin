@@ -36,4 +36,10 @@ fun main() {
     println(11)
   }
 
+  if (! 5L==6L) {
+    println(12)
+  } else {
+    println(13)
+  }
+
 }
