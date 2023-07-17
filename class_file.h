@@ -2403,7 +2403,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
         const u32 delta =
             sizeof(u8) + cf_compute_verification_infos_size(stack_map_frame);
         pg_assert(delta >= 2);
-        pg_assert(delta <= 3);
+        pg_assert(delta <= 4);
 
         size += delta;
       } else if (128 <= stack_map_frame->kind &&
@@ -5092,7 +5092,8 @@ typedef struct {
   const cf_class_file_t *class_files;
   cf_stack_map_frame_t *stack_map_frames;
   u16 out_field_ref_i;
-  pg_pad(6);
+  u16 out_field_ref_class_i;
+  pg_pad(4);
 } cg_generator_t;
 
 static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
@@ -5592,7 +5593,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
     cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_get_static(cg_generator_t *gen, u16 field_i,
+static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
                                arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -5608,7 +5609,9 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i,
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
   const cf_verification_info_t verification_info = {
-      .kind = VERIFICATION_INFO_OBJECT};
+      .kind = VERIFICATION_INFO_OBJECT,
+      .extra_data = class_i,
+  };
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
@@ -5702,6 +5705,18 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
 static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                          cf_class_file_t *class_file, u32 node_i,
                          arena_t *arena);
+
+static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(at > 0);
+  pg_assert(target > 0);
+
+  const i16 jump_offset = target - (at - 1);
+  gen->code->code[at + 0] = (u8)(((u16)(jump_offset & 0xff00)) >> 8);
+  gen->code->code[at + 1] = (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
+}
 
 // TODO: Make a primitive emerge to use here and in cg_emit_if_then_else.
 static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
@@ -6006,25 +6021,14 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
   // Patch first, conditional, jump.
   {
-    const u16 jump_offset =
-        (conditional_jump_target_absolute) - (jump_conditionally_from_i - 1);
-    gen->code->code[jump_conditionally_from_i + 0] =
-        (u8)(((u16)(jump_offset & 0xff00)) >> 8);
-    gen->code->code[jump_conditionally_from_i + 1] =
-        (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
-
+    cg_patch_jump_at(gen, jump_conditionally_from_i,
+                     conditional_jump_target_absolute);
     stack_map_record_frame_at_pc(frame_before_then_else, &gen->stack_map_frames,
                                  conditional_jump_target_absolute, arena);
   }
   // Patch second, unconditional, jump.
   {
-    const u16 jump_offset =
-        (unconditional_jump_target_absolute) - (jump_from_i - 1);
-    gen->code->code[jump_from_i + 0] = (u8)((u16)jump_offset & 0xff00) >> 8;
-    gen->code->code[jump_from_i + 1] = (u8)((u16)jump_offset & 0x00ff) >> 0;
-
-    // This stack map frame covers the unconditional jump, i.e. the `then`
-    // branch.
+    cg_patch_jump_at(gen, jump_from_i, unconditional_jump_target_absolute);
     stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
                                  unconditional_jump_target_absolute, arena);
   }
@@ -6172,9 +6176,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_BUILTIN_PRINTLN: {
     pg_assert(gen->out_field_ref_i > 0);
+    pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
 
-    cg_emit_get_static(gen, gen->out_field_ref_i, arena);
+    cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
+                       arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
@@ -6414,12 +6420,23 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_rem(gen, arena);
       break;
 
-    case TOKEN_KIND_AMPERSAND_AMPERSAND:
+    case TOKEN_KIND_AMPERSAND_AMPERSAND: {
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cf_code_array_push_u8(&gen->code->code, BYTECODE_IFEQ, arena);
+      const u16 conditional_jump_location = pg_array_len(gen->code->code);
+      cf_code_array_push_u16(&gen->code->code, 0, arena);
+      cg_frame_stack_pop(gen->frame);
+
+      const cg_frame_t *const frame_before_rhs =
+          cg_frame_clone(gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      // FIXME!
-      cg_emit_bitwise_and(gen, arena);
+
+      const u16 pc_end = pg_array_len(gen->code->code);
+      cg_patch_jump_at(gen, conditional_jump_location, pc_end);
+      stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
+                                   pc_end, arena);
       break;
+    }
 
     case TOKEN_KIND_PIPE_PIPE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
@@ -6601,12 +6618,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     // Patch first, conditional, jump.
     {
-      const u16 jump_offset = (pc_end) - (conditional_jump - 1);
-      gen->code->code[conditional_jump + 0] =
-          (u8)((u16)jump_offset & 0xff00) >> 8;
-      gen->code->code[conditional_jump + 1] =
-          (u8)((u16)jump_offset & 0x00ff) >> 0;
-
+      cg_patch_jump_at(gen, conditional_jump, pc_end);
       stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
                                    pc_end, arena);
     }
@@ -6695,6 +6707,14 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
         &class_file->constant_pool, &out_field_ref, arena);
 
     gen->out_field_ref_i = out_field_ref_i;
+
+    const u16 out_class_name_i = cf_add_constant_cstring(
+        &class_file->constant_pool, "java/io/PrintStream", arena);
+    const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+                                     .v = {.class_name = out_class_name_i}};
+    const u16 out_class_i =
+        cf_constant_array_push(&class_file->constant_pool, &out_class, arena);
+    gen->out_field_ref_class_i = out_class_i;
   }
 
   { // This class
