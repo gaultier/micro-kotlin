@@ -1069,204 +1069,6 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
-static u16 cg_emit_jump_conditionally(u8 **code, cg_frame_t *frame,
-                                      u8 jump_opcode, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  cf_code_array_push_u8(code, jump_opcode, arena);
-  const u16 jump_from_i = pg_array_len(*code);
-  cf_code_array_push_u8(code, BYTECODE_IMPDEP1, arena);
-  cf_code_array_push_u8(code, BYTECODE_IMPDEP2, arena);
-
-  switch (jump_opcode) {
-  case BYTECODE_IF_ICMPEQ:
-  case BYTECODE_IF_ICMPNE:
-  case BYTECODE_IF_ICMPLT:
-  case BYTECODE_IF_ICMPGE:
-  case BYTECODE_IF_ICMPGT:
-  case BYTECODE_IF_ICMPLE:
-    cg_frame_stack_pop(frame);
-    cg_frame_stack_pop(frame);
-    break;
-  case BYTECODE_IFEQ:
-  case BYTECODE_IFNE:
-    cg_frame_stack_pop(frame);
-    break;
-  default:
-    pg_assert(0 && "unreachable/unimplemented");
-  }
-
-  return jump_from_i;
-}
-
-static u16 cg_emit_jump(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  cf_code_array_push_u8(code, BYTECODE_GOTO, arena);
-  const u16 from_location = pg_array_len(*code);
-  cf_code_array_push_u8(code, BYTECODE_IMPDEP1, arena);
-  cf_code_array_push_u8(code, BYTECODE_IMPDEP2, arena);
-
-  return from_location;
-}
-
-static void cg_emit_pop(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  cf_code_array_push_u8(code, BYTECODE_POP, arena);
-
-  cg_frame_stack_pop(frame);
-}
-
-static void cg_emit_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                       arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) > 0);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  pg_assert(var_i < frame->locals_count);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-
-  cf_code_array_push_u8(code, BYTECODE_ISTORE, arena);
-  cf_code_array_push_u8(code, var_i, arena);
-
-  cg_frame_stack_pop(frame);
-}
-
-static void cg_emit_store_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
-                                        arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) > 0);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  pg_assert(var_i < frame->locals_count);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_LONG);
-
-  cf_code_array_push_u8(code, BYTECODE_LSTORE, arena);
-  cf_code_array_push_u8(code, var_i, arena);
-
-  cg_frame_stack_pop(frame);
-}
-
-static void cg_emit_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                      arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_assert(var_i < frame->locals_count);
-  pg_assert(pg_array_len(frame->locals) > 0);
-
-  cf_code_array_push_u8(code, BYTECODE_ILOAD, arena);
-  cf_code_array_push_u8(code, var_i, arena);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
-}
-
-static void cg_emit_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
-                                       arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_assert(var_i < frame->locals_count);
-  pg_assert(pg_array_len(frame->locals) > 0);
-
-  cf_code_array_push_u8(code, BYTECODE_LLOAD, arena);
-  cf_code_array_push_u8(code, var_i, arena);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
-}
-
-static void cg_emit_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IADD, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LADD, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-}
-
-static void cg_emit_neg(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 1);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  const cf_verification_info_kind_t kind = pg_array_last(frame->stack)->kind;
-
-  switch (kind) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_INEG, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LNEG, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-}
-
-static void cg_emit_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_I2L, arena);
-
-  cg_frame_stack_pop(frame);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP}, arena);
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
-}
-
 #if 0
 static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
@@ -1303,6 +1105,21 @@ static void cg_emit_call_superclass_constructor(
   pg_assert(method_type != NULL);
   cg_emit_invoke_special(code, super_class_constructor_i, frame, method_type,
                         arena);
+}
+
+static void cg_emit_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
+  pg_assert(code != NULL);
+  pg_assert(frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(code, BYTECODE_I2L, arena);
+
+  cg_frame_stack_pop(frame);
+
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP}, arena);
+  cg_frame_stack_push(
+      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 #endif
 
@@ -5285,6 +5102,210 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
+                                      arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, jump_opcode, arena);
+  const u16 jump_from_i = pg_array_len(gen->code->code);
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_IMPDEP1, arena);
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_IMPDEP2, arena);
+
+  switch (jump_opcode) {
+  case BYTECODE_IF_ICMPEQ:
+  case BYTECODE_IF_ICMPNE:
+  case BYTECODE_IF_ICMPLT:
+  case BYTECODE_IF_ICMPGE:
+  case BYTECODE_IF_ICMPGT:
+  case BYTECODE_IF_ICMPLE:
+    cg_frame_stack_pop(gen->frame);
+    cg_frame_stack_pop(gen->frame);
+    break;
+  case BYTECODE_IFEQ:
+  case BYTECODE_IFNE:
+    cg_frame_stack_pop(gen->frame);
+    break;
+  default:
+    pg_assert(0 && "unreachable/unimplemented");
+  }
+
+  return jump_from_i;
+}
+
+static u16 cg_emit_jump(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
+  const u16 from_location = pg_array_len(gen->code->code);
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_IMPDEP1, arena);
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_IMPDEP2, arena);
+
+  return from_location;
+}
+
+static void cg_emit_pop(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_POP, arena);
+
+  cg_frame_stack_pop(gen->frame);
+}
+
+static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
+                                       arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) > 0);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  pg_assert(var_i < gen->frame->locals_count);
+  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_ISTORE, arena);
+  cf_code_array_push_u8(&gen->code->code, var_i, arena);
+
+  cg_frame_stack_pop(gen->frame);
+}
+
+static void cg_emit_store_variable_long(cg_generator_t *gen, u8 var_i,
+                                        arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) > 0);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  pg_assert(var_i < gen->frame->locals_count);
+  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind ==
+            VERIFICATION_INFO_LONG);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_LSTORE, arena);
+  cf_code_array_push_u8(&gen->code->code, var_i, arena);
+
+  cg_frame_stack_pop(gen->frame);
+}
+
+static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
+                                      arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(var_i < gen->frame->locals_count);
+  pg_assert(pg_array_len(gen->frame->locals) > 0);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_ILOAD, arena);
+  cf_code_array_push_u8(&gen->code->code, var_i, arena);
+
+  cg_frame_stack_push(gen->frame,
+                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      arena);
+}
+
+static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
+                                       arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->locals != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(var_i < gen->frame->locals_count);
+  pg_assert(pg_array_len(gen->frame->locals) > 0);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_LLOAD, arena);
+  cf_code_array_push_u8(&gen->code->code, var_i, arena);
+
+  cg_frame_stack_push(gen->frame,
+                      (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG},
+                      arena);
+}
+
+static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IADD, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LADD, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+}
+
+static void cg_emit_neg(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 1);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  const cf_verification_info_kind_t kind =
+      pg_array_last(gen->frame->stack)->kind;
+
+  switch (kind) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_INEG, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LNEG, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+}
+
 static void cg_emit_lcmp(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -5956,8 +5977,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // Emit condition.
   cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
-  const u16 jump_conditionally_from_i = cg_emit_jump_conditionally(
-      &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
+  const u16 jump_conditionally_from_i =
+      cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
   const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
@@ -5970,7 +5991,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  const u16 jump_from_i = cg_emit_jump(&gen->code->code, gen->frame, arena);
+  const u16 jump_from_i = cg_emit_jump(gen, arena);
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we can
@@ -6350,7 +6371,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_neg(&gen->code->code, gen->frame, arena);
+      cg_emit_neg(gen, arena);
       break;
 
     default:
@@ -6372,14 +6393,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_PLUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_add(&gen->code->code, gen->frame, arena);
+      cg_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_neg(&gen->code->code, gen->frame, arena);
+      cg_emit_neg(gen, arena);
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_add(&gen->code->code, gen->frame, arena);
+      cg_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_STAR:
@@ -6464,7 +6485,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       switch (type->kind) {
       case TYPE_INT:
-        cg_emit_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
+        cg_emit_store_variable_int(gen, var_i, arena);
         break;
       case TYPE_LONG:
         pg_assert(0 && "todo");
@@ -6493,7 +6514,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       // If the 'statement' was in fact an expression, we need to pop it out.
       while (gen->frame->stack_count > 0)
-        cg_emit_pop(&gen->code->code, gen->frame, arena);
+        cg_emit_pop(gen, arena);
     }
 
     cg_end_scope(gen);
@@ -6527,9 +6548,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 local_i = cg_frame_locals_push(gen->frame, &variable, arena);
 
     if (verification_info.kind == VERIFICATION_INFO_INT) {
-      cg_emit_store_variable_int(&gen->code->code, gen->frame, local_i, arena);
+      cg_emit_store_variable_int(gen, local_i, arena);
     } else if (verification_info.kind == VERIFICATION_INFO_LONG) {
-      cg_emit_store_variable_long(&gen->code->code, gen->frame, local_i, arena);
+      cg_emit_store_variable_long(gen, local_i, arena);
     } else {
       pg_assert(0 && "todo");
     }
@@ -6547,12 +6568,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     if (gen->frame->locals[var_i].verification_info.kind ==
         VERIFICATION_INFO_INT)
-      cg_emit_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
+      cg_emit_load_variable_int(gen, var_i, arena);
     else if (gen->frame->locals[var_i].verification_info.kind ==
                  VERIFICATION_INFO_TOP &&
              gen->frame->locals[var_i + 1].verification_info.kind ==
                  VERIFICATION_INFO_LONG)
-      cg_emit_load_variable_long(&gen->code->code, gen->frame, var_i, arena);
+      cg_emit_load_variable_long(gen, var_i, arena);
     else
       pg_assert(0 && "todo");
 
@@ -6568,11 +6589,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         cg_frame_clone(gen->frame, arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
-    const u16 conditional_jump = cg_emit_jump_conditionally(
-        &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
+    const u16 conditional_jump =
+        cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
-    const u16 unconditional_jump =
-        cg_emit_jump(&gen->code->code, gen->frame, arena);
+    const u16 unconditional_jump = cg_emit_jump(gen, arena);
 
     const i16 unconditional_jump_delta = -(unconditional_jump - 1 - pc_start);
     gen->code->code[unconditional_jump + 0] =
