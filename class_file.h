@@ -4551,6 +4551,12 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN)) {
     return par_parse_builtin_println(parser, arena);
+  } else if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
+    const u32 node_i = par_parse_expression(parser, arena);
+    // TODO: Locate left parenthesis for the error message.
+    par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
+                     "Expected matching right parenthesis");
+    return node_i;
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
     par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
