@@ -5954,14 +5954,14 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   //
   //                 <condition expression>
   //      x     ---- jump_conditionally (IFEQ,  etc)
-  //      x     |    jump_conditionally_offset1 <----- jump_conditionally_from_i
+  //      x     |    jump_conditionally_offset1
   //      x     |    jump_conditionally_offset2
   //      x     |    <then branch>
   //  +   x  ...|... jump
-  //  +   x  .  |    jump_offset1 <------------------- jump_from_i
+  //  +   x  .  |    jump_offset1 
   //  +   x  .  |    jump_offset2
-  //  +   x  .  |--> <else branch> <--- stack map frame same for this location
-  //  +      ......> ...           <--- stack map frame same for this location
+  //  +   x  .  |--> <else branch> 
+  //  +      ......> ...          
   //
   // clang-format on
 
