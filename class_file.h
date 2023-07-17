@@ -6421,7 +6421,36 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND: {
+      // clang-format off
+      //
+      // a && b
+      // 
+      // <=>
+      // 
+      // if (a) {
+      //   if (b) {
+      //     push 1 
+      //   } else  {
+      //     push 0
+      //   }
+      // } else {
+      //   push 0
+      // }
+      //
+      //                 lhs
+      //      x     ---- jump_conditionally (IFEQ,  etc)
+      //      x     |    jump_conditionally_offset1 
+      //      x     |    jump_conditionally_offset2
+      //      x     |    rhs
+      //  +   x  ...|... jump
+      //  +   x  .  |    jump_offset1 
+      //  +   x  .  |    jump_offset2
+      //  +   x  .  |--> bipush 0
+      //  +      ......> ...           
+      //
+      // clang-format on
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
+
       cf_code_array_push_u8(&gen->code->code, BYTECODE_IFEQ, arena);
       const u16 conditional_jump_location = pg_array_len(gen->code->code);
       cf_code_array_push_u16(&gen->code->code, 0, arena);
@@ -6431,10 +6460,28 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
           cg_frame_clone(gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
-      const u16 pc_end = pg_array_len(gen->code->code);
-      cg_patch_jump_at(gen, conditional_jump_location, pc_end);
-      stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
-                                   pc_end, arena);
+      const cg_frame_t *const frame_after_rhs =
+          cg_frame_clone(gen->frame, arena);
+      const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
+
+      {
+        const u16 pc_end = pg_array_len(gen->code->code);
+        cg_patch_jump_at(gen, conditional_jump_location, pc_end);
+        stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
+                                     pc_end, arena);
+      }
+
+      // Restore the frame as if the `rhs` branch never executed.
+      gen->frame = cg_frame_clone(frame_before_rhs, arena);
+      cg_emit_bipush(gen, false, arena);
+
+      {
+        const u16 pc_end = pg_array_len(gen->code->code);
+        cg_patch_jump_at(gen, unconditional_jump_location, pc_end);
+        stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
+                                     pc_end, arena);
+      }
+
       break;
     }
 
