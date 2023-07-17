@@ -1497,25 +1497,6 @@ cg_emit_load_constant_single_word(u8 **code, u16 constant_i, cg_frame_t *frame,
   cg_frame_stack_push(frame, verification_info, arena);
 }
 
-static void
-cg_emit_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
-                                  cf_verification_info_t verification_info,
-                                  arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(constant_i > 0);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-  pg_assert(cf_verification_info_kind_word_count(verification_info.kind) == 2);
-
-  cf_code_array_push_u8(code, BYTECODE_LDC2_W, arena);
-  cf_code_array_push_u16(code, constant_i, arena);
-
-  pg_assert(pg_array_len(frame->stack) < UINT16_MAX);
-
-  cg_frame_stack_push(frame, verification_info, arena);
-}
-
 #if 0
 static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
@@ -5534,6 +5515,27 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+static void
+cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
+                                  cf_verification_info_t verification_info,
+                                  arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(constant_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(cf_verification_info_kind_word_count(verification_info.kind) == 2);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_LDC2_W, arena);
+  cf_code_array_push_u16(&gen->code->code, constant_i, arena);
+
+  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+
+  cg_frame_stack_push(gen->frame, verification_info, arena);
+}
+
 static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
                                    const par_type_method_t *method_type,
                                    arena_t *arena) {
@@ -6122,7 +6124,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
 
       cg_emit_load_constant_double_word(
-          &gen->code->code, number_i, gen->frame,
+          gen, number_i,
           (cf_verification_info_t){.kind = verification_info_kind}, arena);
     } else {
       cg_emit_load_constant_single_word(
@@ -6173,8 +6175,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
 
-    cg_emit_invoke_virtual(gen, method_ref_i,  method,
-                           arena);
+    cg_emit_invoke_virtual(gen, method_ref_i, method, arena);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
