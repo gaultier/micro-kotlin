@@ -1,67 +1,67 @@
-[x] Add JVM function types
-[x] Generate type descriptors as strings
-[x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
-[x] Semantic opcode generation functions
-[x] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
-[ ] Call functions generically (no builtin) from the same class file
-[ ] Call functions generically (no builtin) from other class files
-[x] Define functions
-[x] Generate stack map tables
-[x] Use latest jvm version
-[x] Makefile/build.sh
-[x] Log memory used in arena
-[x] Write non-trivial program with the API (opcode generation functions)
-[x] Compute class file name
-[x] Naive register (e.g. locals) allocation
-[x] Type checking, no inference
-[x] Local variables
-[ ] Comments
-[x] Local variable mutation
-[ ] Function definition
-[ ] Field access
-[x] String literals
-[ ] Grouping
-[ ] Casts
-[.] Long
-[ ] Refactor/rename stuff
-[x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
-[ ] Byte, Char, Short
-[ ] Double, Float
-[x] Control flow: If
-[x] Logical operator !
-[x] Comparison operators <,<=,>,>=,==,!=
-[.] Logical operators (and, or)
-[x] Control flow: While
-[ ] Control flow: Continue
-[ ] Control flow: Break
-[ ] Control flow: For (?)
-[ ] Recursion (mutual recursion?)
-[ ] Multiple files
-[ ] Packages
-[ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
-[ ] Defend against integer overflows
+- [x] Add JVM function types
+- [x] Generate type descriptors as strings
+- [x] Read class files and keep a map of function name to signature (copy descriptor strings, skip building them?)
+- [x] Semantic opcode generation functions
+- [x] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
+- [ ] Call functions generically (no builtin) from the same class file
+- [ ] Call functions generically (no builtin) from other class files
+- [x] Define functions
+- [x] Generate stack map tables
+- [x] Use latest jvm version
+- [x] Makefile/build.sh
+- [x] Log memory used in arena
+- [x] Write non-trivial program with the API (opcode generation functions)
+- [x] Compute class file name
+- [x] Naive register (e.g. locals) allocation
+- [x] Type checking, no inference
+- [x] Local variables
+- [ ] Comments
+- [x] Local variable mutation
+- [ ] Function definition
+- [ ] Field access
+- [x] String literals
+- [x] Grouping
+- [ ] Casts
+- [.] Long
+- [ ] Refactor/rename stuff
+- [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
+- [ ] Byte, Char, Short
+- [ ] Double, Float
+- [x] Control flow: If
+- [x] Logical operator !
+- [x] Comparison operators <,<=,>,>=,==,!=
+- [.] Logical operators (and, or)
+- [x] Control flow: While
+- [ ] Control flow: Continue
+- [ ] Control flow: Break
+- [ ] Control flow: For (?)
+- [ ] Recursion (mutual recursion?)
+- [ ] Multiple files
+- [ ] Packages
+- [ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
+- [ ] Defend against integer overflows
 
 Later, nice to have:
 
-[ ] High level APIs for the driver
-[ ] Generate line tables
-[ ] Generate full debug information
-[ ] Generate exceptions table
-[ ] Generate multi-threading stuff (volatile, synchronized, etc)
-[ ] Out-of-order declarations
-[ ] Bit operators
-[ ] Interfaces
+- [ ] High level APIs for the driver
+- [ ] Generate line tables
+- [ ] Generate full debug information
+- [ ] Generate exceptions table
+- [ ] Generate multi-threading stuff (volatile, synchronized, etc)
+- [ ] Out-of-order declarations
+- [ ] Bit operators
+- [ ] Interfaces
 
 Probably much later/never:
 
-[ ] Infix functions
-[ ] Vararg
-[ ] Operator overloading
-[ ] Data class
-[ ] Raw (multiline) strings
-[ ] Nested (interpolation) strings 
-[ ] Property delegate
-[ ] Lazy/lateinit
+- [ ] Infix functions
+- [ ] Vararg
+- [ ] Operator overloading
+- [ ] Data class
+- [ ] Raw (multiline) strings
+- [ ] Nested (interpolation) strings 
+- [ ] Property delegate
+- [ ] Lazy/lateinit
 
 ## Naive approach for reading external class files to know what fields/methods are available
 
