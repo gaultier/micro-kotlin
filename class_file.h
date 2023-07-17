@@ -5688,7 +5688,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
                                unconditional_jump_target_absolute, arena);
 }
 
-static void cg_emit_if_cmp_gt(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -5717,7 +5717,7 @@ static void cg_emit_if_cmp_gt(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_if_cmp_ge(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_ge(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -5746,7 +5746,7 @@ static void cg_emit_if_cmp_ge(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_if_cmp_le(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_le(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -5775,7 +5775,7 @@ static void cg_emit_if_cmp_le(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_if_cmp_lt(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -6322,25 +6322,25 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_LE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_if_cmp_le(gen, arena);
+      cg_emit_le(gen, arena);
       break;
 
     case TOKEN_KIND_LT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_if_cmp_lt(gen, arena);
+      cg_emit_lt(gen, arena);
       break;
 
     case TOKEN_KIND_GT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_if_cmp_gt(gen, arena);
+      cg_emit_gt(gen, arena);
       break;
 
     case TOKEN_KIND_GE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_if_cmp_ge(gen, arena);
+      cg_emit_ge(gen, arena);
       break;
 
     case TOKEN_KIND_NOT_EQUAL:
