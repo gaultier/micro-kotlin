@@ -1516,23 +1516,6 @@ cg_emit_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
   cg_frame_stack_push(frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_virtual(u8 **code, u16 method_ref_i,
-                                   cg_frame_t *frame,
-                                   const par_type_method_t *method_type,
-                                   arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(method_ref_i > 0);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  cf_code_array_push_u8(code, BYTECODE_INVOKE_VIRTUAL, arena);
-  cf_code_array_push_u16(code, method_ref_i, arena);
-
-  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
-    cg_frame_stack_pop(frame);
-}
-
 #if 0
 static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
@@ -5551,6 +5534,24 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
+                                   const par_type_method_t *method_type,
+                                   arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_VIRTUAL, arena);
+  cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
+
+  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
+    cg_frame_stack_pop(gen->frame);
+}
+
 static void cg_emit_get_static(cg_generator_t *gen, u16 field_i,
                                arena_t *arena) {
   pg_assert(gen != NULL);
@@ -6172,7 +6173,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
 
-    cg_emit_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method,
+    cg_emit_invoke_virtual(gen, method_ref_i,  method,
                            arena);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
