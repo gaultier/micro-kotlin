@@ -1267,217 +1267,6 @@ static void cg_emit_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
-static void cg_emit_lcmp(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_LCMP, arena);
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
-}
-
-static void cg_emit_bipush(u8 **code, cg_frame_t *frame, u8 value,
-                           arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_BIPUSH, arena);
-  cf_code_array_push_u8(code, value, arena);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
-}
-
-static void cg_emit_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-  pg_assert(frame->stack[pg_array_len(frame->stack) - 2].kind ==
-            VERIFICATION_INFO_INT);
-
-  cf_code_array_push_u8(code, BYTECODE_IXOR, arena);
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
-}
-
-static void cg_emit_mul(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IMUL, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LMUL, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
-}
-
-static void cg_emit_div(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IDIV, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LDIV, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
-}
-
-static void cg_emit_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IREM, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LREM, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
-}
-
-static void cg_emit_bitwise_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IAND, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LAND, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
-}
-
-static void cg_emit_bitwise_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 2);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-
-  const cf_verification_info_kind_t kind_a =
-      frame->stack[pg_array_len(frame->stack) - 1].kind;
-  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-  pg_assert(pg_array_len(frame->stack) >= 2 * word_count);
-
-  const cf_verification_info_kind_t kind_b =
-      frame->stack[pg_array_len(frame->stack) - 1 - word_count].kind;
-
-  pg_assert(kind_a == kind_b);
-
-  switch (kind_a) {
-  case VERIFICATION_INFO_INT:
-    cf_code_array_push_u8(code, BYTECODE_IOR, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cf_code_array_push_u8(code, BYTECODE_LOR, arena);
-    break;
-  default:
-    pg_assert(0 && "todo");
-  }
-
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_pop(frame);
-  cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
-}
-
 #if 0
 static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
@@ -5496,6 +5285,239 @@ typedef struct {
   pg_pad(6);
 } cg_generator_t;
 
+static void cg_emit_lcmp(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_LCMP, arena);
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+
+  cg_frame_stack_push(gen->frame,
+                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      arena);
+}
+
+static void cg_emit_bipush(cg_generator_t *gen, u8 value, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_BIPUSH, arena);
+  cf_code_array_push_u8(&gen->code->code, value, arena);
+
+  cg_frame_stack_push(gen->frame,
+                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      arena);
+}
+
+static void cg_emit_ixor(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind ==
+            VERIFICATION_INFO_INT);
+  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind ==
+            VERIFICATION_INFO_INT);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_IXOR, arena);
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame,
+                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      arena);
+}
+
+static void cg_emit_mul(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IMUL, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LMUL, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
+                      arena);
+}
+
+static void cg_emit_div(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IDIV, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LDIV, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
+                      arena);
+}
+
+static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IREM, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LREM, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
+                      arena);
+}
+
+static void cg_emit_bitwise_and(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IAND, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LAND, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
+                      arena);
+}
+
+static void cg_emit_bitwise_or(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  const cf_verification_info_kind_t kind_a =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+  const u8 word_count = cf_verification_info_kind_word_count(kind_a);
+  pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
+
+  const cf_verification_info_kind_t kind_b =
+      gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
+
+  pg_assert(kind_a == kind_b);
+
+  switch (kind_a) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IOR, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LOR, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
+
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_pop(gen->frame);
+  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
+                      arena);
+}
 static void
 cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
                                   cf_verification_info_t verification_info,
@@ -5698,7 +5720,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   const cg_frame_t *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
-  cg_emit_bipush(&gen->code->code, gen->frame, true, arena); // Then.
+  cg_emit_bipush(gen, true, arena); // Then.
   cf_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
   cf_code_array_push_u8(&gen->code->code, 0, arena);
   cf_code_array_push_u8(&gen->code->code, 3 + 2, arena);
@@ -5708,7 +5730,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
 
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
-  cg_emit_bipush(&gen->code->code, gen->frame, false, arena); // Else.
+  cg_emit_bipush(gen, false, arena); // Else.
 
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
@@ -5738,8 +5760,8 @@ static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
-    cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_lcmp(gen, arena);
+    cg_emit_bipush(gen, 1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
@@ -5767,7 +5789,7 @@ static void cg_emit_ne(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_lcmp(gen, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IFEQ, arena);
     break;
   default:
@@ -5795,7 +5817,7 @@ static void cg_emit_eq(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_lcmp(gen, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IFNE, arena);
     break;
   default:
@@ -5823,8 +5845,8 @@ static void cg_emit_ge(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
-    cg_emit_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_lcmp(gen, arena);
+    cg_emit_bipush(gen, -1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
@@ -5852,8 +5874,8 @@ static void cg_emit_le(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
-    cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_lcmp(gen, arena);
+    cg_emit_bipush(gen, 1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
@@ -5881,8 +5903,8 @@ static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
-    cg_emit_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_lcmp(gen, arena);
+    cg_emit_bipush(gen, -1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
@@ -6322,8 +6344,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
-      cg_emit_ixor(&gen->code->code, gen->frame, arena);
+      cg_emit_bipush(gen, 1, arena);
+      cg_emit_ixor(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
@@ -6363,33 +6385,33 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_STAR:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_mul(&gen->code->code, gen->frame, arena);
+      cg_emit_mul(gen, arena);
       break;
 
     case TOKEN_KIND_SLASH:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_div(&gen->code->code, gen->frame, arena);
+      cg_emit_div(gen, arena);
       break;
 
     case TOKEN_KIND_PERCENT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_rem(&gen->code->code, gen->frame, arena);
+      cg_emit_rem(gen, arena);
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       // FIXME!
-      cg_emit_bitwise_and(&gen->code->code, gen->frame, arena);
+      cg_emit_bitwise_and(gen, arena);
       break;
 
     case TOKEN_KIND_PIPE_PIPE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       // FIXME!
-      cg_emit_bitwise_or(&gen->code->code, gen->frame, arena);
+      cg_emit_bitwise_or(gen, arena);
       break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
@@ -6593,8 +6615,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jstring_i,
     };
-    cg_emit_load_constant_single_word(gen, jstring_i, 
-                                      verification_info, arena);
+    cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 
     break;
   }
