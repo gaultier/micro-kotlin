@@ -1069,8 +1069,8 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
   }
 }
 
-static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
-                                     u8 jump_opcode, arena_t *arena) {
+static u16 cg_emit_jump_conditionally(u8 **code, cg_frame_t *frame,
+                                      u8 jump_opcode, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1103,7 +1103,7 @@ static u16 cf_asm_jump_conditionally(u8 **code, cg_frame_t *frame,
   return jump_from_i;
 }
 
-static u16 cf_asm_jump(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static u16 cg_emit_jump(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1118,7 +1118,7 @@ static u16 cf_asm_jump(u8 **code, cg_frame_t *frame, arena_t *arena) {
   return from_location;
 }
 
-static void cf_asm_pop(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_pop(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1130,8 +1130,8 @@ static void cf_asm_pop(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                      arena_t *arena) {
+static void cg_emit_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
+                                       arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1149,8 +1149,8 @@ static void cf_asm_store_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
   cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_store_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
-                                       arena_t *arena) {
+static void cg_emit_store_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
+                                        arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1168,8 +1168,8 @@ static void cf_asm_store_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
   cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
-                                     arena_t *arena) {
+static void cg_emit_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
+                                      arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1185,8 +1185,8 @@ static void cf_asm_load_variable_int(u8 **code, cg_frame_t *frame, u8 var_i,
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
-                                      arena_t *arena) {
+static void cg_emit_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
+                                       arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
@@ -1202,7 +1202,7 @@ static void cf_asm_load_variable_long(u8 **code, cg_frame_t *frame, u8 var_i,
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
-static void cf_asm_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1232,7 +1232,7 @@ static void cf_asm_add(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_neg(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_neg(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1252,7 +1252,7 @@ static void cf_asm_neg(u8 **code, cg_frame_t *frame, arena_t *arena) {
   }
 }
 
-static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -1267,7 +1267,7 @@ static void cf_asm_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
 }
 
-static void cf_asm_lcmp(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_lcmp(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -1281,8 +1281,8 @@ static void cf_asm_lcmp(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
-                          arena_t *arena) {
+static void cg_emit_bipush(u8 **code, cg_frame_t *frame, u8 value,
+                           arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -1294,7 +1294,7 @@ static void cf_asm_bipush(u8 **code, cg_frame_t *frame, u8 value,
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1313,7 +1313,7 @@ static void cf_asm_ixor(u8 **code, cg_frame_t *frame, arena_t *arena) {
       frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_INT}, arena);
 }
 
-static void cf_asm_mul(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_mul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1346,7 +1346,7 @@ static void cf_asm_mul(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_div(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_div(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1379,7 +1379,7 @@ static void cf_asm_div(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1412,7 +1412,7 @@ static void cf_asm_rem(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_bitwise_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_bitwise_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1445,7 +1445,7 @@ static void cf_asm_bitwise_and(u8 **code, cg_frame_t *frame, arena_t *arena) {
   cg_frame_stack_push(frame, (cf_verification_info_t){.kind = kind_a}, arena);
 }
 
-static void cf_asm_bitwise_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
+static void cg_emit_bitwise_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(frame != NULL);
   pg_assert(frame->stack != NULL);
@@ -1479,9 +1479,9 @@ static void cf_asm_bitwise_or(u8 **code, cg_frame_t *frame, arena_t *arena) {
 }
 
 static void
-cf_asm_load_constant_single_word(u8 **code, u16 constant_i, cg_frame_t *frame,
-                                 cf_verification_info_t verification_info,
-                                 arena_t *arena) {
+cg_emit_load_constant_single_word(u8 **code, u16 constant_i, cg_frame_t *frame,
+                                  cf_verification_info_t verification_info,
+                                  arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -1498,9 +1498,9 @@ cf_asm_load_constant_single_word(u8 **code, u16 constant_i, cg_frame_t *frame,
 }
 
 static void
-cf_asm_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
-                                 cf_verification_info_t verification_info,
-                                 arena_t *arena) {
+cg_emit_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
+                                  cf_verification_info_t verification_info,
+                                  arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(constant_i > 0);
   pg_assert(frame != NULL);
@@ -1516,10 +1516,10 @@ cf_asm_load_constant_double_word(u8 **code, u16 constant_i, cg_frame_t *frame,
   cg_frame_stack_push(frame, verification_info, arena);
 }
 
-static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
-                                  cg_frame_t *frame,
-                                  const par_type_method_t *method_type,
-                                  arena_t *arena) {
+static void cg_emit_invoke_virtual(u8 **code, u16 method_ref_i,
+                                   cg_frame_t *frame,
+                                   const par_type_method_t *method_type,
+                                   arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(frame != NULL);
@@ -1533,8 +1533,8 @@ static void cf_asm_invoke_virtual(u8 **code, u16 method_ref_i,
     cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
-                              arena_t *arena) {
+static void cg_emit_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
+                               arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(field_i > 0);
   pg_assert(frame != NULL);
@@ -1551,7 +1551,7 @@ static void cf_asm_get_static(u8 **code, u16 field_i, cg_frame_t *frame,
   cg_frame_stack_push(frame, verification_info, arena);
 }
 
-static void cf_asm_return(u8 **code, arena_t *arena) {
+static void cg_emit_return(u8 **code, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(*code != NULL);
   pg_assert(arena != NULL);
@@ -1560,7 +1560,7 @@ static void cf_asm_return(u8 **code, arena_t *arena) {
 }
 
 #if 0
-static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
+static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
                                   cg_frame_t *frame,
                                   const par_type_method_t *method_type,
                                   arena_t *arena) {
@@ -1579,7 +1579,7 @@ static void cf_asm_invoke_special(u8 **code, u16 method_ref_i,
     cg_frame_stack_pop(frame);
 }
 
-static void cf_asm_call_superclass_constructor(
+static void cg_emit_call_superclass_constructor(
     u8 **code, u16 super_class_constructor_i, cg_frame_t *frame,
     const par_type_t *constructor_type, arena_t *arena) {
   pg_assert(code != NULL);
@@ -1593,7 +1593,7 @@ static void cf_asm_call_superclass_constructor(
 
   const par_type_method_t *const method_type = &constructor_type->v.method;
   pg_assert(method_type != NULL);
-  cf_asm_invoke_special(code, super_class_constructor_i, frame, method_type,
+  cg_emit_invoke_special(code, super_class_constructor_i, frame, method_type,
                         arena);
 }
 #endif
@@ -5690,7 +5690,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   const cg_frame_t *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
-  cf_asm_bipush(&gen->code->code, gen->frame, true, arena); // Then.
+  cg_emit_bipush(&gen->code->code, gen->frame, true, arena); // Then.
   cf_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
   cf_code_array_push_u8(&gen->code->code, 0, arena);
   cf_code_array_push_u8(&gen->code->code, 3 + 2, arena);
@@ -5700,7 +5700,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
 
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
-  cf_asm_bipush(&gen->code->code, gen->frame, false, arena); // Else.
+  cg_emit_bipush(&gen->code->code, gen->frame, false, arena); // Else.
 
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
@@ -5730,8 +5730,8 @@ static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
-    cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
@@ -5759,7 +5759,7 @@ static void cg_emit_ne(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IFEQ, arena);
     break;
   default:
@@ -5787,7 +5787,7 @@ static void cg_emit_eq(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IFNE, arena);
     break;
   default:
@@ -5815,8 +5815,8 @@ static void cg_emit_ge(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
-    cf_asm_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_bipush(&gen->code->code, gen->frame, -1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
@@ -5844,8 +5844,8 @@ static void cg_emit_le(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
-    cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
@@ -5873,8 +5873,8 @@ static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cf_asm_lcmp(&gen->code->code, gen->frame, arena);
-    cf_asm_bipush(&gen->code->code, gen->frame, -1, arena);
+    cg_emit_lcmp(&gen->code->code, gen->frame, arena);
+    cg_emit_bipush(&gen->code->code, gen->frame, -1, arena);
     cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
@@ -5926,7 +5926,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // Emit condition.
   cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
-  const u16 jump_conditionally_from_i = cf_asm_jump_conditionally(
+  const u16 jump_conditionally_from_i = cg_emit_jump_conditionally(
       &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
@@ -5940,7 +5940,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
-  const u16 jump_from_i = cf_asm_jump(&gen->code->code, gen->frame, arena);
+  const u16 jump_from_i = cg_emit_jump(&gen->code->code, gen->frame, arena);
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we can
@@ -6092,8 +6092,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_INT};
-    cf_asm_load_constant_single_word(&gen->code->code, number_i, gen->frame,
-                                     verification_info, arena);
+    cg_emit_load_constant_single_word(&gen->code->code, number_i, gen->frame,
+                                      verification_info, arena);
     break;
   }
   case AST_KIND_NUMBER: {
@@ -6117,11 +6117,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       const cf_constant_t dummy = {0};
       cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
 
-      cf_asm_load_constant_double_word(
+      cg_emit_load_constant_double_word(
           &gen->code->code, number_i, gen->frame,
           (cf_verification_info_t){.kind = verification_info_kind}, arena);
     } else {
-      cf_asm_load_constant_single_word(
+      cg_emit_load_constant_single_word(
           &gen->code->code, number_i, gen->frame,
           (cf_verification_info_t){.kind = verification_info_kind}, arena);
     }
@@ -6131,8 +6131,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->out_field_ref_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
 
-    cf_asm_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame,
-                      arena);
+    cg_emit_get_static(&gen->code->code, gen->out_field_ref_i, gen->frame,
+                       arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
@@ -6170,8 +6170,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
 
-    cf_asm_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method,
-                          arena);
+    cg_emit_invoke_virtual(&gen->code->code, method_ref_i, gen->frame, method,
+                           arena);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
@@ -6266,7 +6266,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     };
     cg_frame_locals_push(gen->frame, &arg0, arena);
 
-    cg_frame_t* const first_method_frame = cg_frame_clone(gen->frame, arena);
+    cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
     // TODO: Handle `lhs`.
@@ -6275,13 +6275,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
-    cf_asm_return(&code.code, arena);
+    cg_emit_return(&code.code, arena);
 
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals = gen->frame->max_locals;
 
-    stack_map_resolve_frames(first_method_frame, gen->stack_map_frames,
-                             arena);
+    stack_map_resolve_frames(first_method_frame, gen->stack_map_frames, arena);
 
     cf_attribute_t attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
@@ -6318,13 +6317,13 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cf_asm_bipush(&gen->code->code, gen->frame, 1, arena);
-      cf_asm_ixor(&gen->code->code, gen->frame, arena);
+      cg_emit_bipush(&gen->code->code, gen->frame, 1, arena);
+      cg_emit_ixor(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cf_asm_neg(&gen->code->code, gen->frame, arena);
+      cg_emit_neg(&gen->code->code, gen->frame, arena);
       break;
 
     default:
@@ -6346,46 +6345,46 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_PLUS:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_add(&gen->code->code, gen->frame, arena);
+      cg_emit_add(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_MINUS:
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_neg(&gen->code->code, gen->frame, arena);
+      cg_emit_neg(&gen->code->code, gen->frame, arena);
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cf_asm_add(&gen->code->code, gen->frame, arena);
+      cg_emit_add(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_STAR:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_mul(&gen->code->code, gen->frame, arena);
+      cg_emit_mul(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_SLASH:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_div(&gen->code->code, gen->frame, arena);
+      cg_emit_div(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_PERCENT:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cf_asm_rem(&gen->code->code, gen->frame, arena);
+      cg_emit_rem(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       // FIXME!
-      cf_asm_bitwise_and(&gen->code->code, gen->frame, arena);
+      cg_emit_bitwise_and(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_PIPE_PIPE:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
       // FIXME!
-      cf_asm_bitwise_or(&gen->code->code, gen->frame, arena);
+      cg_emit_bitwise_or(&gen->code->code, gen->frame, arena);
       break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
@@ -6438,7 +6437,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       switch (type->kind) {
       case TYPE_INT:
-        cf_asm_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
+        cg_emit_store_variable_int(&gen->code->code, gen->frame, var_i, arena);
         break;
       case TYPE_LONG:
         pg_assert(0 && "todo");
@@ -6467,7 +6466,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       // If the 'statement' was in fact an expression, we need to pop it out.
       while (gen->frame->stack_count > 0)
-        cf_asm_pop(&gen->code->code, gen->frame, arena);
+        cg_emit_pop(&gen->code->code, gen->frame, arena);
     }
 
     cg_end_scope(gen);
@@ -6501,9 +6500,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u16 local_i = cg_frame_locals_push(gen->frame, &variable, arena);
 
     if (verification_info.kind == VERIFICATION_INFO_INT) {
-      cf_asm_store_variable_int(&gen->code->code, gen->frame, local_i, arena);
+      cg_emit_store_variable_int(&gen->code->code, gen->frame, local_i, arena);
     } else if (verification_info.kind == VERIFICATION_INFO_LONG) {
-      cf_asm_store_variable_long(&gen->code->code, gen->frame, local_i, arena);
+      cg_emit_store_variable_long(&gen->code->code, gen->frame, local_i, arena);
     } else {
       pg_assert(0 && "todo");
     }
@@ -6521,12 +6520,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     if (gen->frame->locals[var_i].verification_info.kind ==
         VERIFICATION_INFO_INT)
-      cf_asm_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
+      cg_emit_load_variable_int(&gen->code->code, gen->frame, var_i, arena);
     else if (gen->frame->locals[var_i].verification_info.kind ==
                  VERIFICATION_INFO_TOP &&
              gen->frame->locals[var_i + 1].verification_info.kind ==
                  VERIFICATION_INFO_LONG)
-      cf_asm_load_variable_long(&gen->code->code, gen->frame, var_i, arena);
+      cg_emit_load_variable_long(&gen->code->code, gen->frame, var_i, arena);
     else
       pg_assert(0 && "todo");
 
@@ -6542,11 +6541,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         cg_frame_clone(gen->frame, arena);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
-    const u16 conditional_jump = cf_asm_jump_conditionally(
+    const u16 conditional_jump = cg_emit_jump_conditionally(
         &gen->code->code, gen->frame, BYTECODE_IFEQ, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
     const u16 unconditional_jump =
-        cf_asm_jump(&gen->code->code, gen->frame, arena);
+        cg_emit_jump(&gen->code->code, gen->frame, arena);
 
     const i16 unconditional_jump_delta = -(unconditional_jump - 1 - pc_start);
     gen->code->code[unconditional_jump + 0] =
@@ -6589,8 +6588,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jstring_i,
     };
-    cf_asm_load_constant_single_word(&gen->code->code, jstring_i, gen->frame,
-                                     verification_info, arena);
+    cg_emit_load_constant_single_word(&gen->code->code, jstring_i, gen->frame,
+                                      verification_info, arena);
 
     break;
   }
@@ -6614,8 +6613,6 @@ static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
 
   return class_name;
 }
-
-// static void ty_add_method_type(par_type_t ** types, )
 
 static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
                                     cf_class_file_t *class_file,
