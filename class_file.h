@@ -4956,13 +4956,16 @@ static u32 ty_resolve_types(par_parser_t *parser,
     case TOKEN_KIND_LE:
     case TOKEN_KIND_GT:
     case TOKEN_KIND_GE:
-    case TOKEN_KIND_AMPERSAND_AMPERSAND:
-    case TOKEN_KIND_PIPE_PIPE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
       pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
       return node->type_i = pg_array_last_index(parser->types);
     }
+    case TOKEN_KIND_AMPERSAND_AMPERSAND:
+    case TOKEN_KIND_PIPE_PIPE:{
+      
+                              }
+                                 
     default:
       return node->type_i;
     }
@@ -5534,7 +5537,7 @@ static void cg_emit_bitwise_or(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
                       arena);
 }
-#endif 
+#endif
 
 static void
 cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
