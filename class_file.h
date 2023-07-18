@@ -4120,17 +4120,27 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
 
     const u32 main_token_i = parser->tokens_i - 1;
-    const string_t variable_name = par_token_to_string(parser, main_token_i);
-    const u32 variable_i = par_find_variable(parser, variable_name);
+    const string_t name = par_token_to_string(parser, main_token_i);
+    const u32 variable_i = par_find_variable(parser, name);
     if (variable_i == (u32)-1) {
+      if (!cf_class_files_find_class_exactly(parser->class_files, name,name)){
       par_error(parser, parser->lexer->tokens[main_token_i],
                 "unknown reference to variable");
       return 0;
+      }
+
+    par_ast_node_t node = {
+        .kind = AST_KIND_VAR_REFERENCE,
+        .main_token_i = parser->tokens_i - 1,
+        .lhs = parser->variables[variable_i].var_definition_node_i,
+    };
+    return par_add_node(parser, &node, arena);
+
     }
     par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
         .main_token_i = parser->tokens_i - 1,
-        .lhs=parser->variables[variable_i].var_definition_node_i,
+        .lhs = parser->variables[variable_i].var_definition_node_i,
     };
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_STRING_LITERAL)) {
