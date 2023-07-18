@@ -4294,6 +4294,34 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
   return par_parse_expression(parser, arena);
 }
 
+// navigationSuffix:
+//     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
+//     'class')
+static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
+    const par_ast_node_t node = {
+        .kind = AST_KIND_UNARY,
+        .main_token_i = parser->tokens_i - 1,
+    };
+    return par_add_node(parser, &node, arena);
+  }
+
+  if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
+    const u32 node_i = par_parse_expression(parser, arena);
+    par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
+                     "Expected matching right parenthesis after expression");
+    return node_i;
+  }
+
+  pg_assert(0 && "todo"); // TODO: `class`
+}
+
 // postfixUnaryExpression:
 //     primaryExpression {postfixUnarySuffix}
 static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
@@ -4304,8 +4332,21 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  return par_parse_primary_expression(
-      parser, arena); // TODO: parse {0,n} postfix unary suffix.
+  const u32 lhs_i = par_parse_primary_expression(parser, arena);
+
+  if (!par_match_token(parser, TOKEN_KIND_DOT))
+    return lhs_i;
+
+  const u32 main_token_i = parser->tokens_i - 1;
+  const u32 rhs_i = par_parse_navigation_suffix(parser, arena);
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_UNARY,
+      .main_token_i = main_token_i,
+      .lhs = lhs_i,
+      .rhs = rhs_i,
+  };
+  return par_add_node(parser, &node, arena);
 }
 
 // prefixUnaryExpression:
@@ -4975,7 +5016,7 @@ static u32 ty_resolve_types(par_parser_t *parser,
       }
       return 0;
     }
-  return node->type_i;
+      return node->type_i;
     default:
       return node->type_i;
     }
