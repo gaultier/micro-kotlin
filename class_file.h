@@ -6434,10 +6434,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       // if (a) {
       //   if (b) {
       //     push 1 
+      //     goto end
       //   }  
       // } else {
       //   push 0
       // }
+      // end:
       //
       //                 lhs
       //      x     ---- jump_conditionally (IFEQ,  etc)
@@ -6487,10 +6489,77 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       break;
     }
 
-    case TOKEN_KIND_PIPE_PIPE:
+    case TOKEN_KIND_PIPE_PIPE: {
+      // Since the if_xxx opcodes always pop the condition off the stack,
+      // there is no simple way to push 0 on the stack if `lhs` is falsey.
+      // We have to use this contrived way, short of advanced CFG analysis. :(
+      //
+      // clang-format off
+      //
+      // a || b
+      // 
+      // <=>
+      // 
+      // if (a) {
+      //   push 1
+      // } else {
+      //   if (b) {
+      //     push 1 
+      //     goto end
+      //   }
+      //   push 0
+      // }
+      // end:
+      //
+      //                 lhs
+      //      x     ---- jump_conditionally (IFNE)
+      //      x     |    jump_conditionally_offset1 
+      //      x     |    jump_conditionally_offset2
+      //      x     |    rhs
+      //  +   x  ...|... jump
+      //  +   x  .  |    jump_offset1 
+      //  +   x  .  |    jump_offset2
+      //  +   x  .  |--> bipush 1
+      //  +      ......> ...           
+      //
+      // clang-format on
+      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+
+      cf_code_array_push_u8(&gen->code->code, BYTECODE_IFNE, arena);
+      const u16 conditional_jump_location = pg_array_len(gen->code->code);
+      cf_code_array_push_u16(&gen->code->code, 0, arena);
+      cg_frame_stack_pop(gen->frame);
+
+      const cg_frame_t *const frame_before_rhs =
+          cg_frame_clone(gen->frame, arena);
+      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+
+      const cg_frame_t *const frame_after_rhs =
+          cg_frame_clone(gen->frame, arena);
+      const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
+
+      {
+        const u16 pc_end = pg_array_len(gen->code->code);
+        cg_patch_jump_at(gen, conditional_jump_location, pc_end);
+        stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
+                                     pc_end, arena);
+      }
+
+      // Restore the frame as if the `rhs` branch never executed.
+      gen->frame = cg_frame_clone(frame_before_rhs, arena);
+      cg_emit_bipush(gen, true, arena);
+
+      {
+        const u16 pc_end = pg_array_len(gen->code->code);
+        cg_patch_jump_at(gen, unconditional_jump_location, pc_end);
+        stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
+                                     pc_end, arena);
+      }
+
+      break;
+    }
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
       cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      // FIXME!
       cg_emit_bitwise_or(gen, arena);
       break;
 
