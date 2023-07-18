@@ -6558,10 +6558,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       break;
     }
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
-      cg_emit_bitwise_or(gen, arena);
-      break;
 
     case TOKEN_KIND_EQUAL_EQUAL:
       cg_emit_node(gen, parser, class_file, node->lhs, arena);
