@@ -5462,6 +5462,7 @@ static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
                       arena);
 }
 
+#if 0
 static void cg_emit_bitwise_and(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -5533,6 +5534,8 @@ static void cg_emit_bitwise_or(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
                       arena);
 }
+#endif 
+
 static void
 cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
                                   cf_verification_info_t verification_info,
