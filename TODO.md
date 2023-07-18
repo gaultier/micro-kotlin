@@ -22,15 +22,15 @@
 - [x] String literals
 - [x] Grouping
 - [ ] Casts
-- [.] Long
-- [ ] Refactor/rename stuff
+- [x] Long
+- [.] Refactor/rename stuff
 - [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
 - [ ] Byte, Char, Short
 - [ ] Double, Float
 - [x] Control flow: If
 - [x] Logical operator !
 - [x] Comparison operators <,<=,>,>=,==,!=
-- [.] Logical operators (and, or)
+- [x] Logical operators (and, or)
 - [x] Control flow: While
 - [ ] Control flow: Continue
 - [ ] Control flow: Break
