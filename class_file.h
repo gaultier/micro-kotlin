@@ -2830,10 +2830,9 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
   return false;
 }
 
-static bool
-cf_class_files_find_class_exactly(const cf_class_file_t *class_files,
-                                  string_t class_name,
-                                  string_t alernate_class_name) {
+static u32 cf_class_files_find_class_exactly(const cf_class_file_t *class_files,
+                                             string_t class_name,
+                                             string_t alernate_class_name) {
   pg_assert(class_files != NULL);
   pg_assert(class_name.len > 0);
 
@@ -2856,9 +2855,9 @@ cf_class_files_find_class_exactly(const cf_class_file_t *class_files,
         !string_eq(this_class_name, alernate_class_name))
       continue;
 
-    return true; // TODO: return more information?
+    return i;
   }
-  return false;
+  return (u32)-1;
 }
 
 static bool
@@ -3563,6 +3562,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_UNARY,
   AST_KIND_VAR_DEFINITION,
   AST_KIND_VAR_REFERENCE,
+  AST_KIND_STATIC_CLASS_REFERENCE,
   AST_KIND_IF,
   AST_KIND_LIST,
   AST_KIND_WHILE_LOOP,
@@ -3581,6 +3581,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
+    [AST_KIND_STATIC_CLASS_REFERENCE] = "STATIC_CLASS_REFERENCE",
     [AST_KIND_IF] = "IF",
     [AST_KIND_LIST] = "LIST",
     [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
@@ -3612,6 +3613,7 @@ typedef struct {
   par_variable_t *variables;
   par_ast_node_t *nodes;
   par_type_t *types;
+  cf_class_file_t *class_files;
   u32 current_function_i;
   u32 scope_depth;
   u32 buf_len;
@@ -4070,6 +4072,8 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &if_node, arena);
 }
 
+static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena);
+
 // primaryExpression:
 //     parenthesizedExpression
 //     | simpleIdentifier
@@ -4123,19 +4127,23 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     const string_t name = par_token_to_string(parser, main_token_i);
     const u32 variable_i = par_find_variable(parser, name);
     if (variable_i == (u32)-1) {
-      if (!cf_class_files_find_class_exactly(parser->class_files, name,name)){
-      par_error(parser, parser->lexer->tokens[main_token_i],
-                "unknown reference to variable");
-      return 0;
+
+      const string_t alternate_name =
+          ty_know_type_aliases(name, arena);
+      const u32 class = cf_class_files_find_class_exactly(parser->class_files,
+                                                          name, alternate_name);
+      if (class == (u32)-1) {
+        par_error(parser, parser->lexer->tokens[main_token_i],
+                  "unknown reference to variable");
+        return 0;
       }
 
-    par_ast_node_t node = {
-        .kind = AST_KIND_VAR_REFERENCE,
-        .main_token_i = parser->tokens_i - 1,
-        .lhs = parser->variables[variable_i].var_definition_node_i,
-    };
-    return par_add_node(parser, &node, arena);
-
+      par_ast_node_t node = {
+          .kind = AST_KIND_STATIC_CLASS_REFERENCE,
+          .main_token_i = parser->tokens_i - 1,
+          .lhs = class,
+      };
+      return par_add_node(parser, &node, arena);
     }
     par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
@@ -4895,7 +4903,7 @@ static u32 ty_add_type(par_type_t **types, const par_type_t *type,
   return pg_array_last_index(*types);
 }
 
-static string_t ty_know_type_aliases(string_t type_literal) {
+static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena) {
   if (string_eq_c(type_literal, "Int"))
     return string_make_from_c_no_alloc("java/lang/Integer");
   if (string_eq_c(type_literal, "Short"))
@@ -4913,7 +4921,9 @@ static string_t ty_know_type_aliases(string_t type_literal) {
   if (string_eq_c(type_literal, "Double"))
     return string_make_from_c_no_alloc("java/lang/Double");
 
-  return string_make_from_c_no_alloc("");
+  string_t res = string_make_from_c("java/lang/", arena);
+  string_append_string(&res, type_literal, arena);
+  return res;
 }
 
 static u32 ty_resolve_types(par_parser_t *parser,
@@ -5091,10 +5101,10 @@ static u32 ty_resolve_types(par_parser_t *parser,
         par_token_to_string(parser, node->main_token_i + 2);
 
     const string_t alternate_type_string =
-        ty_know_type_aliases(type_literal_string);
+        ty_know_type_aliases(type_literal_string, arena);
 
-    if (!cf_class_files_find_class_exactly(class_files, type_literal_string,
-                                           alternate_type_string)) {
+    if (cf_class_files_find_class_exactly(class_files, type_literal_string,
+                                          alternate_type_string) == (u32)-1) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
       string_append_string(&error, type_literal_string, arena);
@@ -5180,6 +5190,11 @@ static u32 ty_resolve_types(par_parser_t *parser,
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_STRING}, arena);
     const u32 type_i = pg_array_last_index(parser->types);
     return node->type_i = type_i;
+  }
+
+  case AST_KIND_STATIC_CLASS_REFERENCE: {
+    pg_assert(0 && "todo");
+    break;
   }
 
   case AST_KIND_FIELD_ACCESS: {
@@ -6887,6 +6902,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     };
     cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 
+    break;
+  }
+  case AST_KIND_STATIC_CLASS_REFERENCE: {
+    pg_assert(0 && "todo");
     break;
   }
   case AST_KIND_FIELD_ACCESS: {

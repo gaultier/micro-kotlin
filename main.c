@@ -57,22 +57,6 @@ int main(int argc, char *argv[]) {
     const char *current = source.value;
     lex_lex(&lexer, source.value, source.len, &current, &arena);
 
-    // Parse.
-    par_parser_t parser = {
-        .buf = source.value,
-        .buf_len = source.len,
-        .lexer = &lexer,
-    };
-    const u32 root_i = par_parse(&parser, &arena);
-
-    // Debug AST.
-    {
-      arena_t tmp_arena = arena;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
-    }
-    if (parser.state != PARSER_STATE_OK)
-      return 1; // TODO: Should type checking still proceed?
-
     // Read class files (stdlib, etc).
     cf_class_file_t *class_files = NULL;
     pg_array_init_reserve(class_files, 32768, &arena);
@@ -84,6 +68,24 @@ int main(int argc, char *argv[]) {
       LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
           arena.current_offset);
     }
+
+    // Parse.
+    par_parser_t parser = {
+        .buf = source.value,
+        .buf_len = source.len,
+        .lexer = &lexer,
+        .class_files=class_files,
+    };
+    const u32 root_i = par_parse(&parser, &arena);
+
+    // Debug AST.
+    {
+      arena_t tmp_arena = arena;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
+    }
+    if (parser.state != PARSER_STATE_OK)
+      return 1; // TODO: Should type checking still proceed?
+
     ty_resolve_types(&parser, class_files, root_i, &arena);
 
     // Debug types.
