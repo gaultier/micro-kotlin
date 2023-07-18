@@ -4962,10 +4962,20 @@ static u32 ty_resolve_types(par_parser_t *parser,
       return node->type_i = pg_array_last_index(parser->types);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
-    case TOKEN_KIND_PIPE_PIPE:{
-      
-                              }
-                                 
+    case TOKEN_KIND_PIPE_PIPE: {
+      const cf_type_kind_t type_kind = parser->types[lhs_i].kind;
+      if (type_kind != TYPE_BOOL) {
+        string_t error = string_reserve(256, arena);
+        string_append_cstring(
+            &error, "incompatible types: expected Boolean, got: ", arena);
+        string_append_string(
+            &error, ty_type_to_human_string(parser->types, lhs_i, arena),
+            arena);
+        par_error(parser, token, error.value);
+      }
+      return 0;
+    }
+  return node->type_i;
     default:
       return node->type_i;
     }
