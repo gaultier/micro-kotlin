@@ -2791,6 +2791,46 @@ static void cf_read_class_files(char *path, u64 path_len,
 }
 
 static bool
+cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
+                                  string_t class_name, string_t field_name) {
+  pg_assert(class_files != NULL);
+  pg_assert(field_name.len > 0);
+
+  // TODO: use the file path <-> class name mapping to search less?
+
+  for (u64 i = 0; i < pg_array_len(class_files); i++) {
+    const cf_class_file_t *const class_file = &class_files[i];
+    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
+    pg_assert(class_file->file_path.len > 0);
+    pg_assert(class_file->file_path.value != NULL);
+
+    const cf_constant_t *const this_class = cf_constant_array_get(
+        &class_file->constant_pool, class_file->this_class);
+    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+    const u16 this_class_i = this_class->v.class_name;
+    const string_t this_class_name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, this_class_i);
+
+    if (!string_eq(this_class_name, class_name))
+      continue;
+
+    for (u64 j = 0; j < pg_array_len(class_file->fields); j++) {
+      const cf_field_t *const this_field = &class_file->fields[j];
+      // TODO: check attributes?
+
+      const string_t this_field_name = cf_constant_array_get_as_string(
+          &class_file->constant_pool, this_field->name);
+
+      if (!string_eq(this_field_name, field_name))
+        continue;
+
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool
 cf_class_files_find_class_exactly(const cf_class_file_t *class_files,
                                   string_t class_name,
                                   string_t alernate_class_name) {
@@ -3527,6 +3567,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_LIST,
   AST_KIND_WHILE_LOOP,
   AST_KIND_STRING,
+  AST_KIND_FIELD_ACCESS,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -3544,6 +3585,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_LIST] = "LIST",
     [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
     [AST_KIND_STRING] = "STRING",
+    [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
 };
 
 typedef struct {
@@ -4076,24 +4118,21 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
                      "Expected matching right parenthesis");
     return node_i;
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
+
+    const u32 main_token_i = parser->tokens_i - 1;
+    const string_t variable_name = par_token_to_string(parser, main_token_i);
+    const u32 variable_i = par_find_variable(parser, variable_name);
+    if (variable_i == (u32)-1) {
+      par_error(parser, parser->lexer->tokens[main_token_i],
+                "unknown reference to variable");
+      return 0;
+    }
     par_ast_node_t node = {
         .kind = AST_KIND_VAR_REFERENCE,
         .main_token_i = parser->tokens_i - 1,
+        .lhs=parser->variables[variable_i].var_definition_node_i,
     };
-    const u32 node_i = par_add_node(parser, &node, arena);
-
-    const string_t variable_name =
-        par_token_to_string(parser, node.main_token_i);
-    const u32 variable_i = par_find_variable(parser, variable_name);
-    if (variable_i == (u32)-1) {
-      par_error(parser, parser->lexer->tokens[node.main_token_i],
-                "unknown reference to variable");
-    } else {
-      pg_assert(pg_array_last(parser->nodes)->kind == AST_KIND_VAR_REFERENCE);
-      pg_array_last(parser->nodes)->lhs =
-          parser->variables[variable_i].var_definition_node_i;
-    }
-    return node_i;
+    return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_STRING_LITERAL)) {
     const par_ast_node_t node = {.kind = AST_KIND_STRING,
                                  .main_token_i = parser->tokens_i - 1};
@@ -4341,7 +4380,7 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
   const u32 rhs_i = par_parse_navigation_suffix(parser, arena);
 
   const par_ast_node_t node = {
-      .kind = AST_KIND_UNARY,
+      .kind = AST_KIND_FIELD_ACCESS,
       .main_token_i = main_token_i,
       .lhs = lhs_i,
       .rhs = rhs_i,
@@ -5131,6 +5170,31 @@ static u32 ty_resolve_types(par_parser_t *parser,
     pg_array_append(parser->types, (par_type_t){.kind = TYPE_STRING}, arena);
     const u32 type_i = pg_array_last_index(parser->types);
     return node->type_i = type_i;
+  }
+
+  case AST_KIND_FIELD_ACCESS: {
+    const u32 lhs_type_i =
+        ty_resolve_types(parser, class_files, node->lhs, arena);
+    const par_type_t *const lhs_type = &parser->types[lhs_type_i];
+
+    if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error,
+                            "incompatible types, expect object, got: ", arena);
+
+      const string_t type_inferred_string =
+          ty_type_to_human_string(parser->types, lhs_type_i, arena);
+      string_append_string(&error, type_inferred_string, arena);
+      par_error(parser, token, error.value);
+    }
+
+    const u32 rhs_type_i =
+        ty_resolve_types(parser, class_files, node->rhs, arena);
+    const par_type_t *const rhs_type = &parser->types[rhs_type_i];
+
+    // TODO: find the type of rhs in class files.
+
+    return node->type_i = rhs_type_i;
   }
 
   case AST_KIND_MAX:
@@ -6813,6 +6877,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     };
     cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 
+    break;
+  }
+  case AST_KIND_FIELD_ACCESS: {
+    pg_assert(0 && "todo");
     break;
   }
   case AST_KIND_MAX:
