@@ -107,7 +107,7 @@ int main(int argc, char *argv[]) {
         .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
         .minor_version = 0,
         .major_version = 17,
-        .access_flags = CAF_ACC_SUPER | CAF_ACC_PUBLIC,
+        .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
     cg_emit(&parser, &class_file, class_files, root_i, &arena);

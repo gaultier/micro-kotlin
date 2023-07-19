@@ -5321,8 +5321,10 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
         return 0;
       }
 
-      // TODO: parse type descriptor, create type accordingly, return it
-      return 0; // FIXME!!!
+      // TODO: parse type descriptor
+      par_type_t type = {0}; // TODO
+      pg_array_append(resolver->parser->types, type, arena);
+      return node->type_i = pg_array_last_index(resolver->parser->types);
     }
 
     if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
@@ -5899,11 +5901,6 @@ static void cg_begin_scope(cg_generator_t *gen) {
   gen->frame->scope_depth += 1;
 }
 
-// TODO: interleaved stack map frames are real! (?)
-// We need to first store all of the stack map frames absolute offset
-// locations (aka: jump targets) *and then* sort them (or perhaps insert in
-// the right sorted location in the first place) and compute all the delta
-// data and delta offsets in the right order.
 static void
 stack_map_record_frame_at_pc(const cg_frame_t *frame,
                              cf_stack_map_frame_t **stack_map_frames, u16 pc,
