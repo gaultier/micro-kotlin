@@ -2771,11 +2771,7 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   string_append_cstring(&last_path_component, "Kt.class", arena);
   string_capitalize_first(&last_path_component);
 
-  string_t result = string_make(source_file_name, arena);
-  string_drop_file_component(&result, arena);
-  string_append_char_if_not_exists(&result, '/', arena);
-  string_append_string(&result, last_path_component, arena);
-  return result;
+  return last_path_component;
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
