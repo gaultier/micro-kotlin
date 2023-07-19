@@ -2798,9 +2798,12 @@ static void cf_read_class_files(char *path, u64 path_len,
 
 static bool
 cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
-                                  string_t class_name, string_t field_name) {
+                                  string_t class_name, string_t field_name,
+                                  u16 access_flags, u32 *class, u16 *field_i) {
   pg_assert(class_files != NULL);
   pg_assert(field_name.len > 0);
+  pg_assert(class != NULL);
+  pg_assert(field_i != NULL);
 
   // TODO: use the file path <-> class name mapping to search less?
 
@@ -2822,7 +2825,8 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
 
     for (u64 j = 0; j < pg_array_len(class_file->fields); j++) {
       const cf_field_t *const this_field = &class_file->fields[j];
-      // TODO: check attributes?
+      if ((this_field->access_flags & access_flags) == 0)
+        continue;
 
       const string_t this_field_name = cf_constant_array_get_as_string(
           &class_file->constant_pool, this_field->name);
@@ -2830,6 +2834,8 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
       if (!string_eq(this_field_name, field_name))
         continue;
 
+      *class = i;
+      *field_i = j;
       return true;
     }
   }
@@ -5288,8 +5294,10 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
           &resolver->parser->class_files[resolver->class].constant_pool,
           resolver->constant_pool_class_name_i);
 
-      pg_assert(node->main_token_i + 1 < pg_array_len(resolver->parser->lexer->tokens));
-      const lex_token_t token_field = resolver->parser->lexer->tokens[node->main_token_i + 1];
+      pg_assert(node->main_token_i + 1 <
+                pg_array_len(resolver->parser->lexer->tokens));
+      const lex_token_t token_field =
+          resolver->parser->lexer->tokens[node->main_token_i + 1];
 
       const string_t field_name = {
           .value = &resolver->parser->buf[token_field.source_offset],
@@ -5297,18 +5305,30 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
                                        resolver->parser->buf_len,
                                        token_field.source_offset),
       };
-      if (!cf_class_files_find_field_exactly(resolver->parser->class_files,
-                                             class_name, field_name)) {
-        pg_assert(0 && "todo");
+
+      u32 class = 0;
+      u16 field_i = 0;
+      if (!cf_class_files_find_field_exactly(
+              resolver->parser->class_files, class_name, field_name,
+              CAF_ACC_STATIC | CAF_ACC_PUBLIC, &class, &field_i)) {
+        string_t error = string_reserve(256, arena);
+        string_append_cstring(&error, "unknown field", arena);
+        string_append_string(&error, field_name, arena);
+        string_append_cstring(&error, "of class ", arena);
+        string_append_string(&error, class_name, arena);
+
+        par_error(resolver->parser, token, error.value);
+        return 0;
       }
 
+      // TODO: parse type descriptor, create type accordingly, return it
       return 0; // FIXME!!!
     }
 
     if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error,
-                            "incompatible types, expect object, got: ", arena);
+      string_append_cstring(
+          &error, "incompatible types, expected object, got: ", arena);
 
       const string_t type_inferred_string =
           ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
