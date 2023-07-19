@@ -994,7 +994,7 @@ static void cf_fill_type_descriptor_string(const ty_type_t *types, u32 type_i,
 
   switch (type->kind) {
   case TYPE_ANY:
-    return ;
+    return;
   case TYPE_VOID: {
     string_append_char(type_descriptor, 'V', arena);
     break;
@@ -4493,8 +4493,11 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
+  if (!par_match_token(parser, TOKEN_KIND_DOT))
+    return 0;
+
   if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    return 0; // No need to create a new node.
+    return 0; // No need to create a new node, end of the chain `a.b.c`.
   }
 
   if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
@@ -4505,6 +4508,23 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
   }
 
   pg_assert(0 && "todo"); // TODO: `class`
+}
+
+// postfixUnarySuffix:
+//     postfixUnaryOperator
+//     | typeArguments
+//     | callSuffix
+//     | indexingSuffix
+//     | navigationSuffix
+static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
+                                          arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+
+  return par_parse_navigation_suffix(parser, arena);
 }
 
 // postfixUnaryExpression:
@@ -4519,15 +4539,18 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
 
   const u32 lhs_i = par_parse_primary_expression(parser, arena);
 
-  if (!par_match_token(parser, TOKEN_KIND_DOT))
-    return lhs_i;
-
-  const u32 main_token_i = parser->tokens_i - 1;
-  const u32 rhs_i = par_parse_navigation_suffix(parser, arena);
+  u32 rhs_i = 0;
+  u32 node_i = 0;
+  while ((node_i = par_parse_postfix_unary_suffix(parser, arena)) != 0) {
+    const par_ast_node_t node = {
+        .kind = AST_KIND_UNARY,
+        .lhs = node_i,
+    };
+    rhs_i = par_add_node(parser, &node, arena);
+  }
 
   const par_ast_node_t node = {
-      .kind = AST_KIND_FIELD_ACCESS,
-      .main_token_i = main_token_i,
+      .kind = rhs_i > 0 ? AST_KIND_BINARY : AST_KIND_UNARY,
       .lhs = lhs_i,
       .rhs = rhs_i,
   };
@@ -4548,8 +4571,6 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
       par_match_token(parser, TOKEN_KIND_MINUS)) {
     const par_ast_node_t node = {
         .kind = AST_KIND_UNARY,
-        // Departure from the official grammer but I believe it must be (!?)
-        // to allow for `!!true`
         .lhs = par_parse_prefix_unary_expression(parser, arena),
         .main_token_i = parser->tokens_i - 1,
     };
