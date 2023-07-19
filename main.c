@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
       char *const class_path =
           "/home/pg/scratch/java-module/java.base/java"; // FIXME
       cf_read_class_files(class_path, strlen(class_path), &class_files, &arena);
+      cf_read_class_files(".", 1, &class_files, &arena);
       LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
           arena.current_offset);
     }
@@ -86,11 +87,12 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    resolver_t resolver = { .parser = &parser };
+    resolver_t resolver = {.parser = &parser};
     ty_resolve_types(&resolver, root_i, &arena);
 
     // Debug types.
     {
+      LOG("------ After type checking%s", "");
       arena_t tmp_arena = arena;
       par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
     }

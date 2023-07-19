@@ -3871,10 +3871,16 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
           parser->lexer->file_path.value, line, column, token.source_offset);
     }
   }
+    par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
+    par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
 
-    // Intentional fallthrough.
+    break;
 
   default:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+        kind_string, token_string.len, token_string.value, human_type.len,
+        human_type.value, parser->lexer->file_path.len,
+        parser->lexer->file_path.value, line, column, token.source_offset);
     par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
     par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
     break;
