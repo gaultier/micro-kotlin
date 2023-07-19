@@ -86,11 +86,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    resolver_t resolver = {
-        .parser = &parser,
-        .class = (u32)-1,
-        .constant_pool_class_name_i = (u16)-1,
-    };
+    resolver_t resolver = { .parser = &parser };
     ty_resolve_types(&resolver, root_i, &arena);
 
     // Debug types.
