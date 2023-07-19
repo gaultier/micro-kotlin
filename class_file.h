@@ -3763,19 +3763,46 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
 
   const string_t human_type =
       ty_type_to_human_string(parser->types, node->type_i, arena);
-  LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-      kind_string, token_string.len, token_string.value, human_type.len,
-      human_type.value, parser->lexer->file_path.len,
-      parser->lexer->file_path.value, line, column, token.source_offset);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
   case AST_KIND_BOOL:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+        kind_string, token_string.len, token_string.value, human_type.len,
+        human_type.value, parser->lexer->file_path.len,
+        parser->lexer->file_path.value, line, column, token.source_offset);
     break;
   case AST_KIND_LIST:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+        kind_string, token_string.len, token_string.value, human_type.len,
+        human_type.value, parser->lexer->file_path.len,
+        parser->lexer->file_path.value, line, column, token.source_offset);
+
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
       par_ast_fprint_node(parser, node->nodes[i], file, indent + 2, arena);
     break;
+  case AST_KIND_FIELD_ACCESS: {
+    if (node->rhs == 0) // End of the chain.
+    {
+      pg_assert(node->main_token_i + 1 < pg_array_len(parser->lexer->tokens));
+      const lex_token_t field = parser->lexer->tokens[node->main_token_i + 1];
+
+      LOG("[%ld] %s .%.*s  : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+          kind_string,
+          lex_find_token_length(parser->lexer, parser->buf, parser->buf_len,
+                                field),
+          &parser->buf[field.source_offset], human_type.len, human_type.value,
+          parser->lexer->file_path.len, parser->lexer->file_path.value, line,
+          column, token.source_offset);
+    } else {
+      LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
+          kind_string, token_string.len, token_string.value, human_type.len,
+          human_type.value, parser->lexer->file_path.len,
+          parser->lexer->file_path.value, line, column, token.source_offset);
+    }
+  }
+
+    // Intentional fallthrough.
 
   default:
     par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
@@ -4379,11 +4406,7 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    const par_ast_node_t node = {
-        .kind = AST_KIND_FIELD_ACCESS,
-        .main_token_i = parser->tokens_i - 1,
-    };
-    return par_add_node(parser, &node, arena);
+    return 0; // No need to create a new node.
   }
 
   if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
@@ -4943,62 +4966,75 @@ static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena) {
   return res;
 }
 
-static u32 ty_resolve_types(par_parser_t *parser,
-                            const cf_class_file_t *class_files, u32 node_i,
-                            arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(class_files != NULL);
-  pg_assert(node_i < pg_array_len(parser->nodes));
+typedef struct {
+  par_parser_t *parser;
+  u32 class;
+  u16 constant_pool_class_name_i;
+  pg_pad(2);
+} resolver_t;
 
-  par_ast_node_t *const node = &parser->nodes[node_i];
-  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
+static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->parser != NULL);
+  pg_assert(resolver->parser->class_files != NULL);
+  pg_assert(node_i < pg_array_len(resolver->parser->nodes));
+
+  par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_ANY}, arena);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_ANY},
+                    arena);
 
-    return node->type_i = pg_array_last_index(parser->types);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
   case AST_KIND_BOOL:
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
-    return node->type_i = pg_array_last_index(parser->types);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_BOOL},
+                    arena);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
   case AST_KIND_BUILTIN_PRINTLN: {
-    ty_resolve_types(parser, class_files, node->lhs, arena);
+    ty_resolve_types(resolver, node->lhs, arena);
 
-    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
-    const par_type_t *const lhs_type = &parser->types[lhs->type_i];
+    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    const par_type_t *const lhs_type = &resolver->parser->types[lhs->type_i];
 
     const par_type_t void_type = {.kind = TYPE_VOID};
-    const u32 return_type_i = ty_add_type(&parser->types, &void_type, arena);
+    const u32 return_type_i =
+        ty_add_type(&resolver->parser->types, &void_type, arena);
     const par_type_t println_type = {
         .kind = TYPE_METHOD,
         .v = {.method = {
                   .argument_count = 1,
                   .return_type_i = return_type_i,
                   .argument_types_i =
-                      ty_add_type(&parser->types, lhs_type, arena),
+                      ty_add_type(&resolver->parser->types, lhs_type, arena),
               }}};
-    pg_array_append(parser->types, println_type, arena);
-    node->type_i = pg_array_last_index(parser->types);
+    pg_array_append(resolver->parser->types, println_type, arena);
+    node->type_i = pg_array_last_index(resolver->parser->types);
 
     string_t descriptor = string_reserve(64, arena);
-    cf_fill_type_descriptor_string(
-        parser->types, pg_array_last_index(parser->types), &descriptor, arena);
+    cf_fill_type_descriptor_string(resolver->parser->types,
+                                   pg_array_last_index(resolver->parser->types),
+                                   &descriptor, arena);
 
-    pg_array_last(parser->types)->v.method.descriptor = descriptor;
+    pg_array_last(resolver->parser->types)->v.method.descriptor = descriptor;
 
     if (!cf_class_files_find_method_exactly(
-            class_files, string_make_from_c_no_alloc("java/io/PrintStream"),
+            resolver->parser->class_files,
+            string_make_from_c_no_alloc("java/io/PrintStream"),
             string_make_from_c_no_alloc("println"), descriptor)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, node->type_i, arena),
+          &error,
+          ty_type_to_human_string(resolver->parser->types, node->type_i, arena),
           arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, lhs->type_i, arena),
+          &error,
+          ty_type_to_human_string(resolver->parser->types, lhs->type_i, arena),
           arena);
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
     }
 
     return return_type_i;
@@ -5008,9 +5044,9 @@ static u32 ty_resolve_types(par_parser_t *parser,
 
     u8 number_flags = 0;
     // TODO: should we memoize this to avoid parsing it twice?
-    const u64 number = par_number(parser, token, &number_flags);
+    const u64 number = par_number(resolver->parser, token, &number_flags);
     if (number_flags & NUMBER_FLAGS_OVERFLOW) {
-      par_error(parser, token,
+      par_error(resolver->parser, token,
                 "Long literal is too big (> 9223372036854775807)");
       return 0;
 
@@ -5018,36 +5054,37 @@ static u32 ty_resolve_types(par_parser_t *parser,
       kind = TYPE_LONG;
     } else {
       if (number > INT32_MAX) {
-        par_error(parser, token, "Integer literal is too big (> 2147483647)");
+        par_error(resolver->parser, token,
+                  "Integer literal is too big (> 2147483647)");
         return 0;
       }
     }
 
-    pg_array_append(parser->types, (par_type_t){.kind = kind},
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = kind},
                     arena); // TODO: something smarter.
-    return node->type_i = pg_array_last_index(parser->types);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_UNARY:
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      node->type_i = ty_resolve_types(parser, class_files, node->lhs, arena);
-      const par_type_t *const type = &parser->types[node->type_i];
+      node->type_i = ty_resolve_types(resolver, node->lhs, arena);
+      const par_type_t *const type = &resolver->parser->types[node->type_i];
       if (type->kind != TYPE_BOOL) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
-        string_append_string(
-            &error, ty_type_to_human_string(parser->types, node->type_i, arena),
-            arena);
+        string_append_string(&error,
+                             ty_type_to_human_string(resolver->parser->types,
+                                                     node->type_i, arena),
+                             arena);
         string_append_cstring(&error, ", expected Boolean ", arena);
-        par_error(parser, token, error.value);
+        par_error(resolver->parser, token, error.value);
         return 0;
       }
 
       return node->type_i;
 
     case TOKEN_KIND_MINUS:
-      return node->type_i =
-                 ty_resolve_types(parser, class_files, node->lhs, arena);
+      return node->type_i = ty_resolve_types(resolver, node->lhs, arena);
 
     default:
       pg_assert(0 && "todo");
@@ -5055,18 +5092,22 @@ static u32 ty_resolve_types(par_parser_t *parser,
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
-    const u32 lhs_i = ty_resolve_types(parser, class_files, node->lhs, arena);
-    const u32 rhs_i = ty_resolve_types(parser, class_files, node->rhs, arena);
+    const u32 lhs_i = ty_resolve_types(resolver, node->lhs, arena);
+    const u32 rhs_i = ty_resolve_types(resolver, node->rhs, arena);
 
-    if (!ty_merge_types(parser->types, lhs_i, rhs_i, &node->type_i)) {
+    if (!ty_merge_types(resolver->parser->types, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, lhs_i, arena), arena);
+          &error,
+          ty_type_to_human_string(resolver->parser->types, lhs_i, arena),
+          arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(parser->types, rhs_i, arena), arena);
-      par_error(parser, token, error.value);
+          &error,
+          ty_type_to_human_string(resolver->parser->types, rhs_i, arena),
+          arena);
+      par_error(resolver->parser, token, error.value);
     }
 
     switch (token.kind) {
@@ -5076,20 +5117,22 @@ static u32 ty_resolve_types(par_parser_t *parser,
     case TOKEN_KIND_GE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
-      pg_array_append(parser->types, (par_type_t){.kind = TYPE_BOOL}, arena);
-      return node->type_i = pg_array_last_index(parser->types);
+      pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_BOOL},
+                      arena);
+      return node->type_i = pg_array_last_index(resolver->parser->types);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const cf_type_kind_t type_kind = parser->types[lhs_i].kind;
+      const cf_type_kind_t type_kind = resolver->parser->types[lhs_i].kind;
       if (type_kind != TYPE_BOOL) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
         string_append_string(
-            &error, ty_type_to_human_string(parser->types, lhs_i, arena),
+            &error,
+            ty_type_to_human_string(resolver->parser->types, lhs_i, arena),
             arena);
-        par_error(parser, token, error.value);
+        par_error(resolver->parser, token, error.value);
       }
       return 0;
     }
@@ -5100,42 +5143,44 @@ static u32 ty_resolve_types(par_parser_t *parser,
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
-      ty_resolve_types(parser, class_files, node->nodes[i], arena);
+      ty_resolve_types(resolver, node->nodes[i], arena);
 
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID}, arena);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_VOID},
+                    arena);
 
-    return node->type_i = pg_array_last_index(parser->types);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_FUNCTION_DEFINITION:
-    ty_resolve_types(parser, class_files, node->lhs, arena);
+    ty_resolve_types(resolver, node->lhs, arena);
     // Inspect body (rhs).
-    ty_resolve_types(parser, class_files, node->rhs, arena);
+    ty_resolve_types(resolver, node->rhs, arena);
 
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID}, arena);
-    return node->type_i = pg_array_last_index(parser->types);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_VOID},
+                    arena);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
     const string_t type_literal_string =
-        par_token_to_string(parser, node->main_token_i + 2);
+        par_token_to_string(resolver->parser, node->main_token_i + 2);
 
     const string_t alternate_type_string =
         ty_know_type_aliases(type_literal_string, arena);
 
-    if (!cf_class_files_find_class_exactly(class_files, type_literal_string,
+    if (!cf_class_files_find_class_exactly(resolver->parser->class_files,
+                                           type_literal_string,
                                            alternate_type_string, NULL, NULL)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
       string_append_string(&error, type_literal_string, arena);
 
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
       return 0;
     }
 
-    const u32 type_lhs_i =
-        ty_resolve_types(parser, class_files, node->lhs, arena);
+    const u32 type_lhs_i = ty_resolve_types(resolver, node->lhs, arena);
 
     const string_t type_inferred_string =
-        ty_type_to_human_string(parser->types, type_lhs_i, arena);
+        ty_type_to_human_string(resolver->parser->types, type_lhs_i, arena);
 
     if (!string_eq(type_literal_string, type_inferred_string)) {
       string_t error = string_reserve(256, arena);
@@ -5143,107 +5188,119 @@ static u32 ty_resolve_types(par_parser_t *parser,
       string_append_string(&error, type_literal_string, arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(&error, type_inferred_string, arena);
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
     }
 
     return node->type_i = type_lhs_i;
   }
   case AST_KIND_VAR_REFERENCE: {
     pg_assert(node->lhs > 0);
-    return node->type_i = parser->nodes[node->lhs].type_i;
+    return node->type_i = resolver->parser->nodes[node->lhs].type_i;
   }
   case AST_KIND_IF: {
     pg_assert(node->lhs > 0);
-    pg_assert(node->lhs < pg_array_len(parser->nodes));
+    pg_assert(node->lhs < pg_array_len(resolver->parser->nodes));
     pg_assert(node->rhs > 0);
-    pg_assert(node->rhs < pg_array_len(parser->nodes));
+    pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i =
-        ty_resolve_types(parser, class_files, node->lhs, arena);
+    const u32 type_condition_i = ty_resolve_types(resolver, node->lhs, arena);
 
-    if (parser->types[type_condition_i].kind != TYPE_BOOL) {
+    if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
 
-      const string_t type_inferred_string =
-          ty_type_to_human_string(parser->types, type_condition_i, arena);
+      const string_t type_inferred_string = ty_type_to_human_string(
+          resolver->parser->types, type_condition_i, arena);
       string_append_string(&error, type_inferred_string, arena);
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
     }
 
-    const u32 type_then_else_i =
-        ty_resolve_types(parser, class_files, node->rhs, arena);
+    const u32 type_then_else_i = ty_resolve_types(resolver, node->rhs, arena);
     pg_assert(type_then_else_i > 0);
 
     return node->type_i = type_then_else_i;
   }
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
-    pg_assert(node->lhs < pg_array_len(parser->nodes));
+    pg_assert(node->lhs < pg_array_len(resolver->parser->nodes));
     pg_assert(node->rhs > 0);
-    pg_assert(node->rhs < pg_array_len(parser->nodes));
+    pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i =
-        ty_resolve_types(parser, class_files, node->lhs, arena);
+    const u32 type_condition_i = ty_resolve_types(resolver, node->lhs, arena);
 
-    if (parser->types[type_condition_i].kind != TYPE_BOOL) {
+    if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
 
-      const string_t type_inferred_string =
-          ty_type_to_human_string(parser->types, type_condition_i, arena);
+      const string_t type_inferred_string = ty_type_to_human_string(
+          resolver->parser->types, type_condition_i, arena);
       string_append_string(&error, type_inferred_string, arena);
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
     }
 
-    ty_resolve_types(parser, class_files, node->rhs, arena);
+    ty_resolve_types(resolver, node->rhs, arena);
 
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_VOID}, arena);
-    const u32 void_type_i = pg_array_last_index(parser->types);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_VOID},
+                    arena);
+    const u32 void_type_i = pg_array_last_index(resolver->parser->types);
     return node->type_i = void_type_i;
   }
   case AST_KIND_STRING: {
-    pg_array_append(parser->types, (par_type_t){.kind = TYPE_STRING}, arena);
-    const u32 type_i = pg_array_last_index(parser->types);
+    pg_array_append(resolver->parser->types, (par_type_t){.kind = TYPE_STRING},
+                    arena);
+    const u32 type_i = pg_array_last_index(resolver->parser->types);
     return node->type_i = type_i;
   }
 
   case AST_KIND_CLASS_REFERENCE: {
     const string_t class_name = cf_constant_array_get_as_string(
-        &class_files[node->static_class].constant_pool,
+        &resolver->parser->class_files[node->static_class].constant_pool,
         node->constant_pool_class_name_i);
     const par_type_t type = {.kind = TYPE_CLASS_REFERENCE,
                              .v = {.class_name = class_name}};
 
-    pg_array_append(parser->types, type, arena);
-    return node->type_i = pg_array_last_index(parser->types);
+    resolver->class = node->static_class;
+    resolver->constant_pool_class_name_i = node->constant_pool_class_name_i;
+
+    pg_array_append(resolver->parser->types, type, arena);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
   }
 
   case AST_KIND_FIELD_ACCESS: {
-    if (node->lhs == 0) { // Last member of the field access e.g. `a.b.c`: `c`
-      // FIXME!!!
+    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    const par_ast_node_t *const rhs = &resolver->parser->nodes[node->rhs];
+
+    // FIXME: For now, this is the only kind of field access that's supported
+    // e.g. `System.out`.
+    pg_assert(lhs->kind == AST_KIND_CLASS_REFERENCE);
+
+    const u32 lhs_type_i = ty_resolve_types(resolver, node->lhs, arena);
+    const par_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
+    pg_assert(resolver->constant_pool_class_name_i != (u16)-1);
+    pg_assert(resolver->constant_pool_class_name_i > 0);
+
+    if (node->rhs ==
+        0) { // `node` is the last member of the field access e.g. `a.b.c`: `c`
+
       const string_t class_name = cf_constant_array_get_as_string(
-          &class_files[node->static_class].constant_pool,
-          node->constant_pool_class_name_i);
+          &resolver->parser->class_files[resolver->class].constant_pool,
+          resolver->constant_pool_class_name_i);
 
       const string_t field_name = {
-          .value = &parser->buf[token.source_offset],
-          .len = lex_identifier_length(parser->buf, parser->buf_len,
+          .value = &resolver->parser->buf[token.source_offset],
+          .len = lex_identifier_length(resolver->parser->buf,
+                                       resolver->parser->buf_len,
                                        token.source_offset),
       };
-      if (!cf_class_files_find_field_exactly(class_files, class_name,
-                                             field_name)) {
+      if (!cf_class_files_find_field_exactly(resolver->parser->class_files,
+                                             class_name, field_name)) {
         pg_assert(0 && "todo");
       }
 
       return 0; // FIXME!!!
     }
-
-    const u32 lhs_type_i =
-        ty_resolve_types(parser, class_files, node->lhs, arena);
-    const par_type_t *const lhs_type = &parser->types[lhs_type_i];
 
     if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
       string_t error = string_reserve(256, arena);
@@ -5251,14 +5308,13 @@ static u32 ty_resolve_types(par_parser_t *parser,
                             "incompatible types, expect object, got: ", arena);
 
       const string_t type_inferred_string =
-          ty_type_to_human_string(parser->types, lhs_type_i, arena);
+          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
       string_append_string(&error, type_inferred_string, arena);
-      par_error(parser, token, error.value);
+      par_error(resolver->parser, token, error.value);
     }
 
-    const u32 rhs_type_i =
-        ty_resolve_types(parser, class_files, node->rhs, arena);
-    const par_type_t *const rhs_type = &parser->types[rhs_type_i];
+    const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena);
+    const par_type_t *const rhs_type = &resolver->parser->types[rhs_type_i];
 
     // TODO: find the type of rhs in class files.
 
