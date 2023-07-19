@@ -5288,11 +5288,14 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
           &resolver->parser->class_files[resolver->class].constant_pool,
           resolver->constant_pool_class_name_i);
 
+      pg_assert(node->main_token_i + 1 < pg_array_len(resolver->parser->lexer->tokens));
+      const lex_token_t token_field = resolver->parser->lexer->tokens[node->main_token_i + 1];
+
       const string_t field_name = {
-          .value = &resolver->parser->buf[token.source_offset],
+          .value = &resolver->parser->buf[token_field.source_offset],
           .len = lex_identifier_length(resolver->parser->buf,
                                        resolver->parser->buf_len,
-                                       token.source_offset),
+                                       token_field.source_offset),
       };
       if (!cf_class_files_find_field_exactly(resolver->parser->class_files,
                                              class_name, field_name)) {
