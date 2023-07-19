@@ -632,7 +632,7 @@ typedef struct {
   string_t descriptor;
   u32 return_type_i;
   u32 argument_types_i;
-  u8 argument_count;
+  u8 argument_count; // TODO: use pg_array_* macros.
   pg_pad(7);
 } par_type_method_t;
 
@@ -3792,15 +3792,30 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_ARRAY_REFERENCE:
     return string_make_from_c("Array<todo>", arena);
   case TYPE_INSTANCE_REFERENCE:
-    return string_make_from_c("Instance<todo>", arena);
-  case TYPE_METHOD:
-    return string_make_from_c("Method<todo>", arena);
+    return type->v.class_name;
+  case TYPE_METHOD: {
+    const par_type_method_t *const method_type = &type->v.method;
+
+    string_t res = string_reserve(128, arena);
+    string_append_cstring(&res, "(", arena);
+    for (u64 i = 0; i < method_type->argument_count; i++) {
+      const u32 argument_type_i = method_type->argument_types_i; // FIXME
+      string_append_string(
+          &res, ty_type_to_human_string(types, argument_type_i, arena), arena);
+    }
+    string_append_cstring(&res, ") -> ", arena);
+    string_append_string(
+        &res, ty_type_to_human_string(types, method_type->return_type_i, arena),
+        arena);
+    return res;
+  }
+
   case TYPE_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
   case TYPE_FLOAT:
     return string_make_from_c("Float", arena);
   case TYPE_CLASS_REFERENCE:
-    return string_make_from_c("Class<todo>", arena);
+    return type->v.class_name;
   }
 }
 
