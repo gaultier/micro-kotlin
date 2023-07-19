@@ -5077,17 +5077,22 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_append(resolver->parser->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->parser->types);
 
-    string_t descriptor = string_reserve(64, arena);
-    cf_fill_type_descriptor_string(resolver->parser->types,
-                                   pg_array_last_index(resolver->parser->types),
-                                   &descriptor, arena);
+    string_t method_descriptor = {0};
+    if (lhs_type->kind == TYPE_INSTANCE_REFERENCE) {
+      method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
+    } else {
+      method_descriptor = string_reserve(64, arena);
+      cf_fill_type_descriptor_string(
+          resolver->parser->types, pg_array_last_index(resolver->parser->types),
+          &method_descriptor, arena);
+    }
 
-    pg_array_last(resolver->parser->types)->v.method.descriptor = descriptor;
+    pg_array_last(resolver->parser->types)->v.method.descriptor = method_descriptor;
 
     if (!cf_class_files_find_method_exactly(
             resolver->parser->class_files,
             string_make_from_c_no_alloc("java/io/PrintStream"),
-            string_make_from_c_no_alloc("println"), descriptor)) {
+            string_make_from_c_no_alloc("println"), method_descriptor)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
