@@ -1,5 +1,5 @@
 a.out
-*.java
+!*.java
 *.class
 debug
 main
