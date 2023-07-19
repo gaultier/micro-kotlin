@@ -835,9 +835,9 @@ static void cf_code_array_push_u16(u8 **array, u16 x, arena_t *arena) {
 }
 
 typedef enum __attribute__((packed)) {
-  CAF_ACC_PUBLIC = 0x0001,
-  CAF_ACC_STATIC = 0x0008,
-  CAF_ACC_SUPER = 0x0020,
+  ACCESS_FLAGS_PUBLIC = 0x0001,
+  ACCESS_FLAGS_STATIC = 0x0008,
+  ACCESS_FLAGS_SUPER = 0x0020,
 } cf_access_flags_t;
 
 typedef struct {
@@ -5310,7 +5310,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       u16 field_i = 0;
       if (!cf_class_files_find_field_exactly(
               resolver->parser->class_files, class_name, field_name,
-              CAF_ACC_STATIC | CAF_ACC_PUBLIC, &class, &field_i)) {
+              ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC, &class, &field_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "unknown field", arena);
         string_append_string(&error, field_name, arena);
@@ -6560,7 +6560,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                                                     type_descriptor, arena);
 
     cf_method_t method = {
-        .access_flags = CAF_ACC_STATIC | CAF_ACC_PUBLIC /* FIXME */,
+        .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC /* FIXME */,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
