@@ -417,8 +417,6 @@ static void string_append_string(string_t *a, string_t b, arena_t *arena) {
 
 static void string_drop_last_n(string_t *a, u64 n) {
   pg_assert(a != NULL);
-  pg_assert(a->cap != 0);
-  pg_assert(a->len <= a->cap);
 
   while (a->len > 0 && n > 0) {
     a->value[a->len - 1] = 0;
@@ -427,7 +425,6 @@ static void string_drop_last_n(string_t *a, u64 n) {
   }
 
   pg_assert(a->value != NULL);
-  pg_assert(a->len <= a->cap);
 }
 
 static void string_clear(string_t *a) {
@@ -1110,10 +1107,14 @@ static void cf_parse_field_type_descriptor(string_t type_descriptor,
     return;
   case 'L':
     type->kind = TYPE_INSTANCE_REFERENCE;
-    type->v.class_name = (string_t){
+    string_t class_name = {
         .value = type_descriptor.value + 1,
         .len = type_descriptor.len - 1,
     };
+    pg_assert(class_name.len >= 2);
+    pg_assert(class_name.value[class_name.len - 1] = ';');
+    string_drop_last_n(&class_name, 1);
+    type->v.class_name = class_name;
     return;
   case '[':
     type->kind = TYPE_ARRAY_REFERENCE;
@@ -1125,8 +1126,8 @@ static void cf_parse_field_type_descriptor(string_t type_descriptor,
     };
     cf_parse_field_type_descriptor(type_descriptor_remaining, &item_type, types,
                                    arena);
-    pg_array_append(*types, item_type,arena);
-    type->v.array_type_i=pg_array_last_index(*types);
+    pg_array_append(*types, item_type, arena);
+    type->v.array_type_i = pg_array_last_index(*types);
     return;
   default:
     pg_assert(0 && "unreachable");
@@ -5380,7 +5381,16 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       }
 
       // TODO: parse type descriptor
-      par_type_t type = {0}; // TODO
+
+      const cf_class_file_t *class_file = &resolver->parser->class_files[class];
+      ;
+
+      const u16 type_descriptor_i = class_file->fields[field_i].descriptor;
+      const string_t type_descriptor = cf_constant_array_get_as_string(
+          &class_file->constant_pool, type_descriptor_i);
+      par_type_t type = {0};
+      cf_parse_field_type_descriptor(type_descriptor, &type,
+                                     &resolver->parser->types, arena);
       pg_array_append(resolver->parser->types, type, arena);
       return node->type_i = pg_array_last_index(resolver->parser->types);
     }
