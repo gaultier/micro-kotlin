@@ -646,6 +646,7 @@ struct par_type_t {
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
   cf_type_kind_t kind;
+  // TODO: some checks with rhs_type.
   pg_pad(7);
 };
 typedef struct par_type_t par_type_t;
@@ -1072,6 +1073,63 @@ static void cf_fill_type_descriptor_string(const par_type_t *types, u32 type_i,
     string_append_string(type_descriptor, class_name, arena);
     break;
   }
+  }
+}
+
+static void cf_parse_field_type_descriptor(string_t type_descriptor,
+                                           par_type_t *type, par_type_t **types,
+                                           arena_t *arena) {
+  pg_assert(type != NULL);
+  pg_assert(types != NULL);
+  pg_assert(arena != NULL);
+
+  if (type_descriptor.len == 0)
+    return;
+
+  switch (type_descriptor.value[0]) {
+  case 'B':
+    type->kind = TYPE_BYTE;
+    return;
+  case 'C':
+    type->kind = TYPE_CHAR;
+    return;
+  case 'D':
+    type->kind = TYPE_DOUBLE;
+    return;
+  case 'F':
+    type->kind = TYPE_FLOAT;
+    return;
+  case 'I':
+    type->kind = TYPE_INT;
+    return;
+  case 'J':
+    type->kind = TYPE_LONG;
+    return;
+  case 'Z':
+    type->kind = TYPE_BOOL;
+    return;
+  case 'L':
+    type->kind = TYPE_INSTANCE_REFERENCE;
+    type->v.class_name = (string_t){
+        .value = type_descriptor.value + 1,
+        .len = type_descriptor.len - 1,
+    };
+    return;
+  case '[':
+    type->kind = TYPE_ARRAY_REFERENCE;
+    par_type_t item_type = {0};
+
+    string_t type_descriptor_remaining = {
+        .value = type_descriptor.value + 1,
+        .len = type_descriptor.len - 1,
+    };
+    cf_parse_field_type_descriptor(type_descriptor_remaining, &item_type, types,
+                                   arena);
+    pg_array_append(*types, item_type,arena);
+    type->v.array_type_i=pg_array_last_index(*types);
+    return;
+  default:
+    pg_assert(0 && "unreachable");
   }
 }
 
@@ -5340,8 +5398,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena);
     const par_type_t *const rhs_type = &resolver->parser->types[rhs_type_i];
-
-    // TODO: find the type of rhs in class files.
+    // TODO: some checks with rhs_type.
 
     return node->type_i = rhs_type_i;
   }
