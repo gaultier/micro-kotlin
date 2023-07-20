@@ -2862,13 +2862,14 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
   pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x06);
 
   // disk number
-  buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
 
   // disk start
   const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
 
   // records count on this disk
-  buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 disk_records_count =
+      buf_read_le_u16(content.value, content.len, &cdre);
 
   const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
 
@@ -2939,6 +2940,7 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
     const u32 local_file_header_offset =
         buf_read_le_u32(content.value, content.len, &cdfh);
 
+    LOG("i=%lu file_name=%.*s", i, file_name_length, cdfh);
     // file name
     buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
 
@@ -2947,49 +2949,52 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
 
     // file comment
     buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
+
+    // Read file header.
+    {
+      char *local_file_header =
+          content.value + disk_start + local_file_header_offset;
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x50);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x4b);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x03);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x04);
+
+      // version to extract
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // general purpose bit flag
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const u16 compression_method =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+      pg_assert(compression_method == 0); // No compression.
+
+      // file last modification time
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // file last modification date
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // crc-32 of uncompressed data
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      // compressed size
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      // uncompressed size
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      const u16 file_name_length =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const u16 extra_field_length =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+    }
   }
-  1;
-
-  // TODO: Should we jump to disk_start + local_file_header_offset ?
-#if 0
-  for (u64 i = 0; i < file_name_length; i++) {
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x03);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x04);
-
-    // version to extract
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // general purpose bit flag
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    const u16 compression_method =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-    pg_assert(compression_method == 0); // No compression.
-
-    // file last modification time
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // file last modification date
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // crc-32 of uncompressed data
-    buf_read_le_u32(content.value, content.len, &cdfh);
-
-    // compressed size
-    buf_read_le_u32(content.value, content.len, &cdfh);
-
-    // uncompressed size
-    buf_read_le_u32(content.value, content.len, &cdfh);
-
-    const u16 file_name_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-
-    const u16 extra_field_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-  }
-#endif
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
