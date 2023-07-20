@@ -2856,13 +2856,16 @@ static void cf_read_class_files(char *path, u64 path_len,
 #undef PATH_MAX
 }
 
-static bool cf_class_files_find_field_exactly(
-    const cf_class_file_t *class_files, string_t class_name,
-    string_t field_name, u16 access_flags, u32 *class_file_i, u16 *field_i) {
+static bool
+cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
+                                  string_t class_name, string_t field_name,
+                                  u16 access_flags, u32 *class_file_i,
+                                  u16 *field_i, u16 *class_name_i) {
   pg_assert(class_files != NULL);
   pg_assert(field_name.len > 0);
   pg_assert(class_file_i != NULL);
   pg_assert(field_i != NULL);
+  pg_assert(class_name_i != NULL);
 
   // TODO: use the file path <-> class name mapping to search less?
 
@@ -2895,6 +2898,7 @@ static bool cf_class_files_find_field_exactly(
 
       *class_file_i = i;
       *field_i = j;
+      *class_name_i = this_class_i;
       return true;
     }
   }
@@ -5088,9 +5092,8 @@ static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena) {
 
 typedef struct {
   par_parser_t *parser;
-  u32 class_file_i;
-  u16 constant_pool_class_name_i;
-  pg_pad(2);
+  u32 current_type_i;
+  pg_pad(4);
 } resolver_t;
 
 static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
@@ -5268,8 +5271,11 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
   }
   case AST_KIND_LIST: {
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       ty_resolve_types(resolver, node->nodes[i], arena);
+      // Clean up after each statement.
+      resolver->current_type_i = 0;
+    }
 
     pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
                     arena);
@@ -5395,44 +5401,34 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 
   case AST_KIND_FIELD_ACCESS: {
-    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    pg_assert(node->rhs == 0 && "todo");
+    if (node->lhs == 0 && node->rhs == 0) { // Field name (for now).
+      pg_assert(token.kind == TOKEN_KIND_IDENTIFIER);
+      // Resolve the type of the field.
+      // FIXME: also search within the current class.
 
-    /* const par_ast_node_t *const rhs = &resolver->parser->nodes[node->rhs]; */
-
-    // FIXME: For now, this is the only kind of field access that's supported
-    // e.g. `System.out`.
-    pg_assert(lhs->kind == AST_KIND_CLASS_REFERENCE);
-
-    const u32 lhs_type_i = ty_resolve_types(resolver, node->lhs, arena);
-    const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
-    pg_assert(lhs_type->constant_pool_item_i != (u16)-1);
-    pg_assert(lhs_type->constant_pool_item_i > 0);
-
-    if (node->rhs ==
-        0) { // `node` is the last member of the field access e.g. `a.b.c`: `c`
+      const ty_type_t *const current_type =
+          &resolver->parser->types[resolver->current_type_i];
 
       const string_t class_name = cf_constant_array_get_as_string(
-          &resolver->parser->class_files[lhs_type->class_file_i].constant_pool,
-          lhs_type->constant_pool_item_i);
+          &resolver->parser->class_files[current_type->class_file_i]
+               .constant_pool,
+          current_type->constant_pool_item_i);
 
       pg_assert(node->main_token_i + 1 <
                 pg_array_len(resolver->parser->lexer->tokens));
-      const lex_token_t token_field =
-          resolver->parser->lexer->tokens[node->main_token_i + 1];
 
       const string_t field_name = {
-          .value = &resolver->parser->buf[token_field.source_offset],
+          .value = &resolver->parser->buf[token.source_offset],
           .len = lex_identifier_length(resolver->parser->buf,
                                        resolver->parser->buf_len,
-                                       token_field.source_offset),
+                                       token.source_offset),
       };
 
       ty_type_t type = {0};
       if (!cf_class_files_find_field_exactly(
               resolver->parser->class_files, class_name, field_name,
               ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC, &type.class_file_i,
-              &type.field_i)) {
+              &type.field_i, &type.constant_pool_item_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "unknown field", arena);
         string_append_string(&error, field_name, arena);
@@ -5454,24 +5450,28 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return node->type_i = pg_array_last_index(resolver->parser->types);
     }
 
-    if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
+    const u32 lhs_type_i = ty_resolve_types(resolver, node->lhs, arena);
+    const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
+
+    if (!(lhs_type->kind == TYPE_INSTANCE_REFERENCE ||
+          lhs_type->kind == TYPE_CLASS_REFERENCE)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
-          &error, "incompatible types, expected object, got: ", arena);
+          &error,
+          "trying to access property of something that is not a object: ",
+          arena);
 
       const string_t type_inferred_string =
           ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
       string_append_string(&error, type_inferred_string, arena);
+
       par_error(resolver->parser, token, error.value);
+      return 0;
     }
 
-    /* const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena); */
-    /* const ty_type_t *const rhs_type = &resolver->parser->types[rhs_type_i];
-     */
-    // TODO: some checks with rhs_type.
-
-    pg_assert(0 && "todo");
-    return node->type_i = 0;
+    resolver->current_type_i = lhs_type_i;
+    const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena);
+    return node->type_i = resolver->current_type_i = rhs_type_i;
   }
 
   case AST_KIND_MAX:
