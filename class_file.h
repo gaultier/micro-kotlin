@@ -5588,10 +5588,43 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 
   case AST_KIND_FUNCTION_PARAMETER:
-    pg_assert(0 && "todo");
+    return node->type_i = ty_resolve_types(resolver, node->lhs, arena);
 
-  case AST_KIND_TYPE:
-    pg_assert(0 && "todo");
+  case AST_KIND_TYPE: {
+    const string_t type_literal_string =
+        par_token_to_string(resolver->parser, node->main_token_i);
+
+    // TODO: Find other things than classes?
+    const string_t name =
+        par_token_to_string(resolver->parser, node->main_token_i);
+    const string_t alternate_name = ty_know_type_aliases(name, arena);
+    u32 class_file_i = 0;
+    u16 constant_pool_class_name_i = 0;
+    // TODO: Should we move the resolution to the type checking phase?
+    if (!cf_class_files_find_class_exactly(resolver->parser->class_files, name,
+                                           alternate_name, &class_file_i,
+                                           &constant_pool_class_name_i)) {
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "unknown type: ", arena);
+      string_append_string(&error, type_literal_string, arena);
+
+      par_error(resolver->parser, token, error.value);
+      return 0;
+    }
+
+    const string_t class_name = cf_constant_array_get_as_string(
+        &resolver->parser->class_files[class_file_i].constant_pool,
+        constant_pool_class_name_i);
+    const ty_type_t type = {.kind = TYPE_CLASS_REFERENCE,
+                            .class_file_i = node->class_file_i,
+                            .constant_pool_item_i =
+                                node->constant_pool_class_name_i,
+                            .v = {.class_name = class_name}};
+
+    pg_array_append(resolver->parser->types, type, arena);
+    return node->type_i = pg_array_last_index(resolver->parser->types);
+    break;
+  }
 
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
@@ -7484,8 +7517,8 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     if (string_eq(descriptor, source_descriptor_string))
       return;
 
-    // A function named `main` but with a different signature e.g. `fun main(x:
-    // Int){}`, skip.
+    // A function named `main` but with a different signature e.g. `fun
+    // main(x: Int){}`, skip.
     if (!string_eq(descriptor, string_make_from_c_no_alloc("()V")))
       continue;
 
