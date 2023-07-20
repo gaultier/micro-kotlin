@@ -854,11 +854,11 @@ typedef struct {
     u16 class_name; // CONSTANT_POOL_KIND_CLASS_INFO
     struct cf_constant_name_and_type_t {
       u16 name;
-      u16 type_descriptor;
+      u16 descriptor;
     } name_and_type; // CONSTANT_POOL_KIND_NAME_AND_TYPE
     struct cf_constant_field_ref_t {
       u16 name;
-      u16 type_descriptor;
+      u16 descriptor;
     } field_ref; // CONSTANT_POOL_KIND_FIELD_REF
   } v;
   enum __attribute__((packed)) cp_info_kind_t {
@@ -983,12 +983,12 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-static void cf_fill_type_descriptor_string(const ty_type_t *types, u32 type_i,
-                                           string_t *type_descriptor,
+static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
+                                           string_t *descriptor,
                                            arena_t *arena) {
   pg_assert(types != NULL);
   pg_assert(type_i < pg_array_len(types));
-  pg_assert(type_descriptor != NULL);
+  pg_assert(descriptor != NULL);
 
   const ty_type_t *const type = &types[type_i];
 
@@ -996,58 +996,58 @@ static void cf_fill_type_descriptor_string(const ty_type_t *types, u32 type_i,
   case TYPE_ANY:
     return;
   case TYPE_VOID: {
-    string_append_char(type_descriptor, 'V', arena);
+    string_append_char(descriptor, 'V', arena);
     break;
   }
   case TYPE_BYTE: {
-    string_append_char(type_descriptor, 'B', arena);
+    string_append_char(descriptor, 'B', arena);
     break;
   }
   case TYPE_CHAR: {
-    string_append_char(type_descriptor, 'C', arena);
+    string_append_char(descriptor, 'C', arena);
     break;
   }
   case TYPE_DOUBLE: {
-    string_append_char(type_descriptor, 'D', arena);
+    string_append_char(descriptor, 'D', arena);
     break;
   }
   case TYPE_FLOAT: {
-    string_append_char(type_descriptor, 'F', arena);
+    string_append_char(descriptor, 'F', arena);
     break;
   }
   case TYPE_INT: {
-    string_append_char(type_descriptor, 'I', arena);
+    string_append_char(descriptor, 'I', arena);
     break;
   }
   case TYPE_LONG: {
-    string_append_char(type_descriptor, 'J', arena);
+    string_append_char(descriptor, 'J', arena);
     break;
   }
   case TYPE_STRING: {
-    string_append_cstring(type_descriptor, "Ljava/lang/String;", arena);
+    string_append_cstring(descriptor, "Ljava/lang/String;", arena);
     break;
   }
   case TYPE_INSTANCE_REFERENCE: {
     const string_t class_name = type->v.class_name;
 
-    string_append_char(type_descriptor, 'L', arena);
-    string_append_string(type_descriptor, class_name, arena);
-    string_append_char(type_descriptor, ';', arena);
+    string_append_char(descriptor, 'L', arena);
+    string_append_string(descriptor, class_name, arena);
+    string_append_char(descriptor, ';', arena);
 
     break;
   }
   case TYPE_SHORT: {
-    string_append_char(type_descriptor, 'S', arena);
+    string_append_char(descriptor, 'S', arena);
     break;
   }
   case TYPE_BOOL: {
-    string_append_char(type_descriptor, 'Z', arena);
+    string_append_char(descriptor, 'Z', arena);
     break;
   }
   case TYPE_ARRAY_REFERENCE: {
-    string_append_char(type_descriptor, '[', arena);
+    string_append_char(descriptor, '[', arena);
 
-    cf_fill_type_descriptor_string(types, type->v.array_type_i, type_descriptor,
+    cf_fill_descriptor_string(types, type->v.array_type_i, descriptor,
                                    arena);
 
     break;
@@ -1055,39 +1055,39 @@ static void cf_fill_type_descriptor_string(const ty_type_t *types, u32 type_i,
   case TYPE_CONSTRUCTOR:
   case TYPE_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
-    string_append_char(type_descriptor, '(', arena);
+    string_append_char(descriptor, '(', arena);
 
     for (u64 i = 0; i < method_type->argument_count; i++) {
-      cf_fill_type_descriptor_string(types, method_type->argument_types_i,
-                                     type_descriptor, arena);
+      cf_fill_descriptor_string(types, method_type->argument_types_i,
+                                     descriptor, arena);
     }
 
-    string_append_char(type_descriptor, ')', arena);
+    string_append_char(descriptor, ')', arena);
 
-    cf_fill_type_descriptor_string(types, method_type->return_type_i,
-                                   type_descriptor, arena);
+    cf_fill_descriptor_string(types, method_type->return_type_i,
+                                   descriptor, arena);
 
     break;
   }
   case TYPE_CLASS_REFERENCE: {
     const string_t class_name = type->v.class_name;
-    string_append_string(type_descriptor, class_name, arena);
+    string_append_string(descriptor, class_name, arena);
     break;
   }
   }
 }
 
-static void cf_parse_field_type_descriptor(string_t type_descriptor,
+static void cf_parse_field_descriptor(string_t descriptor,
                                            ty_type_t *type, ty_type_t **types,
                                            arena_t *arena) {
   pg_assert(type != NULL);
   pg_assert(types != NULL);
   pg_assert(arena != NULL);
 
-  if (type_descriptor.len == 0)
+  if (descriptor.len == 0)
     return;
 
-  switch (type_descriptor.value[0]) {
+  switch (descriptor.value[0]) {
   case 'B':
     type->kind = TYPE_BYTE;
     return;
@@ -1112,8 +1112,8 @@ static void cf_parse_field_type_descriptor(string_t type_descriptor,
   case 'L':
     type->kind = TYPE_INSTANCE_REFERENCE;
     string_t class_name = {
-        .value = type_descriptor.value + 1, // Skip starting `L`.
-        .len = type_descriptor.len - 1,
+        .value = descriptor.value + 1, // Skip starting `L`.
+        .len = descriptor.len - 1,
     };
     pg_assert(class_name.len >= 2);
     pg_assert(class_name.value[class_name.len - 1] = ';');
@@ -1125,11 +1125,11 @@ static void cf_parse_field_type_descriptor(string_t type_descriptor,
     type->kind = TYPE_ARRAY_REFERENCE;
     ty_type_t item_type = {0};
 
-    string_t type_descriptor_remaining = {
-        .value = type_descriptor.value + 1,
-        .len = type_descriptor.len - 1,
+    string_t descriptor_remaining = {
+        .value = descriptor.value + 1,
+        .len = descriptor.len - 1,
     };
-    cf_parse_field_type_descriptor(type_descriptor_remaining, &item_type, types,
+    cf_parse_field_descriptor(descriptor_remaining, &item_type, types,
                                    arena);
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
@@ -1973,7 +1973,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
-        .v = {.field_ref = {.name = name_i, .type_descriptor = descriptor_i}}};
+        .v = {.field_ref = {.name = name_i, .descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2020,7 +2020,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
-                                .type_descriptor = descriptor_i}}};
+                                .descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2290,7 +2290,7 @@ static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     const cf_constant_field_ref_t *const field_ref = &constant->v.field_ref;
 
     file_write_be_u16(file, field_ref->name);
-    file_write_be_u16(file, field_ref->type_descriptor);
+    file_write_be_u16(file, field_ref->descriptor);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
@@ -2310,7 +2310,7 @@ static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
         &constant->v.name_and_type;
 
     file_write_be_u16(file, name_and_type->name);
-    file_write_be_u16(file, name_and_type->type_descriptor);
+    file_write_be_u16(file, name_and_type->descriptor);
     break;
   }
   case CONSTANT_POOL_KIND_INVOKE_DYNAMIC:
@@ -5140,7 +5140,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
     } else {
       method_descriptor = string_reserve(64, arena);
-      cf_fill_type_descriptor_string(
+      cf_fill_descriptor_string(
           resolver->parser->types, pg_array_last_index(resolver->parser->types),
           &method_descriptor, arena);
     }
@@ -5441,10 +5441,10 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
       const cf_class_file_t *class_file =
           &resolver->parser->class_files[type.class_file_i];
-      const u16 type_descriptor_i = class_file->fields[type.field_i].descriptor;
-      const string_t type_descriptor = cf_constant_array_get_as_string(
-          &class_file->constant_pool, type_descriptor_i);
-      cf_parse_field_type_descriptor(type_descriptor, &type,
+      const u16 descriptor_i = class_file->fields[type.field_i].descriptor;
+      const string_t descriptor = cf_constant_array_get_as_string(
+          &class_file->constant_pool, descriptor_i);
+      cf_parse_field_descriptor(descriptor, &type,
                                      &resolver->parser->types, arena);
       pg_array_append(resolver->parser->types, type, arena);
       return node->type_i = pg_array_last_index(resolver->parser->types);
@@ -6605,7 +6605,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i,
-                                .type_descriptor = descriptor_i}}};
+                                .descriptor = descriptor_i}}};
     const u16 name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &name_and_type, arena);
 
@@ -6678,11 +6678,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_append(parser->types, main_type, arena);
     const u32 main_type_i = pg_array_last_index(parser->types);
 
-    string_t type_descriptor = string_reserve(64, arena);
-    cf_fill_type_descriptor_string(parser->types, main_type_i, &type_descriptor,
+    string_t descriptor = string_reserve(64, arena);
+    cf_fill_descriptor_string(parser->types, main_type_i, &descriptor,
                                    arena);
     const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
-                                                    type_descriptor, arena);
+                                                    descriptor, arena);
 
     cf_method_t method = {
         .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC /* FIXME */,
@@ -7195,7 +7195,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {
                   .name = field_name_i,
-                  .type_descriptor = field_descriptor_i,
+                  .descriptor = field_descriptor_i,
               }}};
     const u16 field_name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &field_name_and_type, arena);
@@ -7217,7 +7217,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
         .v = {.field_ref = {
                   .name = lhs_class_name_i,
-                  .type_descriptor = field_name_and_type_i,
+                  .descriptor = field_name_and_type_i,
               }}};
     const u16 field_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &field_ref, arena);
@@ -7270,7 +7270,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t out_name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = out_name_i,
-                                .type_descriptor = out_descriptor_i}}};
+                                .descriptor = out_descriptor_i}}};
     const u16 out_name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &out_name_and_type, arena);
 
@@ -7284,7 +7284,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
     const cf_constant_t out_field_ref = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
         .v = {.field_ref = {.name = system_class_i,
-                            .type_descriptor = out_name_and_type_i}}};
+                            .descriptor = out_name_and_type_i}}};
     const u16 out_field_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &out_field_ref, arena);
 
