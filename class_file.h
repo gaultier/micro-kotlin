@@ -4294,6 +4294,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
       const string_t alternate_name = ty_know_type_aliases(name, arena);
       u32 class_file_i = 0;
       u16 constant_pool_class_name_i = 0;
+      // FIXME: this is wrong.
       // TODO: Should we move the resolution to the type checking phase?
       if (!cf_class_files_find_class_exactly(parser->class_files, name,
                                              alternate_name, &class_file_i,
