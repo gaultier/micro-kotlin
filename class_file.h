@@ -984,8 +984,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
 }
 
 static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
-                                           string_t *descriptor,
-                                           arena_t *arena) {
+                                      string_t *descriptor, arena_t *arena) {
   pg_assert(types != NULL);
   pg_assert(type_i < pg_array_len(types));
   pg_assert(descriptor != NULL);
@@ -1047,8 +1046,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   case TYPE_ARRAY_REFERENCE: {
     string_append_char(descriptor, '[', arena);
 
-    cf_fill_descriptor_string(types, type->v.array_type_i, descriptor,
-                                   arena);
+    cf_fill_descriptor_string(types, type->v.array_type_i, descriptor, arena);
 
     break;
   }
@@ -1059,13 +1057,13 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
 
     for (u64 i = 0; i < method_type->argument_count; i++) {
       cf_fill_descriptor_string(types, method_type->argument_types_i,
-                                     descriptor, arena);
+                                descriptor, arena);
     }
 
     string_append_char(descriptor, ')', arena);
 
-    cf_fill_descriptor_string(types, method_type->return_type_i,
-                                   descriptor, arena);
+    cf_fill_descriptor_string(types, method_type->return_type_i, descriptor,
+                              arena);
 
     break;
   }
@@ -1077,9 +1075,8 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   }
 }
 
-static void cf_parse_field_descriptor(string_t descriptor,
-                                           ty_type_t *type, ty_type_t **types,
-                                           arena_t *arena) {
+static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
+                                      ty_type_t **types, arena_t *arena) {
   pg_assert(type != NULL);
   pg_assert(types != NULL);
   pg_assert(arena != NULL);
@@ -1129,8 +1126,7 @@ static void cf_parse_field_descriptor(string_t descriptor,
         .value = descriptor.value + 1,
         .len = descriptor.len - 1,
     };
-    cf_parse_field_descriptor(descriptor_remaining, &item_type, types,
-                                   arena);
+    cf_parse_field_descriptor(descriptor_remaining, &item_type, types, arena);
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
     return;
@@ -2019,8 +2015,7 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
 
     const cf_constant_t constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = name_i,
-                                .descriptor = descriptor_i}}};
+        .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -5001,6 +4996,42 @@ static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
 }
 
 // topLevelObject: declaration [semis]
+static u32 par_parse_top_level_object(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
+
+  return par_parse_declaration(parser, arena);
+}
+
+// kotlinFile:
+//     [shebangLine]
+//     {NL}
+//     {fileAnnotation}
+//     packageHeader
+//     importList
+//     {topLevelObject}
+//     EOF
+static u32 par_parse_kotlin_file(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
+
+  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  pg_array_init_reserve(node.nodes, 512, arena);
+
+  u32 node_i = 0;
+  while ((node_i = par_parse_top_level_object(parser, arena)) != 0) {
+    pg_array_append(node.nodes, node_i, arena);
+  }
+
+  return par_add_node(parser, &node, arena);
+}
+
 static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5017,7 +5048,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   const par_ast_node_t dummy_node = {0};
   par_add_node(parser, &dummy_node, arena);
 
-  const u32 root_i = par_parse_declaration(parser, arena);
+  const u32 root_i = par_parse_kotlin_file(parser, arena);
 
   pg_array_init_reserve(parser->types, pg_array_len(parser->nodes) + 32, arena);
   pg_array_append(parser->types, (ty_type_t){0}, arena); // Default value.
@@ -5140,9 +5171,9 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
     } else {
       method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(
-          resolver->parser->types, pg_array_last_index(resolver->parser->types),
-          &method_descriptor, arena);
+      cf_fill_descriptor_string(resolver->parser->types,
+                                pg_array_last_index(resolver->parser->types),
+                                &method_descriptor, arena);
     }
 
     pg_array_last(resolver->parser->types)->v.method.descriptor =
@@ -5444,8 +5475,8 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       const u16 descriptor_i = class_file->fields[type.field_i].descriptor;
       const string_t descriptor = cf_constant_array_get_as_string(
           &class_file->constant_pool, descriptor_i);
-      cf_parse_field_descriptor(descriptor, &type,
-                                     &resolver->parser->types, arena);
+      cf_parse_field_descriptor(descriptor, &type, &resolver->parser->types,
+                                arena);
       pg_array_append(resolver->parser->types, type, arena);
       return node->type_i = pg_array_last_index(resolver->parser->types);
     }
@@ -6604,8 +6635,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     const cf_constant_t name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = name_i,
-                                .descriptor = descriptor_i}}};
+        .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
     const u16 name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &name_and_type, arena);
 
@@ -6679,10 +6709,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const u32 main_type_i = pg_array_last_index(parser->types);
 
     string_t descriptor = string_reserve(64, arena);
-    cf_fill_descriptor_string(parser->types, main_type_i, &descriptor,
-                                   arena);
-    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
-                                                    descriptor, arena);
+    cf_fill_descriptor_string(parser->types, main_type_i, &descriptor, arena);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
 
     cf_method_t method = {
         .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC /* FIXME */,
