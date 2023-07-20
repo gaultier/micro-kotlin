@@ -3634,6 +3634,8 @@ typedef enum __attribute__((packed)) {
   AST_KIND_BOOL,
   AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
+  AST_KIND_FUNCTION_PARAMETER,
+  AST_KIND_TYPE,
   AST_KIND_BINARY,
   AST_KIND_UNARY,
   AST_KIND_VAR_DEFINITION,
@@ -3653,6 +3655,8 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_BOOL] = "BOOL",
     [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
+    [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
+    [AST_KIND_TYPE] = "TYPE",
     [AST_KIND_BINARY] = "BINARY",
     [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
@@ -4845,6 +4849,81 @@ static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &node, arena);
 }
 
+// TODO: Parse more complex types.
+// type:
+//     [typeModifiers] (functionType | parenthesizedType | nullableType |
+//     typeReference | definitelyNonNullableType)
+static u32 par_parse_type(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(arena != NULL);
+
+  par_expect_token(
+      parser, TOKEN_KIND_IDENTIFIER,
+      "expected an identifier for the type of the function parameter");
+  const par_ast_node_t node = {
+      .kind = AST_KIND_TYPE,
+      .main_token_i = parser->tokens_i - 1,
+  };
+  return par_add_node(parser, &node, arena);
+}
+
+// parameter:
+//     simpleIdentifier
+//     {NL}
+//     ':'
+//     {NL}
+//     type
+static u32 par_parse_parameter(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(arena != NULL);
+
+  par_expect_token(
+      parser, TOKEN_KIND_IDENTIFIER,
+      "expected an identifier for the name of the function parameter");
+
+  const u32 name_i = parser->tokens_i - 1;
+
+  par_expect_token(
+      parser, TOKEN_KIND_COLON,
+      "expected a colon between the function parameter name and type");
+
+  const par_ast_node_t node = {
+      .kind = AST_KIND_FUNCTION_PARAMETER,
+      .main_token_i = name_i,
+      .lhs = par_parse_type(parser, arena),
+  };
+
+  return par_add_node(parser, &node, arena);
+}
+
+// functionValueParameter:
+//     [parameterModifiers] parameter [{NL} '=' {NL} expression]
+static u32 par_parse_function_value_parameter(par_parser_t *parser,
+                                              arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(arena != NULL);
+
+  return par_parse_parameter(parser, arena);
+}
+
+// functionValueParameters:
+//     '('
+//     {NL}
+//     [functionValueParameter {{NL} ',' {NL} functionValueParameter} [{NL}
+//     ',']] {NL}
+//     ')'
 static u32 par_parse_function_value_parameters(par_parser_t *parser,
                                                arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4862,7 +4941,8 @@ static u32 par_parse_function_value_parameters(par_parser_t *parser,
 
   const u32 root_i = par_add_node(parser, &node, arena);
   do {
-    pg_array_append(node.nodes, par_parse_expression(parser, arena), arena);
+    pg_array_append(node.nodes,
+                    par_parse_function_value_parameter(parser, arena), arena);
   } while (par_match_token(parser, TOKEN_KIND_COMMA));
 
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
@@ -5505,6 +5585,12 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena);
     return node->type_i = resolver->current_type_i = rhs_type_i;
   }
+
+  case AST_KIND_FUNCTION_PARAMETER:
+    pg_assert(0 && "todo");
+
+  case AST_KIND_TYPE:
+    pg_assert(0 && "todo");
 
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
@@ -7239,6 +7325,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     break;
   }
+  case AST_KIND_FUNCTION_PARAMETER:
+    pg_assert(0 && "todo");
+
+  case AST_KIND_TYPE:
+    pg_assert(0 && "todo");
+
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
