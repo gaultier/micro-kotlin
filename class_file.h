@@ -7499,15 +7499,17 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
     cg_emit_return(gen, arena);
 
+    gen->code->max_stack = gen->frame->max_stack;
+    gen->code->max_locals = gen->frame->max_locals;
+    gen->code = NULL;
+    gen->frame = NULL;
+
     cf_attribute_t attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
     pg_array_append(attributes, attribute_code, arena);
-
-    gen->code = NULL;
-    gen->frame = NULL;
   }
 
   // Add new method.
