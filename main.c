@@ -7,6 +7,9 @@ int main(int argc, char *argv[]) {
   arena_t arena = {0};
   arena_init(&arena, 1 << 29);
 
+  cf_read_jar_file("/usr/share/java/kotlin-stdlib.jar", &arena);
+  exit(0);
+
   {
     // TODO: when parsing multiple files, need to allocate that.
     const string_t source_file_name = {

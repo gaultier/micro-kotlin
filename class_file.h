@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #ifdef __linux
 
@@ -230,9 +231,8 @@ static bool mem_eq_c(const char *a, u32 a_len, char *b) {
 // ------------------- String
 
 typedef struct {
-  u16 cap;
-  u16 len;
-  pg_pad(4);
+  u32 cap;
+  u32 len;
   char *value;
 } string_t;
 
@@ -247,7 +247,7 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
     string_append_char(s, 0, arena);
 }
 
-static string_t string_reserve(u16 cap, arena_t *arena) {
+static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(arena != NULL);
   cap = pg_max(8, cap + 1);
 
@@ -472,9 +472,6 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
   pg_assert(result != NULL);
   pg_assert(arena != NULL);
 
-  if (announced_len > UINT16_MAX)
-    return E2BIG;
-
   *result = string_reserve(announced_len, arena);
   while (result->len < announced_len) {
     pg_assert(result->len < result->cap);
@@ -485,7 +482,6 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
     if (read_bytes == 0)
       return EINVAL; // TODO: retry?
 
-    pg_assert((i64)result->len + read_bytes <= UINT16_MAX);
     result->len += read_bytes;
   }
   return -1;
@@ -2796,6 +2792,77 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   string_capitalize_first(&last_path_component);
 
   return last_path_component;
+}
+
+static void *zalloc(void *opaque, u32 items, u32 size) {
+  arena_t *const arena = opaque;
+  return arena_alloc(arena, items, size);
+}
+
+static void zfree(void *opaque, void *address) {}
+
+static void cf_read_jar_file(char *path, arena_t *arena) {
+
+  const int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
+    return;
+  }
+
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
+            strerror(errno));
+    return;
+  }
+  if (st.st_size == 0) {
+    return;
+  }
+
+  string_t content = {0};
+  int res = ut_read_all_from_fd(fd, st.st_size, &content, arena);
+  if (res != -1) {
+    fprintf(stderr, "Failed to read the full file %s: %s\n", path,
+            strerror(res));
+    return;
+  }
+  close(fd);
+
+  z_stream stream = {
+      .zalloc = zalloc,
+      .zfree = zfree,
+      .next_in = (u8 *)content.value,
+      .avail_in = content.len,
+      .opaque = arena,
+  };
+
+  int err = inflateInit(&stream);
+  if (err != Z_OK) {
+    fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
+    return;
+  }
+
+  const u64 out_cap = 32 * 1024 * 1024;
+  u8 *out = arena_alloc(arena, out_cap, 1);
+
+  stream.avail_out = out_cap;
+  stream.next_out = out;
+  while (true) {
+    err = inflate(&stream, Z_NO_FLUSH);
+    if (err == Z_STREAM_END)
+      break;
+
+    if (err != Z_OK) {
+      fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
+      return;
+    }
+  }
+
+  err = inflateEnd(&stream);
+  if (err != Z_OK) {
+    fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
+    return;
+  }
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
