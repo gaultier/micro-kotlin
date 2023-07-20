@@ -2865,7 +2865,7 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
   buf_read_le_u16(content.value, content.len, &cdre);
 
   // disk start
-  buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
 
   // records count on this disk
   buf_read_le_u16(content.value, content.len, &cdre);
@@ -2878,17 +2878,116 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
   const u32 central_directory_offset =
       buf_read_le_u32(content.value, content.len, &cdre);
 
-  // Sign of zip64.
-  pg_assert(central_directory_offset!=(u32)-1); 
+  pg_assert(central_directory_offset < content.len);
 
+  // Sign of zip64.
+  pg_assert(central_directory_offset != (u32)-1);
+
+  char *cdfh = content.value + central_directory_offset;
+  for (u64 i = 0; i < records_count; i++) {
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x01);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x02);
+
+    // version made by
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // version needed to extract
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // general purpose bit flag
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 compression_method =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+    pg_assert(compression_method == 0); // No compression.
+
+    // file last modification time
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // file last modification date
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // crc-32 of uncompressed data
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // compressed size
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // uncompressed size
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    const u16 file_name_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 extra_field_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 file_comment_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // disk number where file starts
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // internal file attributes
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // external file attributes
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    const u32 local_file_header_offset =
+        buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // file name
+    buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
+
+    // extra field
+    buf_read_n_u8(content.value, content.len, NULL, extra_field_length, &cdfh);
+
+    // file comment
+    buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
+  }
+  1;
+
+  // TODO: Should we jump to disk_start + local_file_header_offset ?
 #if 0
-  const u64 out_cap = 32 * 1024 * 1024;
-  u8 *out = arena_alloc(arena, out_cap, 1);
-  u64 out_len = 0;
-  int err = uncompress(out, &out_len, (u8 *)content.value, content.len);
-  if (err != Z_OK) {
-    fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
-    return;
+  for (u64 i = 0; i < file_name_length; i++) {
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x03);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x04);
+
+    // version to extract
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // general purpose bit flag
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 compression_method =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+    pg_assert(compression_method == 0); // No compression.
+
+    // file last modification time
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // file last modification date
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // crc-32 of uncompressed data
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // compressed size
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // uncompressed size
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    const u16 file_name_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 extra_field_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
   }
 #endif
 }
