@@ -3862,6 +3862,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
       par_ast_fprint_node(parser, node->nodes[i], file, indent + 2, arena);
     break;
+#if 0
   case AST_KIND_FIELD_ACCESS: {
     if (node->rhs == 0) // End of the chain.
     {
@@ -3887,6 +3888,7 @@ static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
 
     break;
 
+#endif
   default:
     LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
         kind_string, token_string.len, token_string.value, human_type.len,
@@ -4486,18 +4488,27 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
 // navigationSuffix:
 //     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
 //     'class')
-static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_navigation_suffix(par_parser_t *parser, u32 *main_token_i,
+                                       arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(main_token_i != NULL);
+  pg_assert(arena != NULL);
 
   if (!par_match_token(parser, TOKEN_KIND_DOT))
     return 0;
 
+  *main_token_i = parser->tokens_i - 1;
+
   if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    return 0; // No need to create a new node, end of the chain `a.b.c`.
+    const par_ast_node_t node = {
+        .kind = AST_KIND_FIELD_ACCESS,
+        .main_token_i = parser->tokens_i - 1,
+    };
+    return par_add_node(parser, &node, arena);
   }
 
   if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
@@ -4517,14 +4528,16 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, arena_t *arena) {
 //     | indexingSuffix
 //     | navigationSuffix
 static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
-                                          arena_t *arena) {
+                                          u32 *main_token_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  pg_assert(main_token_i != NULL);
+  pg_assert(arena != NULL);
 
-  return par_parse_navigation_suffix(parser, arena);
+  return par_parse_navigation_suffix(parser, main_token_i, arena);
 }
 
 // postfixUnaryExpression:
@@ -4537,24 +4550,22 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
-  const u32 lhs_i = par_parse_primary_expression(parser, arena);
+  u32 lhs_i = par_parse_primary_expression(parser, arena);
 
   u32 rhs_i = 0;
-  u32 node_i = 0;
-  while ((node_i = par_parse_postfix_unary_suffix(parser, arena)) != 0) {
+  u32 main_token_i = 0;
+  while ((rhs_i = par_parse_postfix_unary_suffix(parser, &main_token_i,
+                                                 arena)) != 0) {
     const par_ast_node_t node = {
-        .kind = AST_KIND_UNARY,
-        .lhs = node_i,
+        .kind = AST_KIND_FIELD_ACCESS,
+        .main_token_i = main_token_i,
+        .lhs = lhs_i,
+        .rhs = rhs_i,
     };
-    rhs_i = par_add_node(parser, &node, arena);
+    lhs_i = par_add_node(parser, &node, arena);
   }
 
-  const par_ast_node_t node = {
-      .kind = rhs_i > 0 ? AST_KIND_BINARY : AST_KIND_UNARY,
-      .lhs = lhs_i,
-      .rhs = rhs_i,
-  };
-  return par_add_node(parser, &node, arena);
+  return lhs_i;
 }
 
 // prefixUnaryExpression:
