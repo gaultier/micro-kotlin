@@ -759,6 +759,34 @@ cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
   pg_assert(0 && "unreachable");
 }
 
+static cf_verification_info_t
+cg_type_to_verification_info(const ty_type_t *type) {
+
+  switch (type->kind) {
+  case TYPE_BOOL:
+  case TYPE_CHAR:
+  case TYPE_SHORT:
+  case TYPE_INT:
+    return (cf_verification_info_t){.kind = VERIFICATION_INFO_INT};
+  case TYPE_LONG:
+    return (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG};
+  case TYPE_FLOAT:
+    return (cf_verification_info_t){.kind = VERIFICATION_INFO_FLOAT};
+  case TYPE_DOUBLE:
+    return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
+  case TYPE_INSTANCE_REFERENCE:
+  case TYPE_CLASS_REFERENCE:
+  case TYPE_STRING:
+    return (cf_verification_info_t){
+        .kind = VERIFICATION_INFO_OBJECT,
+        .extra_data = type->constant_pool_item_i,
+    };
+
+  default:
+    pg_assert(0 && "unreachable");
+  }
+}
+
 static void cg_frame_stack_push(cg_frame_t *frame,
                                 cf_verification_info_t verification_info,
                                 arena_t *arena) {
@@ -6851,11 +6879,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
-    // TODO: Handle `lhs`.
-    if (node->lhs > 0)
-      pg_assert(0 && "todo");
 
     cg_begin_scope(gen);
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
     cg_emit_return(gen, arena);
@@ -7188,17 +7214,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
-    cf_verification_info_t verification_info = {.kind = VERIFICATION_INFO_INT};
-    if (type->kind == TYPE_LONG) {
-      verification_info.kind = VERIFICATION_INFO_LONG;
-    } else if (type->kind == TYPE_DOUBLE) {
-      verification_info.kind = VERIFICATION_INFO_DOUBLE;
-    } else if (type->kind == TYPE_FLOAT) {
-      verification_info.kind = VERIFICATION_INFO_FLOAT;
-    } else if (type->kind == TYPE_ARRAY_REFERENCE ||
-               type->kind == TYPE_INSTANCE_REFERENCE) {
-      verification_info.kind = VERIFICATION_INFO_OBJECT;
-    }
+    const cf_verification_info_t verification_info =
+        cg_type_to_verification_info(type);
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
@@ -7359,11 +7376,21 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     break;
   }
-  case AST_KIND_FUNCTION_PARAMETER:
-    pg_assert(0 && "todo");
+  case AST_KIND_FUNCTION_PARAMETER: {
+    const cf_verification_info_t verification_info =
+        cg_type_to_verification_info(type);
+    const cf_variable_t argument = {
+        .type_i = node->type_i,
+        .scope_depth = gen->frame->scope_depth,
+        .verification_info = verification_info,
+    };
+    cg_frame_locals_push(gen->frame, &argument, arena);
+    break;
+  }
 
   case AST_KIND_TYPE:
-    pg_assert(0 && "todo");
+    // No-op. Although at some point we might need to generate RTTI or such.
+    return;
 
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
