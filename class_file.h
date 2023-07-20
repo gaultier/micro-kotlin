@@ -380,6 +380,16 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
   string_ensure_null_terminated(s, arena);
 }
 
+static void string_append_char_if_not_exists(string_t *s, char c,
+                                             arena_t *arena) {
+  pg_assert(s != NULL);
+
+  if (s->len > 0 && s->value[s->len - 1] != c) {
+    pg_assert(arena != NULL);
+    string_append_char(s, c, arena);
+  }
+}
+
 static void string_append_string_n(string_t *a, string_t b, u64 n,
                                    arena_t *arena) {
   pg_assert(a != NULL);
@@ -405,6 +415,23 @@ static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   pg_assert(a->len <= a->cap);
 }
 
+static void string_drop_last_n(string_t *a, u64 n) {
+  pg_assert(a != NULL);
+
+  while (a->len > 0 && n > 0) {
+    a->value[a->len - 1] = 0;
+    a->len -= 1;
+    n -= 1;
+  }
+
+  pg_assert(a->value != NULL);
+}
+
+static void string_clear(string_t *a) {
+  pg_assert(a != NULL);
+  a->len = 0;
+}
+
 static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   pg_assert(a != NULL);
   pg_assert(b != NULL);
@@ -416,6 +443,25 @@ static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
+}
+
+static void string_drop_file_component(string_t *path, arena_t *arena) {
+  pg_assert(path != NULL);
+  pg_assert(path->value != NULL);
+  pg_assert(path->len > 0);
+
+  char *const file = ut_memrchr(path->value, '/', path->len);
+  if (file == NULL) {
+    string_clear(path);
+    string_append_cstring(path, "./", arena);
+    return;
+  }
+
+  const u64 file_len = path->value + path->len - file;
+  string_drop_last_n(path, file_len);
+
+  if (path->len > 0)
+    pg_assert(path->value[path->len - 1] != '/');
 }
 
 // ------------------- Utils, continued
@@ -5169,7 +5215,6 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     default:
       pg_assert(0 && "todo");
     }
-    break;
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
