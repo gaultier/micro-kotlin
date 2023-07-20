@@ -7066,17 +7066,17 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     }
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      if (gen->frame!=NULL){
-      pg_assert(pg_array_len(gen->frame->stack) == 0);
+      if (gen->frame != NULL) {
+        pg_assert(pg_array_len(gen->frame->stack) == 0);
       }
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
 
       // If the 'statement' was in fact an expression, we need to pop it out.
-      if (gen->frame!=NULL){
-      pg_assert(pg_array_len(gen->frame->stack) == 0);
-      while (gen->frame->stack_count > 0)
-        cg_emit_pop(gen, arena);
-    }
+      if (gen->frame != NULL) {
+        pg_assert(pg_array_len(gen->frame->stack) == 0);
+        while (gen->frame->stack_count > 0)
+          cg_emit_pop(gen, arena);
+      }
     }
 
     break;
@@ -7383,4 +7383,8 @@ static void cg_emit(par_parser_t *parser, cf_class_file_t *class_file,
     return;
 
   cg_emit_node(&gen, parser, class_file, root_i, arena);
+
+
+  // TODO: Create entrypoint if it does not exist and call `main()`.
+  {}
 }
