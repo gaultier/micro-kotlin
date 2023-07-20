@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
       return 1; // TODO: Should type checking still proceed?
 
     resolver_t resolver = {.parser = &parser};
-    ty_resolve_types(&resolver, root_i, &arena);
+    ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.
     {

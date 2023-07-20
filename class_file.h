@@ -5217,7 +5217,7 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
-static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
+static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(resolver->parser->class_files != NULL);
@@ -5237,7 +5237,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
                     arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
   case AST_KIND_BUILTIN_PRINTLN: {
-    ty_resolve_types(resolver, node->lhs, arena);
+    ty_resolve_node(resolver, node->lhs, arena);
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs->type_i];
@@ -5317,7 +5317,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_UNARY:
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      node->type_i = ty_resolve_types(resolver, node->lhs, arena);
+      node->type_i = ty_resolve_node(resolver, node->lhs, arena);
       const ty_type_t *const type = &resolver->parser->types[node->type_i];
       if (type->kind != TYPE_BOOL) {
         string_t error = string_reserve(256, arena);
@@ -5334,7 +5334,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return node->type_i;
 
     case TOKEN_KIND_MINUS:
-      return node->type_i = ty_resolve_types(resolver, node->lhs, arena);
+      return node->type_i = ty_resolve_node(resolver, node->lhs, arena);
 
     default:
       pg_assert(0 && "todo");
@@ -5342,8 +5342,8 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
-    const u32 lhs_i = ty_resolve_types(resolver, node->lhs, arena);
-    const u32 rhs_i = ty_resolve_types(resolver, node->rhs, arena);
+    const u32 lhs_i = ty_resolve_node(resolver, node->lhs, arena);
+    const u32 rhs_i = ty_resolve_node(resolver, node->rhs, arena);
 
     if (!ty_merge_types(resolver->parser->types, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
@@ -5393,7 +5393,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      ty_resolve_types(resolver, node->nodes[i], arena);
+      ty_resolve_node(resolver, node->nodes[i], arena);
       // Clean up after each statement.
       resolver->current_type_i = 0;
     }
@@ -5404,11 +5404,11 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_FUNCTION_DEFINITION:
-                      par_begin_scope(resolver->parser);
-    ty_resolve_types(resolver, node->lhs, arena);
+    par_begin_scope(resolver->parser);
+    ty_resolve_node(resolver, node->lhs, arena);
     // Inspect body (rhs).
-    ty_resolve_types(resolver, node->rhs, arena);
-                      par_end_scope(resolver->parser);
+    ty_resolve_node(resolver, node->rhs, arena);
+    par_end_scope(resolver->parser);
 
     pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
                     arena);
@@ -5432,7 +5432,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
     }
 
-    const u32 type_lhs_i = ty_resolve_types(resolver, node->lhs, arena);
+    const u32 type_lhs_i = ty_resolve_node(resolver, node->lhs, arena);
 
     const string_t type_inferred_string =
         ty_type_to_human_string(resolver->parser->types, type_lhs_i, arena);
@@ -5458,7 +5458,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i = ty_resolve_types(resolver, node->lhs, arena);
+    const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
 
     if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
       string_t error = string_reserve(256, arena);
@@ -5471,7 +5471,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
-    const u32 type_then_else_i = ty_resolve_types(resolver, node->rhs, arena);
+    const u32 type_then_else_i = ty_resolve_node(resolver, node->rhs, arena);
     pg_assert(type_then_else_i > 0);
 
     return node->type_i = type_then_else_i;
@@ -5482,7 +5482,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i = ty_resolve_types(resolver, node->lhs, arena);
+    const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
 
     if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
       string_t error = string_reserve(256, arena);
@@ -5495,7 +5495,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
-    ty_resolve_types(resolver, node->rhs, arena);
+    ty_resolve_node(resolver, node->rhs, arena);
 
     pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
                     arena);
@@ -5563,7 +5563,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return node->type_i = pg_array_last_index(resolver->parser->types);
     }
 
-    const u32 lhs_type_i = ty_resolve_types(resolver, node->lhs, arena);
+    const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
 
     if (!(lhs_type->kind == TYPE_INSTANCE_REFERENCE ||
@@ -5583,12 +5583,12 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
 
     resolver->current_type_i = lhs_type_i;
-    const u32 rhs_type_i = ty_resolve_types(resolver, node->rhs, arena);
+    const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
     return node->type_i = resolver->current_type_i = rhs_type_i;
   }
 
   case AST_KIND_FUNCTION_PARAMETER:
-    return node->type_i = ty_resolve_types(resolver, node->lhs, arena);
+    return node->type_i = ty_resolve_node(resolver, node->lhs, arena);
 
   case AST_KIND_TYPE: {
     const string_t type_literal_string =
@@ -5640,7 +5640,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     node->kind = AST_KIND_VAR_REFERENCE;
     node->lhs = resolver->parser->variables[variable_i].var_definition_node_i;
 
-    return ty_resolve_types(resolver, node_i, arena);
+    return ty_resolve_node(resolver, node_i, arena);
 
     break;
   }
