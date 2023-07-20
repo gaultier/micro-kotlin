@@ -2,5 +2,5 @@ fun main() {
   println("Hello, world!")
 }
 
-fun foo(){}
+fun foo(a: Int){}
 fun bar(){}

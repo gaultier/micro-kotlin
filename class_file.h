@@ -4350,6 +4350,7 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   par_expect_token(parser, TOKEN_KIND_COLON,
                    "expected colon between variable name and type");
 
+  // FIXME: Use `par_parse_type`.
   par_expect_token(parser, TOKEN_KIND_IDENTIFIER, "expected type");
 
   par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
