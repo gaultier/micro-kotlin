@@ -4929,8 +4929,11 @@ static u32 par_parse_parameter(par_parser_t *parser, arena_t *arena) {
       .main_token_i = name_i,
       .lhs = par_parse_type(parser, arena),
   };
+  const u32 node_i = par_add_node(parser, &node, arena);
 
-  return par_add_node(parser, &node, arena);
+  par_declare_variable(parser, par_token_to_string(parser, node.main_token_i),
+                       node_i, arena);
+  return node_i;
 }
 
 // functionValueParameter:
@@ -5026,11 +5029,15 @@ static u32 par_parse_function_declaration(par_parser_t *parser,
 
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
+
+  par_begin_scope(parser);
   parser->nodes[parser->current_function_i].lhs =
       par_parse_function_value_parameters(parser, arena);
 
   parser->nodes[parser->current_function_i].rhs =
       par_parse_function_body(parser, arena);
+  par_end_scope(parser);
+
   parser->current_function_i = 0;
 
   return fn_i;
