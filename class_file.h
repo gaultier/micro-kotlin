@@ -1351,6 +1351,18 @@ static u16 buf_read_be_u16(char *buf, u64 size, char **current) {
   return x;
 }
 
+static u16 buf_read_le_u16(char *buf, u64 size, char **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + 2 <= buf + size);
+
+  const char *const ptr = *current;
+  const u16 x = (((u16)(ptr[1] & 0xff)) << 8) | ((u16)((ptr[0] & 0xff)) << 0);
+  *current += 2;
+  return x;
+}
+
 static u32 buf_read_be_u32(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
@@ -1360,6 +1372,19 @@ static u32 buf_read_be_u32(char *buf, u64 size, char **current) {
   const char *const ptr = *current;
   const u32 x = ((u32)(ptr[0] & 0xff) << 24) | (((u32)(ptr[1] & 0xff)) << 16) |
                 (((u32)(ptr[2] & 0xff)) << 8) | (((u32)(ptr[3] & 0xff)) << 0);
+  *current += 4;
+  return x;
+}
+
+static u32 buf_read_le_u32(char *buf, u64 size, char **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + 4 <= buf + size);
+
+  const char *const ptr = *current;
+  const u32 x = ((u32)(ptr[3] & 0xff) << 24) | (((u32)(ptr[2] & 0xff)) << 16) |
+                (((u32)(ptr[1] & 0xff)) << 8) | (((u32)(ptr[0] & 0xff)) << 0);
   *current += 4;
   return x;
 }
@@ -2822,7 +2847,7 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
   close(fd);
 
   char *current = content.value;
-  const u64 central_directory_end_size = 20;
+  const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x50);
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x4b);
@@ -2831,10 +2856,30 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
 
   // Assume no trailing comment.
   char *cdre = content.value + content.len - central_directory_end_size;
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x06);
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x05);
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x4b);
   pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x50);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x4b);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x05);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x06);
+
+  // disk number
+  buf_read_le_u16(content.value, content.len, &cdre);
+
+  // disk start
+  buf_read_le_u16(content.value, content.len, &cdre);
+
+  // records count on this disk
+  buf_read_le_u16(content.value, content.len, &cdre);
+
+  const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
+
+  const u32 central_directory_size =
+      buf_read_le_u32(content.value, content.len, &cdre);
+
+  const u32 central_directory_offset =
+      buf_read_le_u32(content.value, content.len, &cdre);
+
+  // Sign of zip64.
+  pg_assert(central_directory_offset!=(u32)-1); 
 
 #if 0
   const u64 out_cap = 32 * 1024 * 1024;
