@@ -6755,9 +6755,11 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     if (node->lhs > 0)
       pg_assert(0 && "todo");
 
+    cg_begin_scope(gen);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
     cg_emit_return(gen, arena);
+    cg_end_scope(gen);
 
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals = gen->frame->max_locals;
@@ -7063,18 +7065,20 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       pg_assert(gen->frame->locals != NULL);
     }
 
-    cg_begin_scope(gen);
-
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      if (gen->frame!=NULL){
       pg_assert(pg_array_len(gen->frame->stack) == 0);
+      }
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
 
       // If the 'statement' was in fact an expression, we need to pop it out.
+      if (gen->frame!=NULL){
+      pg_assert(pg_array_len(gen->frame->stack) == 0);
       while (gen->frame->stack_count > 0)
         cg_emit_pop(gen, arena);
     }
+    }
 
-    cg_end_scope(gen);
     break;
   }
   case AST_KIND_VAR_DEFINITION: {
