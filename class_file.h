@@ -2794,13 +2794,6 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   return last_path_component;
 }
 
-static void *zalloc(void *opaque, u32 items, u32 size) {
-  arena_t *const arena = opaque;
-  return arena_alloc(arena, items, size);
-}
-
-static void zfree(void *opaque, void *address) {}
-
 static void cf_read_jar_file(char *path, arena_t *arena) {
 
   const int fd = open(path, O_RDONLY);
@@ -2828,41 +2821,31 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
   }
   close(fd);
 
-  z_stream stream = {
-      .zalloc = zalloc,
-      .zfree = zfree,
-      .next_in = (u8 *)content.value,
-      .avail_in = content.len,
-      .opaque = arena,
-  };
+  char *current = content.value;
+  const u64 central_directory_end_size = 20;
+  pg_assert(content.len >= 4 + central_directory_end_size);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x50);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x4b);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
 
-  int err = inflateInit(&stream);
-  if (err != Z_OK) {
-    fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
-    return;
-  }
+  // Assume no trailing comment.
+  char *cdre = content.value + content.len - central_directory_end_size;
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x06);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x05);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x4b);
+  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x50);
 
+#if 0
   const u64 out_cap = 32 * 1024 * 1024;
   u8 *out = arena_alloc(arena, out_cap, 1);
-
-  stream.avail_out = out_cap;
-  stream.next_out = out;
-  while (true) {
-    err = inflate(&stream, Z_NO_FLUSH);
-    if (err == Z_STREAM_END)
-      break;
-
-    if (err != Z_OK) {
-      fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
-      return;
-    }
-  }
-
-  err = inflateEnd(&stream);
+  u64 out_len = 0;
+  int err = uncompress(out, &out_len, (u8 *)content.value, content.len);
   if (err != Z_OK) {
     fprintf(stderr, "Failed to uncompress the file %s: %d\n", path, err);
     return;
   }
+#endif
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
