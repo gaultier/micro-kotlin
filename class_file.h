@@ -3674,6 +3674,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_WHILE_LOOP,
   AST_KIND_STRING,
   AST_KIND_FIELD_ACCESS,
+  AST_KIND_UNRESOLVED_NAME,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -3695,6 +3696,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
     [AST_KIND_STRING] = "STRING",
     [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
+    [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
 };
 
 // TODO: compact fields.
@@ -3706,9 +3708,7 @@ typedef struct {
   // TODO: should it be separate?
   u32 *nodes; // AST_KIND_LIST
   par_ast_node_kind_t kind;
-  pg_pad(1);
-  u16 constant_pool_class_name_i;
-  u32 class_file_i;
+  pg_pad(7);
 } par_ast_node_t;
 
 typedef enum __attribute__((packed)) {
@@ -4285,37 +4285,9 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
                      "Expected matching right parenthesis");
     return node_i;
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-
-    const u32 main_token_i = parser->tokens_i - 1;
-    const string_t name = par_token_to_string(parser, main_token_i);
-    const u32 variable_i = par_find_variable(parser, name);
-    if (variable_i == (u32)-1) {
-
-      const string_t alternate_name = ty_know_type_aliases(name, arena);
-      u32 class_file_i = 0;
-      u16 constant_pool_class_name_i = 0;
-      // FIXME: this is wrong.
-      // TODO: Should we move the resolution to the type checking phase?
-      if (!cf_class_files_find_class_exactly(parser->class_files, name,
-                                             alternate_name, &class_file_i,
-                                             &constant_pool_class_name_i)) {
-        par_error(parser, parser->lexer->tokens[main_token_i],
-                  "unknown reference to variable");
-        return 0;
-      }
-
-      par_ast_node_t node = {
-          .kind = AST_KIND_CLASS_REFERENCE,
-          .main_token_i = parser->tokens_i - 1,
-          .class_file_i = class_file_i,
-          .constant_pool_class_name_i = constant_pool_class_name_i,
-      };
-      return par_add_node(parser, &node, arena);
-    }
     par_ast_node_t node = {
-        .kind = AST_KIND_VAR_REFERENCE,
+        .kind = AST_KIND_UNRESOLVED_NAME,
         .main_token_i = parser->tokens_i - 1,
-        .lhs = parser->variables[variable_i].var_definition_node_i,
     };
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_STRING_LITERAL)) {
@@ -5432,9 +5404,11 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_FUNCTION_DEFINITION:
+                      par_begin_scope(resolver->parser);
     ty_resolve_types(resolver, node->lhs, arena);
     // Inspect body (rhs).
     ty_resolve_types(resolver, node->rhs, arena);
+                      par_end_scope(resolver->parser);
 
     pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
                     arena);
@@ -5536,17 +5510,7 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 
   case AST_KIND_CLASS_REFERENCE: {
-    const string_t class_name = cf_constant_array_get_as_string(
-        &resolver->parser->class_files[node->class_file_i].constant_pool,
-        node->constant_pool_class_name_i);
-    const ty_type_t type = {.kind = TYPE_CLASS_REFERENCE,
-                            .class_file_i = node->class_file_i,
-                            .constant_pool_item_i =
-                                node->constant_pool_class_name_i,
-                            .v = {.class_name = class_name}};
-
-    pg_array_append(resolver->parser->types, type, arena);
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+    pg_assert(0 && "todo");
   }
 
   case AST_KIND_FIELD_ACCESS: {
@@ -5652,13 +5616,32 @@ static u32 ty_resolve_types(resolver_t *resolver, u32 node_i, arena_t *arena) {
         &resolver->parser->class_files[class_file_i].constant_pool,
         constant_pool_class_name_i);
     const ty_type_t type = {.kind = TYPE_CLASS_REFERENCE,
-                            .class_file_i = node->class_file_i,
-                            .constant_pool_item_i =
-                                node->constant_pool_class_name_i,
+                            .class_file_i = class_file_i,
+                            .constant_pool_item_i = constant_pool_class_name_i,
                             .v = {.class_name = class_name}};
 
     pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
+    break;
+  }
+
+  case AST_KIND_UNRESOLVED_NAME: {
+    const string_t name =
+        par_token_to_string(resolver->parser, node->main_token_i);
+    const u32 variable_i = par_find_variable(resolver->parser, name);
+
+    if (variable_i == (u32)-1) {
+      par_error(resolver->parser,
+                resolver->parser->lexer->tokens[node->main_token_i],
+                "unknown reference to variable");
+      return 0;
+    }
+
+    node->kind = AST_KIND_VAR_REFERENCE;
+    node->lhs = resolver->parser->variables[variable_i].var_definition_node_i;
+
+    return ty_resolve_types(resolver, node_i, arena);
+
     break;
   }
 
@@ -7400,6 +7383,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     // No-op. Although at some point we might need to generate RTTI or such.
     return;
 
+  case AST_KIND_UNRESOLVED_NAME: {
+    pg_assert(0 && "unreachable");
+  }
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
