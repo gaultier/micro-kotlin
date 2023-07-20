@@ -7166,8 +7166,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_FIELD_ACCESS: {
+    pg_assert(0 && "todo");
     const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
-    pg_assert(node->rhs == 0 && "todo");
 
     // FIXME: For now, this is the only kind of field access that's supported
     // e.g. `System.out`.
