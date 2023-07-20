@@ -18,7 +18,7 @@
 - [ ] Comments
 - [x] Local variable mutation
 - [ ] Function definition
-- [ ] Field access
+- [.] Field access
 - [x] String literals
 - [x] Grouping
 - [ ] Casts
@@ -35,11 +35,23 @@
 - [ ] Control flow: Continue
 - [ ] Control flow: Break
 - [ ] Control flow: For (?)
+- [ ] Control flow: When
+- [ ] Control flow: Do-while
 - [ ] Recursion (mutual recursion?)
-- [ ] Multiple files
+- [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Packages
 - [ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
 - [ ] Defend against integer overflows
+- [ ] Hex/other number literals
+- [ ] Constant pool deduplication
+- [ ] Hashes/Hashtables in judicious places in the compiler
+- [ ] Class definition (BIG!)
+        * Fields
+        * Primary constructor
+        * Secondary constructor
+        * Methods
+        * Static methods
+        * Static fields
 
 Later, nice to have:
 
@@ -47,21 +59,26 @@ Later, nice to have:
 - [ ] Generate line tables
 - [ ] Generate full debug information
 - [ ] Generate exceptions table
-- [ ] Generate multi-threading stuff (volatile, synchronized, etc)
 - [ ] Out-of-order declarations
 - [ ] Bit operators
 - [ ] Interfaces
 
-Probably much later/never:
+Probably much later:
 
 - [ ] Infix functions
 - [ ] Vararg
+- [ ] Tailrec
 - [ ] Operator overloading
 - [ ] Data class
 - [ ] Raw (multiline) strings
 - [ ] Nested (interpolation) strings 
 - [ ] Property delegate
 - [ ] Lazy/lateinit
+- [ ] Multi-threading stuff (volatile, synchronized, etc)
+- [ ] Annotation
+- [ ] Complicated OOP stuff (companion objects, singleton, extension methods, etc)
+- [ ] Inline
+- [ ] Async stuff (suspend, etc)
 
 ## Naive approach for reading external class files to know what fields/methods are available
 
