@@ -3,3 +3,4 @@ fun main() {
 }
 
 fun foo(){}
+fun bar(){}

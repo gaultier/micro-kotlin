@@ -7449,7 +7449,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     };
 
     cf_attribute_code_t code = {0};
-    pg_array_init_reserve(code.code, 8, arena);
+    pg_array_init_reserve(code.code, 4, arena);
 
     gen->code = &code;
     gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
