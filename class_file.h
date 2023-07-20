@@ -506,8 +506,6 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
 typedef enum __attribute__((packed)) {
   BYTECODE_NOP = 0x00,
   BYTECODE_ALOAD_0 = 0x2a,
-  BYTECODE_INVOKE_SPECIAL = 0xb7,
-  BYTECODE_RETURN = 0xb1,
   BYTECODE_GET_STATIC = 0xb2,
   BYTECODE_BIPUSH = 0x10,
   BYTECODE_LDC = 0x12,
@@ -544,7 +542,10 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IF_ICMPGT = 0xa3,
   BYTECODE_IF_ICMPLE = 0xa4,
   BYTECODE_GOTO = 0xa7,
+  BYTECODE_RETURN = 0xb1,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
+  BYTECODE_INVOKE_SPECIAL = 0xb7,
+  BYTECODE_INVOKE_STATIC = 0xb8,
   BYTECODE_IMPDEP1 = 0xfe,
   BYTECODE_IMPDEP2 = 0xff,
 } cf_op_kind_t;
@@ -6022,6 +6023,24 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
     cg_frame_stack_pop(gen->frame);
 }
 
+static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
+                                  const par_type_method_t *method_type,
+                                  arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_STATIC, arena);
+  cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
+
+  for (u8 i = 0; i < method_type->argument_count; i++)
+    cg_frame_stack_pop(gen->frame);
+}
+
 static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
                                arena_t *arena) {
   pg_assert(gen != NULL);
@@ -6677,31 +6696,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_array_append(parser->types, (ty_type_t){.kind = TYPE_VOID}, arena);
     const u32 void_type_i = pg_array_last_index(parser->types);
 
-    const string_t string_class_name =
-        string_make_from_c("java/lang/String", arena);
-    const ty_type_t string_type = {
-        .kind = TYPE_INSTANCE_REFERENCE,
-        .v = {.class_name = string_class_name},
-    };
-    pg_array_append(parser->types, string_type, arena);
-    const u32 string_type_i = pg_array_last_index(parser->types);
-
-    const ty_type_t main_argument_types = {
-        .kind = TYPE_ARRAY_REFERENCE,
-        .v = {.array_type_i = string_type_i},
-    };
-    pg_array_append(parser->types, main_argument_types, arena);
-    const u32 main_argument_types_i = pg_array_last_index(parser->types);
-
     const ty_type_t main_type = {
         .kind = TYPE_METHOD,
         .v =
             {
                 .method =
                     {
-                        .argument_count = 1,
+                        .argument_count = 0,
                         .return_type_i = void_type_i,
-                        .argument_types_i = main_argument_types_i,
                     },
             },
     };
@@ -6714,7 +6716,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
 
     cf_method_t method = {
-        .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC /* FIXME */,
+        .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
@@ -6725,28 +6727,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     gen->code = &code;
     gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
     cg_frame_init(gen->frame, arena);
-
-    const u16 function_args_string = cf_add_constant_cstring(
-        &class_file->constant_pool, "[Ljava/lang/String;", arena);
-
-    const cf_constant_t functions_args_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {
-            .class_name = function_args_string,
-        }};
-    const u16 functions_args_class_i = cf_constant_array_push(
-        &class_file->constant_pool, &functions_args_class, arena);
-
-    const cf_variable_t arg0 = {
-        .type_i = main_argument_types_i,
-        .scope_depth = gen->frame->scope_depth,
-        .verification_info =
-            {
-                .kind = VERIFICATION_INFO_OBJECT,
-                .extra_data = functions_args_class_i,
-            },
-    };
-    cg_frame_locals_push(gen->frame, &arg0, arena);
 
     cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
 
@@ -7362,6 +7342,187 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
   }
 }
 
+static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
+                         u16 name, u16 descriptor, cf_attribute_t *attributes,
+                         arena_t *arena) {
+  pg_assert(class_file != NULL);
+  pg_assert(class_file->methods != NULL);
+
+  cf_method_t method = {
+      .access_flags = access_flags,
+      .attributes = attributes,
+      .descriptor = descriptor,
+      .name = name,
+  };
+  pg_array_append(class_file->methods, method, arena);
+  return pg_array_last_index(class_file->methods);
+}
+
+static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
+                                               par_parser_t *parser,
+                                               cf_class_file_t *class_file,
+                                               arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(parser != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(class_file->methods != NULL);
+
+  i32 method_i = -1;
+  const string_t source_descriptor_string =
+      string_make_from_c_no_alloc("([Ljava/lang/String;)V");
+
+  for (u16 i = 0; i < pg_array_len(class_file->methods); i++) {
+    const cf_method_t *const method = &class_file->methods[i];
+
+    if ((method->access_flags & (ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC)) ==
+        0)
+      continue;
+
+    // A function not named `main`, skip.
+    const string_t name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, method->name);
+    if (!string_eq(name, string_make_from_c_no_alloc("main")))
+      continue;
+
+    const string_t descriptor = cf_constant_array_get_as_string(
+        &class_file->constant_pool, method->descriptor);
+
+    // The entrypoint already exists as the JVM expects it, nothing to do.
+    if (string_eq(descriptor, source_descriptor_string))
+      return;
+
+    // A function named `main` but with a different signature e.g. `fun main(x:
+    // Int){}`, skip.
+    if (!string_eq(descriptor, string_make_from_c_no_alloc("()V")))
+      continue;
+
+    // At this point, the function is `fun main(){}` and we need to add an JVM
+    // entrypoint i.e. `fun main(args: Array<String){ main() }`.
+    // Record its index but keep going, in case a later function is already a
+    // suitable JVM entrypoint, to avoid duplication.
+
+    pg_assert(method_i == -1);
+    method_i = i;
+  }
+  if (method_i == -1)
+    return; // Nothing to do.
+
+  pg_assert((u16)method_i < pg_array_len(class_file->methods));
+  const cf_method_t *const target_method = &class_file->methods[method_i];
+
+  cf_attribute_t *attributes = NULL;
+  pg_array_init_reserve(attributes, 1, arena);
+
+  // Generate code section for the new method.
+  {
+
+    const string_t target_descriptor_string = cf_constant_array_get_as_string(
+        &class_file->constant_pool, target_method->descriptor);
+    const cf_constant_t target_descriptor = {
+        .kind = CONSTANT_POOL_KIND_UTF8,
+        .v = {.s = target_descriptor_string},
+    };
+    const u16 target_descriptor_i = cf_constant_array_push(
+        &class_file->constant_pool, &target_descriptor, arena);
+
+    const cf_constant_t target_name_and_type = {
+        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
+        .v = {.name_and_type = {.name = target_method->name,
+                                .descriptor = target_descriptor_i}},
+    };
+    const u16 target_name_and_type_i = cf_constant_array_push(
+        &class_file->constant_pool, &target_name_and_type, arena);
+    const cf_constant_t target_method_ref = {
+        .kind = CONSTANT_POOL_KIND_METHOD_REF,
+        .v = {.method_ref = {.class = class_file->this_class,
+                             .name_and_type = target_name_and_type_i}}};
+    const u16 target_method_ref_i = cf_constant_array_push(
+        &class_file->constant_pool, &target_method_ref, arena);
+
+    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_VOID}, arena);
+    const u32 void_type_i = pg_array_last_index(parser->types);
+
+    const par_type_method_t target_method_type = {
+        .argument_count = 0,
+        .return_type_i = void_type_i,
+        .descriptor = target_descriptor_string,
+    };
+
+    cf_attribute_code_t code = {0};
+    pg_array_init_reserve(code.code, 8, arena);
+
+    gen->code = &code;
+    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
+    cg_frame_init(gen->frame, arena);
+
+    // Fill locals (method arguments).
+    {
+      const string_t string_class_name =
+          string_make_from_c("java/lang/String", arena);
+      const ty_type_t string_type = {
+          .kind = TYPE_INSTANCE_REFERENCE,
+          .v = {.class_name = string_class_name},
+      };
+      pg_array_append(parser->types, string_type, arena);
+      const u32 string_type_i = pg_array_last_index(parser->types);
+
+      const ty_type_t source_method_argument_types = {
+          .kind = TYPE_ARRAY_REFERENCE,
+          .v = {.array_type_i = string_type_i},
+      };
+      pg_array_append(parser->types, source_method_argument_types, arena);
+
+      const u32 source_argument_types_i = pg_array_last_index(parser->types);
+      const u16 source_method_arg0_string = cf_add_constant_cstring(
+          &class_file->constant_pool, "[Ljava/lang/String;", arena);
+
+      const cf_constant_t source_method_arg0_class = {
+          .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+          .v = {
+              .class_name = source_method_arg0_string,
+          }};
+      const u16 source_method_arg0_class_i = cf_constant_array_push(
+          &class_file->constant_pool, &source_method_arg0_class, arena);
+
+      const cf_variable_t arg0 = {
+          .type_i = source_argument_types_i,
+          .scope_depth = gen->frame->scope_depth,
+          .verification_info =
+              {
+                  .kind = VERIFICATION_INFO_OBJECT,
+                  .extra_data = source_method_arg0_class_i,
+              },
+      };
+      cg_frame_locals_push(gen->frame, &arg0, arena);
+    }
+
+    cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
+    cg_emit_return(gen, arena);
+
+    cf_attribute_t attribute_code = {
+        .kind = ATTRIBUTE_KIND_CODE,
+        .name =
+            cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
+        .v = {.code = code}};
+    pg_array_append(attributes, attribute_code, arena);
+
+    gen->code = NULL;
+    gen->frame = NULL;
+  }
+
+  // Add new method.
+  {
+    const cf_constant_t source_descriptor = {
+        .kind = CONSTANT_POOL_KIND_UTF8,
+        .v = {.s = source_descriptor_string},
+    };
+    const u16 source_descriptor_i = cf_constant_array_push(
+        &class_file->constant_pool, &source_descriptor, arena);
+    cg_add_method(class_file, ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+                  target_method->name, source_descriptor_i, attributes, arena);
+  }
+}
+
 static void cg_emit(par_parser_t *parser, cf_class_file_t *class_file,
                     const cf_class_file_t *class_files, u32 root_i,
                     arena_t *arena) {
@@ -7384,7 +7545,5 @@ static void cg_emit(par_parser_t *parser, cf_class_file_t *class_file,
 
   cg_emit_node(&gen, parser, class_file, root_i, arena);
 
-
-  // TODO: Create entrypoint if it does not exist and call `main()`.
-  {}
+  cg_supplement_entrypoint_if_exists(&gen, parser, class_file, arena);
 }
