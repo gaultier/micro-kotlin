@@ -5,15 +5,16 @@ int main(int argc, char *argv[]) {
   pg_assert(argc == 2);
 
   arena_t arena = {0};
-  arena_init(&arena, 1 << 29);
+  arena_init(&arena, 1L << 32);
 
   // Read class files (stdlib, etc).
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 32768, &arena);
   {
     LOG("'arena before reading class files'=%lu", arena.current_offset);
-    cf_read_jar_file("/usr/share/java/kotlin-stdlib.jar", &class_files, &arena);
-    cf_read_class_files(".", 1, &class_files, &arena);
+    cf_read_jar_and_class_files_recursively(
+        "/usr/share/java/", strlen("/usr/share/java/"), &class_files, &arena);
+    cf_read_jar_and_class_files_recursively(".", 1, &class_files, &arena);
     LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
         arena.current_offset);
   }

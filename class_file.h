@@ -2868,12 +2868,17 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
 
-  // Assume no trailing comment.
+  // Assume first no trailing comment.
   char *cdre = content.value + content.len - central_directory_end_size;
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x50);
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x4b);
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x05);
-  pg_assert(buf_read_u8(content.value, content.len, &cdre) == 0x06);
+  if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+    // Need to scan backwards in the presence of a trailing comment to find the magic number.
+    cdre -= sizeof(u32);
+    while (--cdre > content.value &&
+           buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+      cdre -= sizeof(u32);
+    }
+    pg_assert(cdre > content.value);
+  }
 
   // disk number
   const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
@@ -2916,7 +2921,8 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
 
     const u16 compression_method =
         buf_read_le_u16(content.value, content.len, &cdfh);
-    pg_assert(compression_method == 0); // No compression.
+    pg_assert(compression_method == 0 ||
+              compression_method == 8); // No compression or DEFLATE.
 
     // file last modification time
     buf_read_le_u16(content.value, content.len, &cdfh);
@@ -2954,7 +2960,6 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
     const u32 local_file_header_offset =
         buf_read_le_u32(content.value, content.len, &cdfh);
 
-    LOG("i=%lu file_name=%.*s", i, file_name_length, cdfh);
     // file name
     buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
 
@@ -2985,7 +2990,8 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
 
       const u16 compression_method =
           buf_read_le_u16(content.value, content.len, &local_file_header);
-      pg_assert(compression_method == 0); // No compression.
+      pg_assert(compression_method == 0 ||
+                compression_method == 8); // No compression or DEFLATE.
 
       // file last modification time
       buf_read_le_u16(content.value, content.len, &local_file_header);
@@ -3018,10 +3024,8 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
                     &local_file_header);
 
       // TODO: Read Manifest file?
-      if (uncompressed_size > 0 &&
+      if (uncompressed_size > 0 && compression_method == 0 &&
           string_ends_with_cstring(file_name, ".class")) {
-        LOG("reading as class file %.*s %lu", file_name.len, file_name.value,
-            pg_array_len(*class_files));
         cf_class_file_t class_file = {.file_path = file_name};
         cf_buf_read_class_file(local_file_header, uncompressed_size,
                                &local_file_header, &class_file, 0, arena);
@@ -3034,8 +3038,8 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
 
 // TODO: one thread that walks the directory recursively and one/many worker
 // threads to parse class files?
-static void cf_read_class_files(char *path, u64 path_len,
-                                cf_class_file_t **class_files, arena_t *arena) {
+static void cf_read_jar_and_class_files_recursively(
+    char *path, u64 path_len, cf_class_file_t **class_files, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path_len > 0);
   pg_assert(class_files != NULL);
@@ -3070,7 +3074,15 @@ static void cf_read_class_files(char *path, u64 path_len,
         "delta-file_size=%lu",
         path, pg_array_len(*class_files), delta, delta - st.st_size);
     return;
+  } else if (S_ISREG(st.st_mode) &&
+             ut_cstring_ends_with(path, path_len, ".jar", 4)) {
+    cf_class_file_t class_file = {
+        .file_path = string_make_from_c(path, arena),
+    };
+    cf_read_jar_file(path, class_files, arena);
+    pg_array_append(*class_files, class_file, arena);
   }
+
   if (!S_ISDIR(st.st_mode))
     return;
 
@@ -3108,7 +3120,8 @@ static void cf_read_class_files(char *path, u64 path_len,
     memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
     pathbuf[pathbuf_len + d_name_len] = 0;
 
-    cf_read_class_files(pathbuf, pathbuf_len + d_name_len, class_files, arena);
+    cf_read_jar_and_class_files_recursively(pathbuf, pathbuf_len + d_name_len,
+                                            class_files, arena);
   }
   closedir(dirp);
 #undef PATH_MAX
@@ -5522,9 +5535,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return return_type_i;
   }
   case AST_KIND_NUMBER: {
-    cf_type_kind_t kind = TYPE_INT;
-
     u8 number_flags = 0;
+    string_t type_name = string_make_from_c_no_alloc("kotlin.Int");
+
     // TODO: should we memoize this to avoid parsing it twice?
     const u64 number = par_number(resolver->parser, token, &number_flags);
     if (number_flags & NUMBER_FLAGS_OVERFLOW) {
@@ -5533,7 +5546,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
 
     } else if (number_flags & NUMBER_FLAGS_LONG) {
-      kind = TYPE_LONG;
+      type_name = string_make_from_c_no_alloc("kotlin.Long");
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
@@ -5542,8 +5555,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       }
     }
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = kind},
-                    arena); // TODO: something smarter.
+    ty_type_t type = {.kind = TYPE_INSTANCE_REFERENCE};
+    pg_assert(cf_class_files_find_class_exactly(
+        resolver->parser->class_files, type_name, type_name, &type.class_file_i,
+        &type.constant_pool_item_i));
+    pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_UNARY:
