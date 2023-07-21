@@ -320,6 +320,15 @@ static void string_capitalize_first(string_t *s) {
     s->value[0] -= 32;
 }
 
+static bool string_ends_with_cstring(string_t s, char *needle) {
+  const u64 needle_len = strlen(needle);
+
+  if (needle_len > s.len)
+    return false;
+
+  return memcmp(s.value + s.len - needle_len, needle, needle_len) == 0;
+}
+
 static void string_drop_before_last_incl(string_t *s, char c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
@@ -2819,7 +2828,12 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   return last_path_component;
 }
 
-static void cf_read_jar_file(char *path, arena_t *arena) {
+static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
+                             arena_t *arena) {
+  pg_assert(path != NULL);
+  pg_assert(class_files != NULL);
+  pg_assert(*class_files != NULL);
+  pg_assert(arena != NULL);
 
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
@@ -2986,13 +3000,33 @@ static void cf_read_jar_file(char *path, arena_t *arena) {
       buf_read_le_u32(content.value, content.len, &local_file_header);
 
       // uncompressed size
-      buf_read_le_u32(content.value, content.len, &local_file_header);
+      const u32 uncompressed_size =
+          buf_read_le_u32(content.value, content.len, &local_file_header);
 
       const u16 file_name_length =
           buf_read_le_u16(content.value, content.len, &local_file_header);
 
       const u16 extra_field_length =
           buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const string_t file_name = {.value = local_file_header,
+                                  .len = file_name_length};
+      buf_read_n_u8(content.value, content.len, NULL, file_name_length,
+                    &local_file_header);
+
+      buf_read_n_u8(content.value, content.len, NULL, extra_field_length,
+                    &local_file_header);
+
+      if (uncompressed_size > 0 &&
+          string_ends_with_cstring(file_name, ".class")) {
+        LOG("reading as class file %.*s %lu", file_name.len, file_name.value,
+            pg_array_len(*class_files));
+        cf_class_file_t class_file = {.file_path = file_name};
+        cf_buf_read_class_file(local_file_header, uncompressed_size,
+                               &local_file_header, &class_file, 0, arena);
+
+        pg_array_append(*class_files, class_file, arena);
+      }
     }
   }
 }
@@ -3139,7 +3173,6 @@ static bool cf_class_files_find_class_exactly(
 
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
     pg_assert(class_file->file_path.len > 0);
     pg_assert(class_file->file_path.value != NULL);
 
@@ -3176,7 +3209,6 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
 
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
     pg_assert(class_file->file_path.len > 0);
     pg_assert(class_file->file_path.value != NULL);
 
