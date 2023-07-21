@@ -42,7 +42,7 @@
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Packages
-- [ ] Read .class, .jar, .jmod files in classpath for stdlib and such - only keep required data
+- [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
