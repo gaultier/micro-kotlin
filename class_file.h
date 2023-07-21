@@ -3017,6 +3017,7 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
       buf_read_n_u8(content.value, content.len, NULL, extra_field_length,
                     &local_file_header);
 
+      // TODO: Read Manifest file?
       if (uncompressed_size > 0 &&
           string_ends_with_cstring(file_name, ".class")) {
         LOG("reading as class file %.*s %lu", file_name.len, file_name.value,
