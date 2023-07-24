@@ -1293,7 +1293,8 @@ const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
 struct cf_class_file_t {
-  string_t file_path;
+  string_t jar_file_path;
+  string_t class_file_path;
   u16 minor_version;
   u16 major_version;
   u16 access_flags;
@@ -2871,7 +2872,8 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
   // Assume first no trailing comment.
   char *cdre = content.value + content.len - central_directory_end_size;
   if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
-    // Need to scan backwards in the presence of a trailing comment to find the magic number.
+    // Need to scan backwards in the presence of a trailing comment to find the
+    // magic number.
     cdre -= sizeof(u32);
     while (--cdre > content.value &&
            buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
@@ -2882,6 +2884,7 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
 
   // disk number
   const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
+  pg_unused(disk_number);
 
   // disk start
   const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
@@ -2889,11 +2892,13 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
   // records count on this disk
   const u16 disk_records_count =
       buf_read_le_u16(content.value, content.len, &cdre);
+  pg_unused(disk_records_count);
 
   const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
 
   const u32 central_directory_size =
       buf_read_le_u32(content.value, content.len, &cdre);
+  pg_unused(central_directory_size);
 
   const u32 central_directory_offset =
       buf_read_le_u32(content.value, content.len, &cdre);
@@ -3026,10 +3031,13 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
       // TODO: Read Manifest file?
       if (uncompressed_size > 0 && compression_method == 0 &&
           string_ends_with_cstring(file_name, ".class")) {
-        cf_class_file_t class_file = {.file_path = file_name};
+        pg_assert(path != NULL);
+        cf_class_file_t class_file = {
+            .class_file_path = file_name,
+            .jar_file_path = string_make_from_c(path, arena),
+        };
         cf_buf_read_class_file(local_file_header, uncompressed_size,
                                &local_file_header, &class_file, 0, arena);
-
         pg_array_append(*class_files, class_file, arena);
       }
     }
@@ -3063,7 +3071,7 @@ static void cf_read_jar_and_class_files_recursively(
 
     char *current = buf;
     cf_class_file_t class_file = {
-        .file_path = string_make_from_c(path, arena),
+        .class_file_path = string_make_from_c(path, arena),
     };
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
     pg_array_append(*class_files, class_file, arena);
@@ -3076,11 +3084,7 @@ static void cf_read_jar_and_class_files_recursively(
     return;
   } else if (S_ISREG(st.st_mode) &&
              ut_cstring_ends_with(path, path_len, ".jar", 4)) {
-    cf_class_file_t class_file = {
-        .file_path = string_make_from_c(path, arena),
-    };
     cf_read_jar_file(path, class_files, arena);
-    pg_array_append(*class_files, class_file, arena);
   }
 
   if (!S_ISDIR(st.st_mode))
@@ -3142,9 +3146,10 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
 
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->file_path.cap >= class_file->file_path.len);
-    pg_assert(class_file->file_path.len > 0);
-    pg_assert(class_file->file_path.value != NULL);
+    pg_assert(class_file->class_file_path.cap >=
+              class_file->class_file_path.len);
+    pg_assert(class_file->class_file_path.len > 0);
+    pg_assert(class_file->class_file_path.value != NULL);
 
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
@@ -3187,8 +3192,9 @@ static bool cf_class_files_find_class_exactly(
 
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->file_path.len > 0);
-    pg_assert(class_file->file_path.value != NULL);
+    pg_assert(class_file->class_file_path.len > 0);
+    pg_assert(class_file->class_file_path.value != NULL);
+    pg_assert(class_file->this_class > 0);
 
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
@@ -3223,8 +3229,8 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
 
   for (u64 i = 0; i < pg_array_len(class_files); i++) {
     const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->file_path.len > 0);
-    pg_assert(class_file->file_path.value != NULL);
+    pg_assert(class_file->class_file_path.len > 0);
+    pg_assert(class_file->class_file_path.value != NULL);
 
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
@@ -7709,7 +7715,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
 
   { // This class
     const string_t class_name =
-        cg_make_class_name_from_path(class_file->file_path, arena);
+        cg_make_class_name_from_path(class_file->class_file_path, arena);
     const u16 this_class_name_i =
         cf_add_constant_string(&class_file->constant_pool, class_name, arena);
 

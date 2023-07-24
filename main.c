@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
 
     // Emit bytecode.
     cf_class_file_t class_file = {
-        .file_path = cf_make_class_file_name_kt(source_file_name, &arena),
+        .class_file_path = cf_make_class_file_name_kt(source_file_name, &arena),
         .minor_version = 0,
         .major_version = 17,
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    FILE *file = fopen(class_file.file_path.value, "w");
+    FILE *file = fopen(class_file.class_file_path.value, "w");
     if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
               source_file_name.len, source_file_name.value, strerror(errno));
@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
 
-      int fd = open(class_file.file_path.value, O_RDONLY);
+      int fd = open(class_file.class_file_path.value, O_RDONLY);
       if (fd == -1) {
         fprintf(stderr, "Failed to open the file %.*s: %s\n",
                 source_file_name.len, source_file_name.value, strerror(errno));
@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
       }
 
       struct stat st = {0};
-      if (stat(class_file.file_path.value, &st) == -1) {
+      if (stat(class_file.class_file_path.value, &st) == -1) {
         fprintf(stderr, "Failed to get the file size %.*s: %s\n",
                 source_file_name.len, source_file_name.value, strerror(errno));
         return errno;
@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
       pg_assert(read(fd, buf, buf_len) == buf_len);
       close(fd);
 
-      cf_class_file_t class_file_verify = {.file_path = class_file.file_path};
+      cf_class_file_t class_file_verify = {.class_file_path = class_file.class_file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
                              READ_CLASS_FILE_FLAG_ALL, &tmp_arena);
