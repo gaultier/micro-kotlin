@@ -329,6 +329,15 @@ static bool string_ends_with_cstring(string_t s, char *needle) {
   return memcmp(s.value + s.len - needle_len, needle, needle_len) == 0;
 }
 
+static bool string_starts_with_cstring(string_t s, char *needle) {
+  const u64 needle_len = strlen(needle);
+
+  if (needle_len > s.len)
+    return false;
+
+  return memcmp(s.value, needle, needle_len) == 0;
+}
+
 static void string_drop_before_last_incl(string_t *s, char c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
@@ -3058,8 +3067,11 @@ static void cf_read_jar_and_class_files_recursively(
     return;
   }
 
+  const string_t last_path_component =
+      string_find_last_path_component(string_make_from_c_no_alloc(path));
+
   if (S_ISREG(st.st_mode) &&
-      ut_cstring_ends_with(path, path_len, ".class", 6)) {
+      string_ends_with_cstring(last_path_component, ".class")) {
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
@@ -3083,7 +3095,8 @@ static void cf_read_jar_and_class_files_recursively(
         path, pg_array_len(*class_files), delta, delta - st.st_size);
     return;
   } else if (S_ISREG(st.st_mode) &&
-             ut_cstring_ends_with(path, path_len, ".jar", 4)) {
+             string_ends_with_cstring(last_path_component, ".jar") &&
+             string_starts_with_cstring(last_path_component, "kotlin")) {
     cf_read_jar_file(path, class_files, arena);
   }
 
@@ -3975,7 +3988,6 @@ typedef struct {
   par_variable_t *variables;
   par_ast_node_t *nodes;
   ty_type_t *types;
-  cf_class_file_t *class_files;
   u32 current_function_i;
   u32 scope_depth;
   u32 buf_len;
@@ -5464,14 +5476,58 @@ static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena) {
 
 typedef struct {
   par_parser_t *parser;
+  cf_class_file_t *class_files;
   u32 current_type_i;
+  u32 kotlin_bool_class_i;
+  u32 kotlin_char_class_i;
+  u32 kotlin_byte_class_i;
+  u32 kotlin_short_class_i;
+  u32 kotlin_int_class_i;
+  u32 kotlin_float_class_i;
+  u32 kotlin_double_class_i;
+  u32 kotlin_long_class_i;
   pg_pad(4);
 } resolver_t;
+
+static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
+  pg_assert(resolver);
+  pg_assert(resolver->class_files);
+  pg_assert(arena);
+
+  const string_t kotlin_int_class_name =
+      string_make_from_c_no_alloc("java/lang/Integer");
+
+  resolver->kotlin_int_class_i = (u32)-1;
+
+  for (u64 i = 0; i < pg_array_len(resolver->class_files); i++) {
+    const cf_class_file_t *const class_file = &resolver->class_files[i];
+    pg_assert(class_file->class_file_path.len > 0);
+    pg_assert(class_file->class_file_path.value != NULL);
+    pg_assert(class_file->this_class > 0);
+
+    const cf_constant_t *const this_class = cf_constant_array_get(
+        &class_file->constant_pool, class_file->this_class);
+    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+    const u16 this_class_i = this_class->v.class_name;
+    const string_t this_class_name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, this_class_i);
+    LOG("[D001] i=%lu jar_path=%.*s class_path=%.*s class=%.*s",i,
+        class_file->jar_file_path.len, class_file->jar_file_path.value,
+        class_file->class_file_path.len, class_file->class_file_path.value,
+        this_class_name.len, this_class_name.value);
+
+    if (string_eq(this_class_name, kotlin_int_class_name)) {
+      resolver->kotlin_int_class_i = i;
+    }
+  }
+
+  pg_assert(resolver->kotlin_int_class_i != (u32)-1);
+}
 
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
-  pg_assert(resolver->parser->class_files != NULL);
+  pg_assert(resolver->class_files != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
   par_ast_node_t *const node = &resolver->parser->nodes[node_i];
@@ -5521,7 +5577,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         method_descriptor;
 
     if (!cf_class_files_find_method_exactly(
-            resolver->parser->class_files,
+            resolver->class_files,
             string_make_from_c_no_alloc("java/io/PrintStream"),
             string_make_from_c_no_alloc("println"), method_descriptor)) {
       string_t error = string_reserve(256, arena);
@@ -5563,7 +5619,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     ty_type_t type = {.kind = TYPE_INSTANCE_REFERENCE};
     pg_assert(cf_class_files_find_class_exactly(
-        resolver->parser->class_files, type_name, type_name, &type.class_file_i,
+        resolver->class_files, type_name, type_name, &type.class_file_i,
         &type.constant_pool_item_i));
     pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
@@ -5675,7 +5731,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const string_t alternate_type_string =
         ty_know_type_aliases(type_literal_string, arena);
 
-    if (!cf_class_files_find_class_exactly(resolver->parser->class_files,
+    if (!cf_class_files_find_class_exactly(resolver->class_files,
                                            type_literal_string,
                                            alternate_type_string, NULL, NULL)) {
       string_t error = string_reserve(256, arena);
@@ -5777,8 +5833,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
           &resolver->parser->types[resolver->current_type_i];
 
       const string_t class_name = cf_constant_array_get_as_string(
-          &resolver->parser->class_files[current_type->class_file_i]
-               .constant_pool,
+          &resolver->class_files[current_type->class_file_i].constant_pool,
           current_type->constant_pool_item_i);
 
       pg_assert(node->main_token_i + 1 <
@@ -5793,7 +5848,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
       ty_type_t type = {0};
       if (!cf_class_files_find_field_exactly(
-              resolver->parser->class_files, class_name, field_name,
+              resolver->class_files, class_name, field_name,
               ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC, &type.class_file_i,
               &type.field_i, &type.constant_pool_item_i)) {
         string_t error = string_reserve(256, arena);
@@ -5807,7 +5862,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       }
 
       const cf_class_file_t *class_file =
-          &resolver->parser->class_files[type.class_file_i];
+          &resolver->class_files[type.class_file_i];
       const u16 descriptor_i = class_file->fields[type.field_i].descriptor;
       const string_t descriptor = cf_constant_array_get_as_string(
           &class_file->constant_pool, descriptor_i);
@@ -5855,7 +5910,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     u32 class_file_i = 0;
     u16 constant_pool_class_name_i = 0;
     // TODO: Should we move the resolution to the type checking phase?
-    if (!cf_class_files_find_class_exactly(resolver->parser->class_files, name,
+    if (!cf_class_files_find_class_exactly(resolver->class_files, name,
                                            alternate_name, &class_file_i,
                                            &constant_pool_class_name_i)) {
       string_t error = string_reserve(256, arena);
@@ -5867,7 +5922,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
 
     const string_t class_name = cf_constant_array_get_as_string(
-        &resolver->parser->class_files[class_file_i].constant_pool,
+        &resolver->class_files[class_file_i].constant_pool,
         constant_pool_class_name_i);
     const ty_type_t type = {.kind = TYPE_CLASS_REFERENCE,
                             .class_file_i = class_file_i,
@@ -7562,10 +7617,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_FIELD_ACCESS: {
     pg_assert(0 && "todo");
+#if 0
     const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
 
     // FIXME: For now, this is the only kind of field access that's supported
     // e.g. `System.out`.
+
 
     const cf_class_file_t *field_class_file =
         &parser->class_files[type->class_file_i];
@@ -7619,6 +7676,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_get_static(gen, field_ref_i, lhs_class_name_i, arena);
 
+#endif
     break;
   }
   case AST_KIND_FUNCTION_PARAMETER: {

@@ -9,7 +9,7 @@ int main(int argc, char *argv[]) {
 
   // Read class files (stdlib, etc).
   cf_class_file_t *class_files = NULL;
-  pg_array_init_reserve(class_files, 32768, &arena);
+  pg_array_init_reserve(class_files, 1<<18, &arena);
   {
     LOG("'arena before reading class files'=%lu", arena.current_offset);
     cf_read_jar_and_class_files_recursively(
@@ -73,7 +73,6 @@ int main(int argc, char *argv[]) {
         .buf = source.value,
         .buf_len = source.len,
         .lexer = &lexer,
-        .class_files = class_files,
     };
     const u32 root_i = par_parse(&parser, &arena);
 
@@ -85,7 +84,9 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    resolver_t resolver = {.parser = &parser};
+    resolver_t resolver = {.parser = &parser, .class_files = class_files};
+    ty_find_known_types(&resolver, &arena);
+
     ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.
@@ -146,7 +147,8 @@ int main(int argc, char *argv[]) {
       pg_assert(read(fd, buf, buf_len) == buf_len);
       close(fd);
 
-      cf_class_file_t class_file_verify = {.class_file_path = class_file.class_file_path};
+      cf_class_file_t class_file_verify = {.class_file_path =
+                                               class_file.class_file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
                              READ_CLASS_FILE_FLAG_ALL, &tmp_arena);
