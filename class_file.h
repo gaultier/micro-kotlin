@@ -3007,9 +3007,6 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
       // general purpose bit flag
       const u16 flag =
           buf_read_le_u16(content.value, content.len, &local_file_header);
-      if ((flag & 0x08) == 0) { // TODO: crc-32
-        pg_assert(0 && "todo");
-      }
 
       const u16 compression_method =
           buf_read_le_u16(content.value, content.len, &local_file_header);
@@ -3026,11 +3023,11 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
       buf_read_le_u32(content.value, content.len, &local_file_header);
 
       // compressed size
-      const u32 compressed_size =
+      u32 compressed_size =
           buf_read_le_u32(content.value, content.len, &local_file_header);
 
       // uncompressed size
-      const u32 uncompressed_size =
+      u32 uncompressed_size =
           buf_read_le_u32(content.value, content.len, &local_file_header);
 
       const u16 file_name_length =
@@ -3052,6 +3049,19 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
           .jar_file_path = string_make_from_c(path, arena),
       };
 
+      if (flag & 0x08) { // TODO
+        char *tmp = local_file_header;
+        buf_read_n_u8(content.value, content.len, NULL, compressed_size, &tmp);
+        // crc-32 of uncompressed data
+        buf_read_le_u32(content.value, content.len, &tmp);
+
+        // compressed size
+        compressed_size = buf_read_le_u32(content.value, content.len, &tmp);
+
+        // uncompressed size
+        uncompressed_size = buf_read_le_u32(content.value, content.len, &tmp);
+      }
+
       // TODO: Read Manifest file?
       if (uncompressed_size > 0 && compression_method == 0 &&
           string_ends_with_cstring(file_name, ".class")) {
@@ -3060,9 +3070,11 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
                                &local_file_header, &class_file, 0, arena);
         pg_array_append(*class_files, class_file, arena);
 
-        LOG("[D005] jmod class file=%.*s i=%lu",file_name.len,file_name.value, i);
+        LOG("[D005] jmod class file=%.*s i=%lu", file_name.len, file_name.value,
+            i);
       }
-      if (compressed_size > 0 && compression_method == 8) {
+      if (compressed_size > 0 && compression_method == 8&&
+          string_ends_with_cstring(file_name, ".class")) {
         // TODO: Use a scratch arena
         u8 *dst = arena_alloc(arena, uncompressed_size, sizeof(u8));
         u64 dst_len = (u64)uncompressed_size;
@@ -3075,6 +3087,9 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
+
+        LOG("[D006] jmod class file=%.*s i=%lu", file_name.len, file_name.value,
+            i);
       }
     }
   }
