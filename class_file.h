@@ -3020,7 +3020,8 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
       buf_read_le_u16(content.value, content.len, &local_file_header);
 
       // crc-32 of uncompressed data
-u32 crc32 =      buf_read_le_u32(content.value, content.len, &local_file_header);
+      u32 crc32 =
+          buf_read_le_u32(content.value, content.len, &local_file_header);
 
       // compressed size
       u32 compressed_size =
@@ -3049,15 +3050,14 @@ u32 crc32 =      buf_read_le_u32(content.value, content.len, &local_file_header)
           .jar_file_path = string_make_from_c(path, arena),
       };
 
-      if (flag & 0x08) { // TODO
+      if ((flag & 0x08) == 0x08) { // Read Data descriptor.
         char *tmp = local_file_header;
         buf_read_n_u8(content.value, content.len, NULL, compressed_size, &tmp);
 
         // crc-32 of uncompressed data
         crc32 = buf_read_le_u32(content.value, content.len, &tmp);
         if (crc32 == 0x08074b50) { // Signature?
-        crc32 = buf_read_le_u32(content.value, content.len, &tmp);
-
+          crc32 = buf_read_le_u32(content.value, content.len, &tmp);
         }
 
         // compressed size
@@ -3095,6 +3095,9 @@ u32 crc32 =      buf_read_le_u32(content.value, content.len, &local_file_header)
 
         LOG("[D006] jmod class file=%.*s i=%lu", file_name.len, file_name.value,
             i);
+
+        buf_read_n_u8(content.value, content.len, NULL, compressed_size,
+                      &local_file_header);
       }
     }
   }
