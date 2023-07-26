@@ -5756,6 +5756,18 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
 
   const string_t kotlin_int_class_name =
       string_make_from_c_no_alloc("java/lang/Integer");
+  const string_t kotlin_byte_class_name =
+      string_make_from_c_no_alloc("java/lang/Byte");
+  const string_t kotlin_char_class_name =
+      string_make_from_c_no_alloc("java/lang/Char");
+  const string_t kotlin_short_class_name =
+      string_make_from_c_no_alloc("java/lang/Short");
+  const string_t kotlin_float_class_name =
+      string_make_from_c_no_alloc("java/lang/Float");
+  const string_t kotlin_double_class_name =
+      string_make_from_c_no_alloc("java/lang/Double");
+  const string_t kotlin_long_class_name =
+      string_make_from_c_no_alloc("java/lang/Long");
 
   resolver->kotlin_int_class_i = (u32)-1;
 
@@ -5771,17 +5783,37 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     const u16 this_class_i = this_class->v.class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
-    LOG("[D001] i=%lu jar_path=%.*s class_path=%.*s class=%.*s", i,
-        class_file->jar_file_path.len, class_file->jar_file_path.value,
-        class_file->class_file_path.len, class_file->class_file_path.value,
-        this_class_name.len, this_class_name.value);
 
     if (string_eq(this_class_name, kotlin_int_class_name)) {
       resolver->kotlin_int_class_i = i;
     }
+    if (string_eq(this_class_name, kotlin_byte_class_name)) {
+      resolver->kotlin_byte_class_i = i;
+    }
+    if (string_eq(this_class_name, kotlin_char_class_name)) {
+      resolver->kotlin_char_class_i = i;
+    }
+    if (string_eq(this_class_name, kotlin_short_class_name)) {
+      resolver->kotlin_short_class_i = i;
+    }
+    if (string_eq(this_class_name, kotlin_float_class_name)) {
+      resolver->kotlin_float_class_i = i;
+    }
+    if (string_eq(this_class_name, kotlin_long_class_name)) {
+      resolver->kotlin_long_class_i = i;
+    }
+    if (string_eq(this_class_name, kotlin_double_class_name)) {
+      resolver->kotlin_double_class_i = i;
+    }
   }
 
   pg_assert(resolver->kotlin_int_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_byte_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_char_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_short_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_float_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_long_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_double_class_i != (u32)-1);
 }
 
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
