@@ -5746,6 +5746,7 @@ typedef struct {
   u32 kotlin_float_class_i;
   u32 kotlin_double_class_i;
   u32 kotlin_long_class_i;
+  u32 kotlin_string_class_i;
   pg_pad(4);
 } resolver_t;
 
@@ -5768,6 +5769,8 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
       string_make_from_c_no_alloc("java/lang/Double");
   const string_t kotlin_long_class_name =
       string_make_from_c_no_alloc("java/lang/Long");
+  const string_t kotlin_string_class_name =
+      string_make_from_c_no_alloc("java/lang/String");
 
   resolver->kotlin_int_class_i = (u32)-1;
 
@@ -5805,6 +5808,9 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     if (string_eq(this_class_name, kotlin_double_class_name)) {
       resolver->kotlin_double_class_i = i;
     }
+    if (string_eq(this_class_name, kotlin_string_class_name)) {
+      resolver->kotlin_string_class_i = i;
+    }
   }
 
   pg_assert(resolver->kotlin_int_class_i != (u32)-1);
@@ -5814,6 +5820,7 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver->kotlin_float_class_i != (u32)-1);
   pg_assert(resolver->kotlin_long_class_i != (u32)-1);
   pg_assert(resolver->kotlin_double_class_i != (u32)-1);
+  pg_assert(resolver->kotlin_string_class_i != (u32)-1);
 }
 
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
