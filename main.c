@@ -12,15 +12,13 @@ int main(int argc, char *argv[]) {
   pg_array_init_reserve(class_files, 1 << 18, &arena);
   {
     LOG("'arena before reading class files'=%lu", arena.current_offset);
+    cf_read_jmod_file("/usr/lib/jvm/java-17-openjdk-amd64/jmods/java.base.jmod",
+                      &class_files, &arena);
+    LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
+        arena.current_offset);
     cf_read_jar_and_class_files_recursively(
         "/usr/share/java/", strlen("/usr/share/java/"), &class_files, &arena);
     cf_read_jar_and_class_files_recursively(".", 1, &class_files, &arena);
-    LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
-        arena.current_offset);
-
-    cf_read_jmod_file(
-        "/usr/lib/jvm/java-17-openjdk-amd64/jmods/java.base.jmod",
-        &class_files, &arena);
     LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
         arena.current_offset);
   }

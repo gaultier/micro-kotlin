@@ -3009,7 +3009,7 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
       pg_unused(version);
 
       // general purpose bit flag
-          buf_read_le_u16(content.value, content.len, &local_file_header);
+      buf_read_le_u16(content.value, content.len, &local_file_header);
 
       const u16 compression_method =
           buf_read_le_u16(content.value, content.len, &local_file_header);
@@ -3077,14 +3077,14 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
             .avail_out = dst_len,
         };
 
-        int res = inflateInit(&stream);
+        int res = inflateInit2(&stream, -8);
         //        const int res =
         //            uncompress(dst, &dst_len, (u8 *)local_file_header,
         //                       compressed_size_according_to_directory_entry);
         pg_assert(res == Z_OK);
 
-        res = inflate(&stream, 0);
-        pg_assert(res == Z_OK);
+        res = inflate(&stream, Z_SYNC_FLUSH);
+        pg_assert(res == Z_STREAM_END);
 
         char *dst_current = (char *)dst;
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
@@ -3356,7 +3356,7 @@ static void cf_read_jar_and_class_files_recursively(
     return;
   } else if (S_ISREG(st.st_mode) &&
              string_ends_with_cstring(last_path_component, ".jar") &&
-             string_starts_with_cstring(last_path_component, "kotlin")) {
+             string_eq_c(last_path_component, "kotlin-stdlib.jar")) {
     cf_read_jar_file(path, class_files, arena);
   }
 
