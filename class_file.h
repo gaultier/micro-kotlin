@@ -5511,7 +5511,7 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     const u16 this_class_i = this_class->v.class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
-    LOG("[D001] i=%lu jar_path=%.*s class_path=%.*s class=%.*s",i,
+    LOG("[D001] i=%lu jar_path=%.*s class_path=%.*s class=%.*s", i,
         class_file->jar_file_path.len, class_file->jar_file_path.value,
         class_file->class_file_path.len, class_file->class_file_path.value,
         this_class_name.len, this_class_name.value);
@@ -5598,7 +5598,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
   case AST_KIND_NUMBER: {
     u8 number_flags = 0;
-    string_t type_name = string_make_from_c_no_alloc("kotlin.Int");
+    string_t type_name = string_make_from_c_no_alloc("java/lang/Integer");
 
     // TODO: should we memoize this to avoid parsing it twice?
     const u64 number = par_number(resolver->parser, token, &number_flags);
@@ -5608,7 +5608,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
 
     } else if (number_flags & NUMBER_FLAGS_LONG) {
-      type_name = string_make_from_c_no_alloc("kotlin.Long");
+      type_name = string_make_from_c_no_alloc("java/lang/Long");
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
