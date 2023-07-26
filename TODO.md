@@ -43,7 +43,7 @@
 - [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Packages
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
-- [.] Read .jmod files
+- [x] Read .jmod files
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
