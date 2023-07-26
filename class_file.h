@@ -2919,7 +2919,8 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
   // Sign of zip64.
   pg_assert(central_directory_offset != (u32)-1);
 
-  char *cdfh = content.value + central_directory_offset + 4 /* JM10 magic prefix adds 4 bytes of offset */;
+  char *cdfh = content.value + central_directory_offset +
+               4 /* JM10 magic prefix adds 4 bytes of offset */;
   for (u64 i = 0; i < records_count; i++) {
     pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
     pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
@@ -2988,7 +2989,9 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
     // Read file header.
     {
       char *local_file_header =
-          content.value + disk_start + local_file_header_offset;
+          content.value + disk_start + local_file_header_offset +
+          4 /* JM10 magic prefix adds 4 bytes of offset */;
+
       pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
                 0x50);
       pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
@@ -3056,6 +3059,8 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
         cf_buf_read_class_file(local_file_header, uncompressed_size,
                                &local_file_header, &class_file, 0, arena);
         pg_array_append(*class_files, class_file, arena);
+
+        LOG("[D005] jmod class file=%.*s i=%lu",file_name.len,file_name.value, i);
       }
       if (compressed_size > 0 && compression_method == 8) {
         // TODO: Use a scratch arena
