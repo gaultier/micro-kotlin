@@ -6,8 +6,8 @@ main_debug: main.c class_file.h
 	$(CC) $(CFLAGS) -DPG_WITH_LOG=1 -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined $< -o $@  $(LDFLAGS)
 
 clean:
-	rm **/*.class || true
-	rm -r **/META-INF/ || true
+	rm *.class || true
+	rm -r META-INF/ || true
 
 test_debug: main_debug clean
 	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
