@@ -658,7 +658,7 @@ struct ty_type_t {
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
   cf_type_kind_t kind;
-  u8 flags;
+  pg_pad(1);
   u16 constant_pool_item_i;
   u32 class_file_i;
   u16 field_i;
