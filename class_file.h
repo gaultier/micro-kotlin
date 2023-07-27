@@ -658,7 +658,7 @@ struct par_type_t {
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
   cf_type_kind_t kind;
-  pg_pad(1);
+  u8 flags;
   u16 constant_pool_item_i;
   u32 class_file_i;
   u16 field_i;
@@ -5747,7 +5747,6 @@ typedef struct {
   u32 kotlin_double_class_i;
   u32 kotlin_long_class_i;
   u32 kotlin_string_class_i;
-  pg_pad(4);
 } resolver_t;
 
 static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
@@ -5897,8 +5896,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
   case AST_KIND_NUMBER: {
     u8 number_flags = 0;
-    string_t type_name = string_make_from_c_no_alloc("java/lang/Integer");
-
+    ty_type_t type = {
+        .kind = TYPE_INSTANCE_REFERENCE,
+        .class_file_i = resolver->kotlin_int_class_i,
+    };
     // TODO: should we memoize this to avoid parsing it twice?
     const u64 number = par_number(resolver->parser, token, &number_flags);
     if (number_flags & NUMBER_FLAGS_OVERFLOW) {
@@ -5907,7 +5908,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
 
     } else if (number_flags & NUMBER_FLAGS_LONG) {
-      type_name = string_make_from_c_no_alloc("java/lang/Long");
+      type.class_file_i = resolver->kotlin_long_class_i;
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
@@ -5916,10 +5917,6 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       }
     }
 
-    ty_type_t type = {.kind = TYPE_INSTANCE_REFERENCE};
-    pg_assert(cf_class_files_find_class_exactly(
-        resolver->class_files, type_name, type_name, &type.class_file_i,
-        &type.constant_pool_item_i));
     pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
@@ -6112,8 +6109,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = void_type_i;
   }
   case AST_KIND_STRING: {
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_STRING},
-                    arena);
+    const ty_type_t type = {
+        .kind = TYPE_INSTANCE_REFERENCE,
+        .class_file_i = resolver->kotlin_string_class_i,
+    };
+    pg_array_append(resolver->parser->types, type, arena);
     const u32 type_i = pg_array_last_index(resolver->parser->types);
     return node->type_i = type_i;
   }
