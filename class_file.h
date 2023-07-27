@@ -6078,7 +6078,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       const string_t lhs_type_human =
           ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
       const string_t rhs_type_human =
-          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
+          ty_type_to_human_string(resolver->parser->types, rhs_type_i, arena);
 
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
