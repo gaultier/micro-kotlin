@@ -5888,6 +5888,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_type_t type = {
         .kind = TYPE_INSTANCE_REFERENCE,
         .class_file_i = resolver->kotlin_int_class_i,
+        .v = {.class_name = string_make_from_c("kotlin.Int", arena)},
     };
     // TODO: should we memoize this to avoid parsing it twice?
     const u64 number = par_number(resolver->parser, token, &number_flags);
@@ -5898,6 +5899,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     } else if (number_flags & NUMBER_FLAGS_LONG) {
       type.class_file_i = resolver->kotlin_long_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Long", arena);
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
