@@ -6242,8 +6242,15 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = resolver->current_type_i = rhs_type_i;
   }
 
-  case AST_KIND_FUNCTION_PARAMETER:
-    return node->type_i = ty_resolve_node(resolver, node->lhs, arena);
+  case AST_KIND_FUNCTION_PARAMETER: {
+    const u32 variable_i = ty_declare_variable(
+        resolver, par_token_to_string(resolver->parser, node->main_token_i),
+        node_i, arena);
+    node->type_i = ty_resolve_node(resolver, node->lhs, arena);
+    ty_mark_variable_as_initialized(resolver, variable_i);
+
+    return node->type_i;
+  }
 
   case AST_KIND_TYPE: {
     const string_t type_literal_string =
