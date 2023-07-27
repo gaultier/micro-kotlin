@@ -7843,7 +7843,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->type_i > 0);
 
     pg_assert(node->lhs > 0);
-    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION);
+    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION||parser->nodes[node->lhs].kind == AST_KIND_FUNCTION_PARAMETER);
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
