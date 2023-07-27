@@ -5851,10 +5851,14 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
                     (ty_type_t){.kind = TYPE_KOTLIN_ANY}, arena);
 
     return node->type_i = pg_array_last_index(resolver->parser->types);
-  case AST_KIND_BOOL:
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_JVM_BOOL},
-                    arena);
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+  case AST_KIND_BOOL: {
+    ty_type_t type = {
+        .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+        .class_file_i = resolver->kotlin_bool_class_i,
+        .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
+    };
+    return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
+  }
   case AST_KIND_BUILTIN_PRINTLN: {
     ty_resolve_node(resolver, node->lhs, arena);
 
@@ -5940,7 +5944,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_NOT:
       node->type_i = ty_resolve_node(resolver, node->lhs, arena);
       const ty_type_t *const type = &resolver->parser->types[node->type_i];
-      if (type->kind != TYPE_JVM_BOOL) {
+      if (!(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+            type->class_file_i == resolver->kotlin_bool_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(&error,
@@ -5988,14 +5993,18 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_GE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
-      pg_array_append(resolver->parser->types,
-                      (ty_type_t){.kind = TYPE_JVM_BOOL}, arena);
-      return node->type_i = pg_array_last_index(resolver->parser->types);
+      const ty_type_t type = {
+          .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+          .class_file_i = resolver->kotlin_bool_class_i,
+          .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
+      };
+      return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const ty_type_kind_t type_kind = resolver->parser->types[lhs_i].kind;
-      if (type_kind != TYPE_JVM_BOOL) {
+      const ty_type_t *const lhs_type = &resolver->parser->types[lhs_i];
+      if (!(lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+            lhs_type->class_file_i == resolver->kotlin_bool_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6069,8 +6078,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
+    const ty_type_t *const type_condition =
+        &resolver->parser->types[type_condition_i];
 
-    if (resolver->parser->types[type_condition_i].kind != TYPE_JVM_BOOL) {
+    if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+          type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6093,8 +6105,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
+    const ty_type_t *const type_condition =
+        &resolver->parser->types[type_condition_i];
 
-    if (resolver->parser->types[type_condition_i].kind != TYPE_JVM_BOOL) {
+    if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+          type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6365,6 +6380,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
+      pg_assert(0&&"should not happen until OOP is implemented");
     } else {
       method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->parser->types, node->type_i,
