@@ -8003,7 +8003,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
       if (gen->frame != NULL) {
-        pg_assert(pg_array_len(gen->frame->stack) == 0);
         while (gen->frame->stack_count > 0)
           cg_emit_pop(gen, arena);
       }
