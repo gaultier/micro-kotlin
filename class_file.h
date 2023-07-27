@@ -5850,14 +5850,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t void_type = {.kind = TYPE_VOID};
     const u32 return_type_i =
         ty_add_type(&resolver->parser->types, &void_type, arena);
-    const ty_type_t println_type = {
-        .kind = TYPE_METHOD,
-        .v = {.method = {
-                  .argument_count = 1,
-                  .return_type_i = return_type_i,
-                  .argument_types_i =
-                      ty_add_type(&resolver->parser->types, lhs_type, arena),
-              }}};
+    const ty_type_t println_type = {.kind = TYPE_METHOD,
+                                    .v = {.method = {
+                                              .argument_count = 1,
+                                              .return_type_i = return_type_i,
+                                              .argument_types_i = lhs->type_i,
+                                          }}};
     pg_array_append(resolver->parser->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->parser->types);
 
