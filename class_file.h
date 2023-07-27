@@ -5819,6 +5819,38 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
+static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
+
+  const u32 previous_var_i = ty_find_variable(resolver, name_token_i);
+  if (previous_var_i == (u32)-1)
+    return false;
+
+  pg_assert(previous_var_i < pg_array_len(resolver->variables));
+  const ty_variable_t *const previous_var =
+      &resolver->variables[previous_var_i];
+
+  pg_assert(previous_var->var_definition_node_i > 0);
+  pg_assert(previous_var->var_definition_node_i <
+            pg_array_len(resolver->parser->nodes));
+  const par_ast_node_t *const previous_var_node =
+      &resolver->parser->nodes[previous_var->var_definition_node_i];
+
+  const lex_token_t previous_var_name_token =
+      resolver->parser->lexer->tokens[previous_var_node->main_token_i];
+
+  u32 line = 0;
+  u32 column = 0;
+  string_t token_string = {0};
+  par_find_token_position(resolver->parser, previous_var_name_token, &line,
+                          &column, &token_string);
+  char error[256] = {0};
+  snprintf(error, 255, "variable shadowing, already declared at %u:%u", line,
+           column);
+  par_error(resolver->parser, resolver->parser->lexer->tokens[name_token_i],
+            error);
+  return false;
+}
+
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
@@ -6030,6 +6062,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   case AST_KIND_VAR_DEFINITION: {
     pg_assert(node->lhs > 0); // TODO: The type is actually optional.
+
+    if (ty_variable_shadows(resolver, node->main_token_i))
+      return 0;
 
     const u32 variable_i = ty_declare_variable(
         resolver, par_token_to_string(resolver->parser, node->main_token_i),
