@@ -570,7 +570,7 @@ typedef struct {
   u32 scope_depth;
   u32 var_definition_node_i;
   string_t name;
-} par_variable_t;
+} ty_variable_t;
 
 typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
@@ -4237,11 +4237,10 @@ typedef enum __attribute__((packed)) {
 typedef struct {
   char *buf;
   lex_lexer_t *lexer;
-  par_variable_t *variables;
   par_ast_node_t *nodes;
   ty_type_t *types;
   u32 current_function_i;
-  u32 scope_depth;
+  pg_pad(4);
   u32 buf_len;
   u32 tokens_i;
   par_parser_state_t state;
@@ -4256,20 +4255,6 @@ static u32 par_add_node(par_parser_t *parser, const par_ast_node_t *node,
 
   pg_array_append(parser->nodes, *node, arena);
   return pg_array_last_index(parser->nodes);
-}
-
-static void par_begin_scope(par_parser_t *parser) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->scope_depth < UINT32_MAX);
-
-  parser->scope_depth += 1;
-}
-
-static void par_end_scope(par_parser_t *parser) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->scope_depth > 0);
-
-  parser->scope_depth -= 1;
 }
 
 static void ut_fwrite_indent(FILE *file, u16 indent) {
@@ -4454,39 +4439,6 @@ static bool par_is_at_end(const par_parser_t *parser) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
 
   return parser->tokens_i == pg_array_len(parser->lexer->tokens);
-}
-
-static u32 par_declare_variable(par_parser_t *parser, string_t name, u32 node_i,
-                                arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->scope_depth > 0);
-  pg_assert(parser->variables != NULL);
-  pg_assert(arena != NULL);
-  pg_assert(node_i > 0);
-
-  pg_assert(pg_array_len(parser->variables) < UINT32_MAX);
-
-  const par_variable_t variable = {
-      .name = name,
-      .scope_depth = parser->scope_depth,
-      .var_definition_node_i = node_i,
-  };
-  pg_array_append(parser->variables, variable, arena);
-  return pg_array_last_index(parser->variables);
-}
-
-static u32 par_find_variable(const par_parser_t *parser, string_t name) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->scope_depth > 0);
-  pg_assert(parser->variables != NULL);
-
-  for (i64 i = pg_array_len(parser->variables) - 1; i >= 0; i--) {
-    const par_variable_t *const variable = &parser->variables[i];
-    if (string_eq(name, variable->name))
-      return (u32)i;
-  }
-
-  return -1;
 }
 
 static lex_token_t par_peek_token(const par_parser_t *parser) {
@@ -4697,9 +4649,7 @@ static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
 
   par_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
                    "Expected a left curly brace to start a block");
-  par_begin_scope(parser);
   const u32 node_i = par_parse_statements(parser, arena);
-  par_end_scope(parser);
   par_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
                    "Expected a right curly brace to end a block");
   return node_i;
@@ -4775,7 +4725,6 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &if_node, arena);
 }
 
-static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena);
 
 // primaryExpression:
 //     parenthesizedExpression
@@ -4860,34 +4809,6 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
                    "expected variable name (identifier)");
   const u32 name_token_i = parser->tokens_i - 1;
 
-  const u32 previous_var_i =
-      par_find_variable(parser, par_token_to_string(parser, name_token_i));
-  if (previous_var_i != (u32)-1) {
-    pg_assert(previous_var_i < pg_array_len(parser->variables));
-    const par_variable_t *const previous_var =
-        &parser->variables[previous_var_i];
-
-    pg_assert(previous_var->var_definition_node_i > 0);
-    pg_assert(previous_var->var_definition_node_i <
-              pg_array_len(parser->nodes));
-    const par_ast_node_t *const previous_var_node =
-        &parser->nodes[previous_var->var_definition_node_i];
-
-    const lex_token_t previous_var_name_token =
-        parser->lexer->tokens[previous_var_node->main_token_i];
-
-    u32 line = 0;
-    u32 column = 0;
-    string_t token_string = {0};
-    par_find_token_position(parser, previous_var_name_token, &line, &column,
-                            &token_string);
-    char error[256] = {0};
-    snprintf(error, 255, "variable shadowing, already declared at %u:%u", line,
-             column);
-    par_error(parser, parser->lexer->tokens[name_token_i], error);
-    return 0;
-  }
-
   par_expect_token(parser, TOKEN_KIND_COLON,
                    "expected colon between variable name and type");
 
@@ -4901,11 +4822,7 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
       .lhs = node_type_i,
       .rhs = par_parse_expression(parser, arena),
   };
-  const u32 node_i = par_add_node(parser, &node, arena);
-
-  const string_t variable_name = par_token_to_string(parser, name_token_i);
-  par_declare_variable(parser, variable_name, node_i, arena);
-  return node_i;
+  return par_add_node(parser, &node, arena);
 }
 
 static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
@@ -5454,8 +5371,6 @@ static u32 par_parse_parameter(par_parser_t *parser, arena_t *arena) {
   };
   const u32 node_i = par_add_node(parser, &node, arena);
 
-  par_declare_variable(parser, par_token_to_string(parser, node.main_token_i),
-                       node_i, arena);
   return node_i;
 }
 
@@ -5553,13 +5468,11 @@ static u32 par_parse_function_declaration(par_parser_t *parser,
   par_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                    "expected left parenthesis before the arguments");
 
-  par_begin_scope(parser);
   parser->nodes[parser->current_function_i].lhs =
       par_parse_function_value_parameters(parser, arena);
 
   parser->nodes[parser->current_function_i].rhs =
       par_parse_function_body(parser, arena);
-  par_end_scope(parser);
 
   parser->current_function_i = 0;
 
@@ -5681,7 +5594,6 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
   pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 8,
                         arena);
-  pg_array_init_reserve(parser->variables, 256, arena);
 
   parser->tokens_i = 1; // Skip the dummy token.
 
@@ -5751,6 +5663,7 @@ static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
 typedef struct {
   par_parser_t *parser;
   cf_class_file_t *class_files;
+  ty_variable_t *variables;
   u32 current_type_i;
   u32 kotlin_bool_class_i;
   u32 kotlin_char_class_i;
@@ -5761,6 +5674,8 @@ typedef struct {
   u32 kotlin_double_class_i;
   u32 kotlin_long_class_i;
   u32 kotlin_string_class_i;
+  u32 scope_depth;
+  pg_pad(4);
 } resolver_t;
 
 static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
@@ -5834,6 +5749,53 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver->kotlin_long_class_i != (u32)-1);
   pg_assert(resolver->kotlin_double_class_i != (u32)-1);
   pg_assert(resolver->kotlin_string_class_i != (u32)-1);
+}
+
+static void ty_begin_scope(resolver_t *resolver) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->scope_depth < UINT32_MAX);
+
+  resolver->scope_depth += 1;
+}
+
+static void ty_end_scope(resolver_t *resolver) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->scope_depth > 0);
+
+  resolver->scope_depth -= 1;
+}
+
+static u32 ty_declare_variable(resolver_t *resolver, string_t name, u32 node_i,
+                               arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->scope_depth > 0);
+  pg_assert(resolver->variables != NULL);
+  pg_assert(arena != NULL);
+  pg_assert(node_i > 0);
+
+  pg_assert(pg_array_len(resolver->variables) < UINT32_MAX);
+
+  const ty_variable_t variable = {
+      .name = name,
+      .scope_depth = resolver->scope_depth,
+      .var_definition_node_i = node_i,
+  };
+  pg_array_append(resolver->variables, variable, arena);
+  return pg_array_last_index(resolver->variables);
+}
+
+static u32 ty_find_variable(resolver_t *resolver, string_t name) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->scope_depth > 0);
+  pg_assert(resolver->variables != NULL);
+
+  for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
+    const ty_variable_t *const variable = &resolver->variables[i];
+    if (string_eq(name, variable->name))
+      return (u32)i;
+  }
+
+  return -1;
 }
 
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
@@ -6034,11 +5996,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
   case AST_KIND_FUNCTION_DEFINITION:
-    par_begin_scope(resolver->parser);
+    ty_begin_scope(resolver);
+    // Arguments (lhs).
     ty_resolve_node(resolver, node->lhs, arena);
     // Inspect body (rhs).
     ty_resolve_node(resolver, node->rhs, arena);
-    par_end_scope(resolver->parser);
+    ty_end_scope(resolver);
 
     pg_array_append(resolver->parser->types,
                     (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
@@ -6093,6 +6056,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
+    // FIXME: begin/end scope.
     const u32 type_then_else_i = ty_resolve_node(resolver, node->rhs, arena);
     pg_assert(type_then_else_i > 0);
 
@@ -6120,7 +6084,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
+    ty_begin_scope(resolver);
     ty_resolve_node(resolver, node->rhs, arena);
+    ty_end_scope(resolver);
 
     pg_array_append(resolver->parser->types,
                     (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
@@ -6267,7 +6233,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_UNRESOLVED_NAME: {
     const string_t name =
         par_token_to_string(resolver->parser, node->main_token_i);
-    const u32 variable_i = par_find_variable(resolver->parser, name);
+    const u32 variable_i = ty_find_variable(resolver, name);
 
     if (variable_i == (u32)-1) {
       par_error(resolver->parser,
@@ -6277,7 +6243,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
 
     node->kind = AST_KIND_VAR_REFERENCE;
-    node->lhs = resolver->parser->variables[variable_i].var_definition_node_i;
+    node->lhs = resolver->variables[variable_i].var_definition_node_i;
 
     return ty_resolve_node(resolver, node_i, arena);
 
@@ -6380,7 +6346,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
-      pg_assert(0&&"should not happen until OOP is implemented");
+      pg_assert(0 && "should not happen until OOP is implemented");
     } else {
       method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->parser->types, node->type_i,
