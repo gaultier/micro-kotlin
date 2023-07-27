@@ -615,6 +615,19 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_UNIT, // i.e.: void.
   TYPE_INSTANCE_REFERENCE,
   TYPE_METHOD,
+
+  // After lowering
+  TYPE_BYTE,
+  TYPE_CHAR,
+  TYPE_SHORT,
+  TYPE_INT,
+  TYPE_STRING,
+  TYPE_BOOL,
+  TYPE_FLOAT,
+  TYPE_LONG,
+  TYPE_DOUBLE,
+  TYPE_ARRAY_REFERENCE,
+  TYPE_CONSTRUCTOR,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
 
@@ -6152,7 +6165,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
 
-    if (!(lhs_type->kind == TYPE_INSTANCE_REFERENCE ) {
+    if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error,
@@ -6249,6 +6262,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
 // --------------------------------- IR
 
+#if 0
 typedef enum {
   IR_TYPE_UNIT, // i.e.: void.
   IR_TYPE_BYTE,
@@ -6291,7 +6305,7 @@ struct ty_type_t {
 
 typedef struct ir_type_t ir_type_t;
 
-/* static void ir_ */
+#endif
 
 // --------------------------------- Code generation
 
