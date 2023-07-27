@@ -6357,6 +6357,18 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
 // --------------------------------- Lowering
 
+void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
+  pg_assert(resolver != NULL);
+  pg_assert(type != NULL);
+
+  if (type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE)
+    return;
+
+  if (string_eq_c(type->v.class_name, "kotlin.Int")) {
+    type->kind = TYPE_JVM_INT;
+  }
+}
+
 void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
@@ -6445,6 +6457,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
+      par_ast_fprint_node(resolver->parser, 17, stderr, 0, arena);
       pg_assert(0 && "should not happen until OOP is implemented");
     } else {
       method_descriptor = string_reserve(64, arena);
@@ -6470,6 +6483,10 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_type_t *const rhs_type = &resolver->parser->types[rhs_node->type_i];
 
     type->kind = rhs_type->kind;
+    break;
+  }
+  case AST_KIND_FUNCTION_PARAMETER: {
+    lo_unbox_type_maybe(resolver, type);
     break;
   }
 
@@ -7673,8 +7690,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
             {
                 .method =
                     {
-                        .argument_count = 0,
+                        .argument_count = type->v.method.argument_count,
                         .return_type_i = void_type_i,
+                        .argument_types_i=type->v.method.argument_types_i,
                     },
             },
     };
