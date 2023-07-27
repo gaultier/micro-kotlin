@@ -645,11 +645,10 @@ struct cg_frame_t {
 struct ty_type_t;
 
 typedef struct {
+  u32 *argument_types_i;
   string_t descriptor;
   u32 return_type_i;
-  u32 argument_types_i;
-  u8 argument_count; // TODO: use pg_array_* macros.
-  pg_pad(7);
+  pg_pad(4);
 } par_type_method_t;
 
 struct ty_type_t {
@@ -1101,8 +1100,8 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     const par_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
 
-    for (u64 i = 0; i < method_type->argument_count; i++) {
-      cf_fill_descriptor_string(types, method_type->argument_types_i,
+    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
+      cf_fill_descriptor_string(types, method_type->argument_types_i[i],
                                 descriptor, arena);
     }
 
@@ -4336,10 +4335,13 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
     string_t res = string_reserve(128, arena);
     string_append_cstring(&res, "(", arena);
-    for (u64 i = 0; i < method_type->argument_count; i++) {
-      const u32 argument_type_i = method_type->argument_types_i; // FIXME
+    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
+      const u32 argument_type_i = method_type->argument_types_i[i];
       string_append_string(
           &res, ty_type_to_human_string(types, argument_type_i, arena), arena);
+
+      if (i < pg_array_len(method_type->argument_types_i) - 1)
+        string_append_cstring(&res, ", ", arena);
     }
     string_append_cstring(&res, ") -> ", arena);
     string_append_string(
@@ -5881,12 +5883,13 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t void_type = {.kind = TYPE_KOTLIN_UNIT};
     const u32 return_type_i =
         ty_add_type(&resolver->parser->types, &void_type, arena);
-    const ty_type_t println_type = {.kind = TYPE_KOTLIN_METHOD,
-                                    .v = {.method = {
-                                              .argument_count = 1,
-                                              .return_type_i = return_type_i,
-                                              .argument_types_i = lhs->type_i,
-                                          }}};
+    ty_type_t println_type = {.kind = TYPE_KOTLIN_METHOD,
+                              .v = {.method = {
+                                        .return_type_i = return_type_i,
+                                    }}};
+    pg_array_init_reserve(println_type.v.method.argument_types_i, 1, arena);
+    pg_array_append(println_type.v.method.argument_types_i, lhs->type_i, arena);
+
     pg_array_append(resolver->parser->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->parser->types);
 
@@ -6054,23 +6057,32 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->rhs, arena);
     ty_end_scope(resolver);
 
-    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    pg_assert(lhs->kind == AST_KIND_LIST);
-
     // FIXME
     const ty_type_t void_type = {.kind = TYPE_KOTLIN_UNIT};
-    const ty_type_t type = {
+
+    ty_type_t type = {
         .kind = TYPE_KOTLIN_METHOD,
         .v = {.method =
                   {
-                      .argument_count = pg_array_len(lhs->nodes),
-                      .argument_types_i = 0,
                       .return_type_i = ty_add_type(&resolver->parser->types,
                                                    &void_type, arena),
                   }},
     };
-    pg_array_append(resolver->parser->types, type, arena);
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+
+    if (node->lhs > 0) {
+      const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+      pg_assert(lhs->kind == AST_KIND_LIST);
+
+      pg_array_init_reserve(type.v.method.argument_types_i,
+                            pg_array_len(lhs->nodes), arena);
+      for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
+        const u32 node_i = lhs->nodes[i];
+        const u32 type_i = resolver->parser->nodes[node_i].type_i;
+        pg_array_append(type.v.method.argument_types_i, type_i, arena);
+      }
+    }
+
+    return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
   }
 
   case AST_KIND_VAR_DEFINITION: {
@@ -7020,7 +7032,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_VIRTUAL, arena);
   cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
-  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
+  for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
 }
 
@@ -7038,7 +7050,7 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_STATIC, arena);
   cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
-  for (u8 i = 0; i < method_type->argument_count; i++)
+  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
 }
 
@@ -7705,7 +7717,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
             {
                 .method =
                     {
-                        .argument_count = type->v.method.argument_count,
                         .return_type_i = void_type_i,
                         .argument_types_i = type->v.method.argument_types_i,
                     },
@@ -8465,7 +8476,6 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u32 void_type_i = pg_array_last_index(parser->types);
 
     const par_type_method_t target_method_type = {
-        .argument_count = 0,
         .return_type_i = void_type_i,
         .descriptor = target_descriptor_string,
     };
