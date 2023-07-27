@@ -610,25 +610,13 @@ typedef struct {
   cg_frame_t *frame;
 } cf_stack_map_frame_t;
 
-enum __attribute__((packed)) cf_type_kind_t {
+enum __attribute__((packed)) ty_type_kind_t {
   TYPE_ANY,
   TYPE_UNIT, // i.e.: void.
-  TYPE_BYTE,
-  TYPE_CHAR,
-  TYPE_DOUBLE,
-  TYPE_FLOAT,
-  TYPE_INT,
-  TYPE_LONG,
   TYPE_INSTANCE_REFERENCE,
-  TYPE_SHORT,
-  TYPE_BOOL,
-  TYPE_STRING,
-  TYPE_ARRAY_REFERENCE,
   TYPE_METHOD,
-  TYPE_CONSTRUCTOR,
-  TYPE_CLASS_REFERENCE,
 };
-typedef enum cf_type_kind_t cf_type_kind_t;
+typedef enum ty_type_kind_t ty_type_kind_t;
 
 struct cg_frame_t {
   cf_variable_t *locals;
@@ -657,7 +645,7 @@ struct ty_type_t {
     par_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
-  cf_type_kind_t kind;
+  ty_type_kind_t kind;
   pg_pad(1);
   u16 constant_pool_item_i;
   u32 class_file_i;
@@ -789,7 +777,6 @@ cg_type_to_verification_info(const ty_type_t *type) {
   case TYPE_DOUBLE:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
   case TYPE_INSTANCE_REFERENCE:
-  case TYPE_CLASS_REFERENCE:
   case TYPE_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
@@ -1111,11 +1098,6 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     cf_fill_descriptor_string(types, method_type->return_type_i, descriptor,
                               arena);
 
-    break;
-  }
-  case TYPE_CLASS_REFERENCE: {
-    const string_t class_name = type->v.class_name;
-    string_append_string(descriptor, class_name, arena);
     break;
   }
   }
@@ -4366,8 +4348,6 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("Constructor<todo>", arena);
   case TYPE_FLOAT:
     return string_make_from_c("Float", arena);
-  case TYPE_CLASS_REFERENCE:
-    return type->v.class_name;
   }
 }
 
@@ -5987,7 +5967,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const cf_type_kind_t type_kind = resolver->parser->types[lhs_i].kind;
+      const ty_type_kind_t type_kind = resolver->parser->types[lhs_i].kind;
       if (type_kind != TYPE_BOOL) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
@@ -6172,8 +6152,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
 
-    if (!(lhs_type->kind == TYPE_INSTANCE_REFERENCE ||
-          lhs_type->kind == TYPE_CLASS_REFERENCE)) {
+    if (!(lhs_type->kind == TYPE_INSTANCE_REFERENCE ) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error,
@@ -6286,6 +6265,31 @@ typedef enum {
   IR_TYPE_METHOD,
   IR_TYPE_CLASS_REFERENCE,
 } ir_type_kind_t;
+
+struct ir_type_t;
+
+typedef struct {
+  string_t descriptor;
+  u32 return_type_i;
+  u32 argument_types_i;
+  u8 argument_count; // TODO: use pg_array_* macros.
+  pg_pad(7);
+} ir_type_method_t;
+struct ty_type_t {
+  union {
+    string_t class_name;      // TYPE_INSTANCE_REFERENCE
+    ir_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
+    u32 array_type_i;         // TYPE_ARRAY_REFERENCE
+  } v;
+  ir_type_kind_t kind;
+  pg_pad(1);
+  u16 constant_pool_item_i;
+  u32 class_file_i;
+  u16 field_i;
+  pg_pad(6);
+};
+
+typedef struct ir_type_t ir_type_t;
 
 // --------------------------------- Code generation
 
