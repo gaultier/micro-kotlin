@@ -6277,9 +6277,9 @@ typedef struct {
 } ir_type_method_t;
 struct ty_type_t {
   union {
-    string_t class_name;      // TYPE_INSTANCE_REFERENCE
+    string_t class_name;     // TYPE_INSTANCE_REFERENCE
     ir_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;         // TYPE_ARRAY_REFERENCE
+    u32 array_type_i;        // TYPE_ARRAY_REFERENCE
   } v;
   ir_type_kind_t kind;
   pg_pad(1);
@@ -6290,6 +6290,8 @@ struct ty_type_t {
 };
 
 typedef struct ir_type_t ir_type_t;
+
+/* static void ir_ */
 
 // --------------------------------- Code generation
 
