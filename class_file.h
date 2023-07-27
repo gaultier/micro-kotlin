@@ -4725,7 +4725,6 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &if_node, arena);
 }
 
-
 // primaryExpression:
 //     parenthesizedExpression
 //     | simpleIdentifier
@@ -5777,22 +5776,44 @@ static u32 ty_declare_variable(resolver_t *resolver, string_t name, u32 node_i,
 
   const ty_variable_t variable = {
       .name = name,
-      .scope_depth = resolver->scope_depth,
+      .scope_depth = -1, // Uninitialized.
       .var_definition_node_i = node_i,
   };
   pg_array_append(resolver->variables, variable, arena);
   return pg_array_last_index(resolver->variables);
 }
 
-static u32 ty_find_variable(resolver_t *resolver, string_t name) {
+static void ty_mark_variable_as_initialized(resolver_t *resolver,
+                                            u32 variable_i) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->scope_depth > 0);
+  pg_assert(variable_i < pg_array_len(resolver->variables));
+
+  // Should this function be idempotent? In that case, this assert should be
+  // removed.
+  pg_assert(resolver->variables[variable_i].scope_depth == (u32)-1);
+
+  resolver->variables[variable_i].scope_depth = resolver->scope_depth;
+}
+
+static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
 
+  const string_t name = par_token_to_string(resolver->parser, token_i);
+
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
     const ty_variable_t *const variable = &resolver->variables[i];
-    if (string_eq(name, variable->name))
-      return (u32)i;
+    if (!string_eq(name, variable->name))
+      continue;
+
+    if (variable->scope_depth == (u32)-1) {
+      par_error(resolver->parser, resolver->parser->lexer->tokens[token_i],
+                "Cannot read local variable in its own initializer");
+      return -1;
+    }
+    return (u32)i;
   }
 
   return -1;
@@ -6010,6 +6031,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_VAR_DEFINITION: {
     pg_assert(node->lhs > 0); // TODO: The type is actually optional.
 
+    const u32 variable_i = ty_declare_variable(
+        resolver, par_token_to_string(resolver->parser, node->main_token_i),
+        node_i, arena);
+
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
 
@@ -6027,6 +6052,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_append_string(&error, rhs_type_human, arena);
       par_error(resolver->parser, token, error.value);
     }
+
+    ty_mark_variable_as_initialized(resolver, variable_i);
 
     return node->type_i;
   }
@@ -6231,9 +6258,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 
   case AST_KIND_UNRESOLVED_NAME: {
-    const string_t name =
-        par_token_to_string(resolver->parser, node->main_token_i);
-    const u32 variable_i = ty_find_variable(resolver, name);
+    const u32 variable_i = ty_find_variable(resolver, node->main_token_i);
 
     if (variable_i == (u32)-1) {
       par_error(resolver->parser,
@@ -6360,6 +6385,17 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         resolver->class_files,
         string_make_from_c_no_alloc("java/io/PrintStream"),
         string_make_from_c_no_alloc("println"), method_descriptor));
+    break;
+  }
+
+  case AST_KIND_VAR_DEFINITION: {
+    pg_assert(node->rhs > 0);
+    lo_lower_ast_node(resolver, node->rhs, arena);
+
+    par_ast_node_t *const rhs_node = &resolver->parser->nodes[node->rhs];
+    ty_type_t *const rhs_type = &resolver->parser->types[rhs_node->type_i];
+
+    type->kind = rhs_type->kind;
     break;
   }
 
@@ -7929,6 +7965,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->type_i > 0);
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
     const cf_verification_info_t verification_info =
         cg_type_to_verification_info(type);
