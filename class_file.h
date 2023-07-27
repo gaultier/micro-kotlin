@@ -3060,8 +3060,6 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
                                &local_file_header, &class_file, 0, arena);
         pg_array_append(*class_files, class_file, arena);
 
-        LOG("[D005] jmod class file=%.*s i=%lu", file_name.len, file_name.value,
-            i);
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
                  string_ends_with_cstring(file_name, ".class")) {
@@ -3090,9 +3088,6 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
-
-        LOG("[D006] jmod class file=%.*s i=%lu", file_name.len, file_name.value,
-            i);
       }
     }
   }
@@ -3335,7 +3330,6 @@ static void cf_read_jar_and_class_files_recursively(
     const int fd = open(path, O_RDONLY);
     pg_assert(fd > 0);
 
-    const u64 arena_before = arena->current_offset;
     char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
     const ssize_t read_bytes = read(fd, buf, st.st_size);
     pg_assert(read_bytes == st.st_size);
@@ -3348,11 +3342,6 @@ static void cf_read_jar_and_class_files_recursively(
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
     pg_array_append(*class_files, class_file, arena);
 
-    const u64 arena_after = arena->current_offset;
-    const u64 delta = arena_after - arena_before;
-    LOG("cf_read_class_files path=%s count=%lu arena_delta=%lu "
-        "delta-file_size=%lu",
-        path, pg_array_len(*class_files), delta, delta - st.st_size);
     return;
   } else if (S_ISREG(st.st_mode) &&
              string_ends_with_cstring(last_path_component, ".jar") &&
