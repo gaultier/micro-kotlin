@@ -4634,6 +4634,7 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
 static u32 par_parse_statements(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_statement(par_parser_t *parser, arena_t *arena);
+static u32 par_parse_type(par_parser_t *parser, arena_t *arena);
 
 static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
@@ -4865,15 +4866,15 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   par_expect_token(parser, TOKEN_KIND_COLON,
                    "expected colon between variable name and type");
 
-  // FIXME: Use `par_parse_type`.
-  par_expect_token(parser, TOKEN_KIND_IDENTIFIER, "expected type");
+  const u32 node_type_i = par_parse_type(parser, arena);
 
   par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
 
   const par_ast_node_t node = {
       .kind = AST_KIND_VAR_DEFINITION,
       .main_token_i = name_token_i,
-      .lhs = par_parse_expression(parser, arena),
+      .lhs = node_type_i,
+      .rhs = par_parse_expression(parser, arena),
   };
   const u32 node_i = par_add_node(parser, &node, arena);
 
@@ -5673,8 +5674,18 @@ static bool ty_merge_types(const ty_type_t *types, u32 lhs_i, u32 rhs_i,
   const ty_type_t *const lhs = &types[lhs_i];
   const ty_type_t *const rhs = &types[rhs_i];
   if (lhs->kind == rhs->kind) {
-    *result_i = lhs_i;
-    return true;
+    if (lhs->kind == TYPE_INSTANCE_REFERENCE &&
+        rhs->kind == TYPE_INSTANCE_REFERENCE) {
+      if (lhs->class_file_i == rhs->class_file_i) {
+        *result_i = lhs_i;
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      *result_i = lhs_i;
+      return true;
+    }
   }
 
   // Any is compatible with everything.
@@ -6012,38 +6023,27 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return node->type_i = pg_array_last_index(resolver->parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
-    const string_t type_literal_string =
-        par_token_to_string(resolver->parser, node->main_token_i + 2);
+    pg_assert(node->lhs > 0); // TODO: The type is actually optional.
 
-    const string_t alternate_type_string =
-        ty_know_type_aliases(type_literal_string, arena);
+    const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
+    const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
 
-    if (!cf_class_files_find_class_exactly(resolver->class_files,
-                                           type_literal_string,
-                                           alternate_type_string, NULL, NULL)) {
-      string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "unknown type: ", arena);
-      string_append_string(&error, type_literal_string, arena);
+    if (!ty_merge_types(resolver->parser->types, lhs_type_i, rhs_type_i,
+                        &node->type_i)) {
+      const string_t lhs_type_human =
+          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
+      const string_t rhs_type_human =
+          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
 
-      par_error(resolver->parser, token, error.value);
-      return 0;
-    }
-
-    const u32 type_lhs_i = ty_resolve_node(resolver, node->lhs, arena);
-
-    const string_t type_inferred_string =
-        ty_type_to_human_string(resolver->parser->types, type_lhs_i, arena);
-
-    if (!string_eq(type_literal_string, type_inferred_string)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
-      string_append_string(&error, type_literal_string, arena);
+      string_append_string(&error, lhs_type_human, arena);
       string_append_cstring(&error, " vs ", arena);
-      string_append_string(&error, type_inferred_string, arena);
+      string_append_string(&error, rhs_type_human, arena);
       par_error(resolver->parser, token, error.value);
     }
 
-    return node->type_i = type_lhs_i;
+    return node->type_i;
   }
   case AST_KIND_VAR_REFERENCE: {
     pg_assert(node->lhs > 0);
@@ -6103,6 +6103,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t type = {
         .kind = TYPE_INSTANCE_REFERENCE,
         .class_file_i = resolver->kotlin_string_class_i,
+        .v = {.class_name = string_make_from_c("kotlin.String", arena)},
     };
     pg_array_append(resolver->parser->types, type, arena);
     const u32 type_i = pg_array_last_index(resolver->parser->types);
