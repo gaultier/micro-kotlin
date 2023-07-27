@@ -3690,6 +3690,9 @@ static u32 lex_string_length(const char *buf, u32 buf_len, u32 current_offset) {
   return end_quote - current;
 }
 
+// FIXME: probably need to memoize it actually to be able to support:
+// - `a.b.c = 1` => `a` has length 1.
+// - `var a : kotlin.Int` => `kotlin.Int` has length 9.
 static u32 lex_identifier_length(const char *buf, u32 buf_len,
                                  u32 current_offset) {
   pg_assert(buf != NULL);
@@ -5733,7 +5736,6 @@ static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
   pg_array_append(*types, *type, arena);
   return pg_array_last_index(*types);
 }
-
 
 typedef struct {
   par_parser_t *parser;
