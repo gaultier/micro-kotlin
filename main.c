@@ -89,6 +89,7 @@ int main(int argc, char *argv[]) {
       return 1; // TODO: Should type checking still proceed?
 
     resolver_t resolver = {.parser = &parser, .class_files = class_files};
+    pg_array_init_reserve(resolver.variables, 512, &arena);
     ty_find_known_types(&resolver, &arena);
     ty_resolve_node(&resolver, root_i, &arena);
 
