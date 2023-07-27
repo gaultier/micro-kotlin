@@ -4858,12 +4858,6 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
   if (par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
     const u32 main_token_i = parser->tokens_i - 1;
 
-    if (!par_is_lvalue(parser, lhs_i)) {
-      par_error(
-          parser, parser->lexer->tokens[main_token_i],
-          "The assignment target is not a lvalue (such as a local variable)");
-    }
-
     const par_ast_node_t node = {
         .kind = AST_KIND_BINARY,
         .lhs = lhs_i,
@@ -6002,6 +5996,15 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
 
     switch (token.kind) {
+    case TOKEN_KIND_EQUAL: {
+      if (!par_is_lvalue(resolver->parser, node->lhs)) {
+        par_error(
+            resolver->parser,
+            resolver->parser->lexer->tokens[node->main_token_i],
+            "The assignment target is not a lvalue (such as a local variable)");
+      }
+      break;
+    }
     case TOKEN_KIND_LT:
     case TOKEN_KIND_LE:
     case TOKEN_KIND_GT:
