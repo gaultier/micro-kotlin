@@ -3088,6 +3088,8 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
+
+        inflateEnd(&stream);
       }
     }
   }
