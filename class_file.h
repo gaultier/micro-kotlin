@@ -4492,9 +4492,20 @@ static lex_token_t par_peek_token(const par_parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
+  if (parser->tokens_i > pg_array_len(parser->lexer->tokens) - 1)
+    return (lex_token_t){0};
 
   return parser->lexer->tokens[parser->tokens_i];
+}
+
+static lex_token_t par_peek_next_token(const par_parser_t *parser) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer->tokens != NULL);
+  pg_assert(parser->nodes != NULL);
+  if (parser->tokens_i > pg_array_len(parser->lexer->tokens) - 2)
+    return (lex_token_t){0};
+
+  return parser->lexer->tokens[parser->tokens_i + 1];
 }
 
 static void par_advance_token(par_parser_t *parser) {
@@ -5381,10 +5392,20 @@ static u32 par_parse_type(par_parser_t *parser, arena_t *arena) {
   par_expect_token(
       parser, TOKEN_KIND_IDENTIFIER,
       "expected an identifier for the type of the function parameter");
+
   const par_ast_node_t node = {
       .kind = AST_KIND_TYPE,
       .main_token_i = parser->tokens_i - 1,
   };
+
+  // userType:
+  //     simpleUserType {{NL} '.' {NL} simpleUserType}
+  while (par_peek_token(parser).kind == TOKEN_KIND_DOT &&
+         par_peek_next_token(parser).kind == TOKEN_KIND_IDENTIFIER) {
+    par_advance_token(parser);
+    par_advance_token(parser);
+  }
+
   return par_add_node(parser, &node, arena);
 }
 
@@ -5713,28 +5734,6 @@ static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
   return pg_array_last_index(*types);
 }
 
-static string_t ty_know_type_aliases(string_t type_literal, arena_t *arena) {
-  if (string_eq_c(type_literal, "Int"))
-    return string_make_from_c_no_alloc("java/lang/Integer");
-  if (string_eq_c(type_literal, "Short"))
-    return string_make_from_c_no_alloc("java/lang/Short");
-  if (string_eq_c(type_literal, "Byte"))
-    return string_make_from_c_no_alloc("java/lang/Byte");
-  if (string_eq_c(type_literal, "Char"))
-    return string_make_from_c_no_alloc("java/lang/Char");
-  if (string_eq_c(type_literal, "Boolean"))
-    return string_make_from_c_no_alloc("java/lang/Boolean");
-  if (string_eq_c(type_literal, "Long"))
-    return string_make_from_c_no_alloc("java/lang/Long");
-  if (string_eq_c(type_literal, "Float"))
-    return string_make_from_c_no_alloc("java/lang/Float");
-  if (string_eq_c(type_literal, "Double"))
-    return string_make_from_c_no_alloc("java/lang/Double");
-
-  string_t res = string_make_from_c("java/lang/", arena);
-  string_append_string(&res, type_literal, arena);
-  return res;
-}
 
 typedef struct {
   par_parser_t *parser;
@@ -6194,16 +6193,36 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const string_t type_literal_string =
         par_token_to_string(resolver->parser, node->main_token_i);
 
-    // TODO: Find other things than classes?
-    const string_t name =
-        par_token_to_string(resolver->parser, node->main_token_i);
-    const string_t alternate_name = ty_know_type_aliases(name, arena);
-    u32 class_file_i = 0;
-    u16 constant_pool_class_name_i = 0;
-    // TODO: Should we move the resolution to the type checking phase?
-    if (!cf_class_files_find_class_exactly(resolver->class_files, name,
-                                           alternate_name, &class_file_i,
-                                           &constant_pool_class_name_i)) {
+    ty_type_t type = {.kind = TYPE_INSTANCE_REFERENCE};
+    if (string_eq_c(type_literal_string, "Int") ||
+        string_eq_c(type_literal_string, "kotlin.Int")) {
+      type.class_file_i = resolver->kotlin_int_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Int", arena);
+    } else if (string_eq_c(type_literal_string, "Byte") ||
+               string_eq_c(type_literal_string, "kotlin.Byte")) {
+      type.class_file_i = resolver->kotlin_byte_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Byte", arena);
+    } else if (string_eq_c(type_literal_string, "Char") ||
+               string_eq_c(type_literal_string, "kotlin.Char")) {
+      type.class_file_i = resolver->kotlin_char_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Char", arena);
+    } else if (string_eq_c(type_literal_string, "Short") ||
+               string_eq_c(type_literal_string, "kotlin.Short")) {
+      type.class_file_i = resolver->kotlin_short_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Short", arena);
+    } else if (string_eq_c(type_literal_string, "Float") ||
+               string_eq_c(type_literal_string, "kotlin.Float")) {
+      type.class_file_i = resolver->kotlin_float_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Float", arena);
+    } else if (string_eq_c(type_literal_string, "Double") ||
+               string_eq_c(type_literal_string, "kotlin.Double")) {
+      type.class_file_i = resolver->kotlin_double_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Double", arena);
+    } else if (string_eq_c(type_literal_string, "Long") ||
+               string_eq_c(type_literal_string, "kotlin.Long")) {
+      type.class_file_i = resolver->kotlin_long_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Long", arena);
+    } else {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
       string_append_string(&error, type_literal_string, arena);
@@ -6211,14 +6230,6 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
       return 0;
     }
-
-    const string_t class_name = cf_constant_array_get_as_string(
-        &resolver->class_files[class_file_i].constant_pool,
-        constant_pool_class_name_i);
-    const ty_type_t type = {.kind = TYPE_CLASS_REFERENCE,
-                            .class_file_i = class_file_i,
-                            .constant_pool_item_i = constant_pool_class_name_i,
-                            .v = {.class_name = class_name}};
 
     pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
