@@ -6054,8 +6054,19 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->rhs, arena);
     ty_end_scope(resolver);
 
-    pg_array_append(resolver->parser->types,
-                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
+    // FIXME
+    const ty_type_t void_type = {.kind = TYPE_KOTLIN_UNIT};
+    const ty_type_t type = {
+        .kind = TYPE_KOTLIN_METHOD,
+        .v = {.method =
+                  {
+                      .argument_count = 0,
+                      .argument_types_i = 0,
+                      .return_type_i = ty_add_type(&resolver->parser->types,
+                                                   &void_type, arena),
+                  }},
+    };
+    pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
@@ -7692,7 +7703,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
                     {
                         .argument_count = type->v.method.argument_count,
                         .return_type_i = void_type_i,
-                        .argument_types_i=type->v.method.argument_types_i,
+                        .argument_types_i = type->v.method.argument_types_i,
                     },
             },
     };
