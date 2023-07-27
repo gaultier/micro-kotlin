@@ -6316,6 +6316,9 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     break;
 
   case AST_KIND_BINARY:
+    lo_lower_ast_node(resolver, node->lhs, arena);
+    lo_lower_ast_node(resolver, node->rhs, arena);
+
     switch (token.kind) {
     case TOKEN_KIND_LT:
     case TOKEN_KIND_LE:
@@ -6325,13 +6328,9 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_EQUAL_EQUAL:
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE:
-      lo_lower_ast_node(resolver, node->lhs, arena);
-      lo_lower_ast_node(resolver, node->rhs, arena);
       type->kind = TYPE_JVM_BOOL;
       break;
     default:
-      lo_lower_ast_node(resolver, node->lhs, arena);
-      lo_lower_ast_node(resolver, node->rhs, arena);
       break;
     }
     break;
@@ -6359,6 +6358,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   case AST_KIND_BUILTIN_PRINTLN: {
     lo_lower_ast_node(resolver, node->lhs, arena);
+
     par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
     ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
 
