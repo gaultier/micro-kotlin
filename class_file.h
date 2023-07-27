@@ -612,7 +612,7 @@ typedef struct {
 
 enum __attribute__((packed)) cf_type_kind_t {
   TYPE_ANY,
-  TYPE_VOID,
+  TYPE_UNIT, // i.e.: void.
   TYPE_BYTE,
   TYPE_CHAR,
   TYPE_DOUBLE,
@@ -1037,7 +1037,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   switch (type->kind) {
   case TYPE_ANY:
     return;
-  case TYPE_VOID: {
+  case TYPE_UNIT: {
     string_append_char(descriptor, 'V', arena);
     break;
   }
@@ -4319,8 +4319,8 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("Any", arena);
   case TYPE_INT:
     return string_make_from_c("Int", arena);
-  case TYPE_VOID:
-    return string_make_from_c("void", arena);
+  case TYPE_UNIT:
+    return string_make_from_c("Unit", arena);
   case TYPE_BOOL:
     return string_make_from_c("Boolean", arena);
   case TYPE_BYTE:
@@ -5838,7 +5838,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs->type_i];
 
-    const ty_type_t void_type = {.kind = TYPE_VOID};
+    const ty_type_t void_type = {.kind = TYPE_UNIT};
     const u32 return_type_i =
         ty_add_type(&resolver->parser->types, &void_type, arena);
     const ty_type_t println_type = {.kind = TYPE_METHOD,
@@ -5993,7 +5993,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       resolver->current_type_i = 0;
     }
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
+    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
                     arena);
 
     return node->type_i = pg_array_last_index(resolver->parser->types);
@@ -6005,7 +6005,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->rhs, arena);
     par_end_scope(resolver->parser);
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
+    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
                     arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
 
@@ -6092,7 +6092,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     ty_resolve_node(resolver, node->rhs, arena);
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_VOID},
+    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
                     arena);
     const u32 void_type_i = pg_array_last_index(resolver->parser->types);
     return node->type_i = void_type_i;
@@ -7429,7 +7429,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     // FIXME: hardcoded type.
 
-    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_VOID}, arena);
+    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_UNIT}, arena);
     const u32 void_type_i = pg_array_last_index(parser->types);
 
     const ty_type_t main_type = {
@@ -8186,7 +8186,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_VOID}, arena);
+    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_UNIT}, arena);
     const u32 void_type_i = pg_array_last_index(parser->types);
 
     const par_type_method_t target_method_type = {
