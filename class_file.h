@@ -641,7 +641,7 @@ struct cg_frame_t {
   pg_pad(4);
 };
 
-struct par_type_t;
+struct ty_type_t;
 
 typedef struct {
   string_t descriptor;
@@ -651,7 +651,7 @@ typedef struct {
   pg_pad(7);
 } par_type_method_t;
 
-struct par_type_t {
+struct ty_type_t {
   union {
     string_t class_name;      // TYPE_INSTANCE_REFERENCE
     par_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
@@ -665,7 +665,7 @@ struct par_type_t {
   pg_pad(6);
 };
 
-typedef struct par_type_t ty_type_t;
+typedef struct ty_type_t ty_type_t;
 
 typedef struct {
   u16 start_pc;
@@ -1203,7 +1203,7 @@ static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
 
 static void cg_emit_call_superclass_constructor(
     u8 **code, u16 super_class_constructor_i, cg_frame_t *frame,
-    const par_type_t *constructor_type, arena_t *arena) {
+    const ty_type_t *constructor_type, arena_t *arena) {
   pg_assert(code != NULL);
   pg_assert(super_class_constructor_i > 0);
   pg_assert(frame != NULL);
@@ -6268,6 +6268,25 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 }
 
+// --------------------------------- IR
+
+typedef enum {
+  IR_TYPE_UNIT, // i.e.: void.
+  IR_TYPE_BYTE,
+  IR_TYPE_CHAR,
+  IR_TYPE_DOUBLE,
+  IR_TYPE_FLOAT,
+  IR_TYPE_INT,
+  IR_TYPE_LONG,
+  IR_TYPE_INSTANCE_REFERENCE,
+  IR_TYPE_SHORT,
+  IR_TYPE_BOOL,
+  IR_TYPE_STRING,
+  IR_TYPE_ARRAY_REFERENCE,
+  IR_TYPE_METHOD,
+  IR_TYPE_CLASS_REFERENCE,
+} ir_type_kind_t;
+
 // --------------------------------- Code generation
 
 typedef struct {
@@ -6891,11 +6910,11 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
 
     const u32 word_count =
         cf_verification_info_kind_word_count(variable->verification_info.kind);
-    if (word_count==1)
+    if (word_count == 1)
       return (u32)i;
     // Long/Double takes up 2 slots: [Top, Long|Double], and we need to return
     // the first slot.
-    else if (word_count==2)
+    else if (word_count == 2)
       return (u32)i - 1;
     else
       pg_assert(0 && "unreachable");
