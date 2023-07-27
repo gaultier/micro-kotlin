@@ -4181,6 +4181,8 @@ typedef enum __attribute__((packed)) {
   AST_KIND_FUNCTION_PARAMETER,
   AST_KIND_TYPE,
   AST_KIND_BINARY,
+  AST_KIND_ASSIGNMENT,
+  AST_KIND_THEN_ELSE,
   AST_KIND_UNARY,
   AST_KIND_VAR_DEFINITION,
   AST_KIND_VAR_REFERENCE,
@@ -4203,6 +4205,8 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
     [AST_KIND_TYPE] = "TYPE",
     [AST_KIND_BINARY] = "BINARY",
+    [AST_KIND_ASSIGNMENT] = "ASSIGNMENT",
+    [AST_KIND_THEN_ELSE] = "THEN_ELSE",
     [AST_KIND_UNARY] = "UNARY",
     [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
     [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
@@ -4700,14 +4704,14 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   //
   //               IF 
   //              /  \
-  //    condition     BINARY )
+  //    condition     THEN_ELSE )
   //                 /      \
   //             then        else
   //
   // clang-format on
 
   const par_ast_node_t binary_node = {
-      .kind = AST_KIND_BINARY,
+      .kind = AST_KIND_THEN_ELSE,
       .main_token_i = parser->tokens_i - 1,
       .lhs = par_parse_control_structure_body(parser, arena), // Then
       .rhs = par_match_token(parser, TOKEN_KIND_KEYWORD_ELSE)
@@ -4859,7 +4863,7 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
     const u32 main_token_i = parser->tokens_i - 1;
 
     const par_ast_node_t node = {
-        .kind = AST_KIND_BINARY,
+        .kind = AST_KIND_ASSIGNMENT,
         .lhs = lhs_i,
         .main_token_i = main_token_i,
         .rhs = par_parse_expression(parser, arena),
@@ -5996,15 +6000,6 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     }
 
     switch (token.kind) {
-    case TOKEN_KIND_EQUAL: {
-      if (!par_is_lvalue(resolver->parser, node->lhs)) {
-        par_error(
-            resolver->parser,
-            resolver->parser->lexer->tokens[node->main_token_i],
-            "The assignment target is not a lvalue (such as a local variable)");
-      }
-      break;
-    }
     case TOKEN_KIND_LT:
     case TOKEN_KIND_LE:
     case TOKEN_KIND_GT:
@@ -6121,11 +6116,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
-    // FIXME: begin/end scope.
-    const u32 type_then_else_i = ty_resolve_node(resolver, node->rhs, arena);
-    pg_assert(type_then_else_i > 0);
-
-    return node->type_i = type_then_else_i;
+    return node->type_i = ty_resolve_node(resolver, node->rhs, arena);
   }
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
@@ -6320,6 +6311,45 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     break;
   }
 
+  case AST_KIND_THEN_ELSE:
+    ty_begin_scope(resolver);
+    const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
+    ty_end_scope(resolver);
+
+    ty_begin_scope(resolver);
+    const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
+    ty_end_scope(resolver);
+
+    if (!ty_merge_types(resolver->parser->types, lhs_type_i, rhs_type_i,
+                        &node->type_i)) {
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "incompatible types: ", arena);
+      string_append_string(
+          &error,
+          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena),
+          arena);
+      string_append_cstring(&error, " vs ", arena);
+      string_append_string(
+          &error,
+          ty_type_to_human_string(resolver->parser->types, rhs_type_i, arena),
+          arena);
+      par_error(resolver->parser, token, error.value);
+    }
+    return node->type_i;
+
+    break;
+
+  case AST_KIND_ASSIGNMENT:
+    ty_resolve_node(resolver, node->lhs, arena);
+
+    if (!par_is_lvalue(resolver->parser, node->lhs)) {
+      par_error(
+          resolver->parser, resolver->parser->lexer->tokens[node->main_token_i],
+          "The assignment target is not a lvalue (such as a local variable)");
+    }
+
+    return node->type_i = ty_resolve_node(resolver, node->rhs, arena);
+
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
@@ -6340,7 +6370,6 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   switch (node->kind) {
   case AST_KIND_NUMBER:
-    pg_assert(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE);
     if (type->flag & NUMBER_FLAGS_LONG) {
       type->kind = TYPE_JVM_LONG;
     } else if (type->flag & NUMBER_FLAGS_INT) {
@@ -7333,7 +7362,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   //
   //               IF 
   //              /  \
-  //    condition     BINARY
+  //    condition     THEN_ELSE
   //                 /      \
   //             then        else
   //
@@ -7375,7 +7404,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
 
   pg_assert(node->rhs > 0);
   const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
-  pg_assert(rhs->kind == AST_KIND_BINARY);
+  pg_assert(rhs->kind == AST_KIND_THEN_ELSE);
 
   // Emit `then` branch.
   // Save a clone of the frame before the `then` branch since we need it
@@ -7954,28 +7983,6 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       cg_emit_ne(gen, arena);
       break;
 
-    case TOKEN_KIND_EQUAL:
-      pg_assert(node->lhs > 0);
-      const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
-      pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
-
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
-
-      const u32 var_i = cf_find_variable(gen->frame, lhs->lhs);
-      pg_assert(var_i != (u32)-1);
-
-      switch (type->kind) {
-      case TYPE_JVM_INT:
-        cg_emit_store_variable_int(gen, var_i, arena);
-        break;
-      case TYPE_JVM_LONG:
-        pg_assert(0 && "todo");
-        break;
-      default:
-        pg_assert(0 && "todo");
-      }
-      break;
-
     default:
       pg_assert(0 && "todo");
     }
@@ -8195,9 +8202,32 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     // No-op. Although at some point we might need to generate RTTI or such.
     return;
 
-  case AST_KIND_UNRESOLVED_NAME: {
+  case AST_KIND_THEN_ELSE:
+  case AST_KIND_UNRESOLVED_NAME:
     pg_assert(0 && "unreachable");
-  }
+
+  case AST_KIND_ASSIGNMENT:
+    pg_assert(node->lhs > 0);
+    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
+    pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
+
+    cg_emit_node(gen, parser, class_file, node->rhs, arena);
+
+    const u32 var_i = cf_find_variable(gen->frame, lhs->lhs);
+    pg_assert(var_i != (u32)-1);
+
+    switch (type->kind) {
+    case TYPE_JVM_INT:
+      cg_emit_store_variable_int(gen, var_i, arena);
+      break;
+    case TYPE_JVM_LONG:
+      pg_assert(0 && "todo");
+      break;
+    default:
+      pg_assert(0 && "todo");
+    }
+    break;
+
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }

@@ -5,6 +5,8 @@ fun main() {
     if (false) {
       b = b + 1
       println(b)
+    } else {
+      b = b * 2
     }
     println(b)
   }
