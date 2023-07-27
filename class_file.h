@@ -844,7 +844,10 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
 static u16 cg_frame_locals_push(cg_frame_t *frame,
                                 const cf_variable_t *variable, arena_t *arena) {
   pg_assert(frame != NULL);
+  pg_assert(variable != NULL);
   pg_assert(arena != NULL);
+  pg_assert(variable->node_i > 0);
+  pg_assert(variable->type_i > 0);
 
   const u64 word_count =
       cf_verification_info_kind_word_count(variable->verification_info.kind);
@@ -4465,6 +4468,8 @@ static u32 par_declare_variable(par_parser_t *parser, string_t name, u32 node_i,
   pg_assert(parser != NULL);
   pg_assert(parser->scope_depth > 0);
   pg_assert(parser->variables != NULL);
+  pg_assert(arena != NULL);
+  pg_assert(node_i > 0);
 
   pg_assert(pg_array_len(parser->variables) < UINT32_MAX);
 
@@ -6877,21 +6882,23 @@ static void cg_end_scope(cg_generator_t *gen) {
 static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   pg_assert(frame != NULL);
   pg_assert(frame->locals != NULL);
+  pg_assert(node_i > 0);
 
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
     const cf_variable_t *const variable = &frame->locals[i];
     if (variable->node_i != node_i)
       continue;
 
-    if (variable->verification_info.kind == VERIFICATION_INFO_INT)
+    const u32 word_count =
+        cf_verification_info_kind_word_count(variable->verification_info.kind);
+    if (word_count==1)
       return (u32)i;
     // Long/Double takes up 2 slots: [Top, Long|Double], and we need to return
     // the first slot.
-    else if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
-             variable->verification_info.kind == VERIFICATION_INFO_DOUBLE)
+    else if (word_count==2)
       return (u32)i - 1;
     else
-      pg_assert(0 && "todo");
+      pg_assert(0 && "unreachable");
   }
 
   return (u32)-1;
@@ -7843,7 +7850,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->type_i > 0);
 
     pg_assert(node->lhs > 0);
-    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION||parser->nodes[node->lhs].kind == AST_KIND_FUNCTION_PARAMETER);
+    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION ||
+              parser->nodes[node->lhs].kind == AST_KIND_FUNCTION_PARAMETER);
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
@@ -7987,6 +7995,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cf_verification_info_t verification_info =
         cg_type_to_verification_info(type);
     const cf_variable_t argument = {
+        .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
         .verification_info = verification_info,
