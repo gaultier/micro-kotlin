@@ -4317,27 +4317,29 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
   switch (type->kind) {
   case TYPE_KOTLIN_ANY:
-    return string_make_from_c("Any", arena);
+    return string_make_from_c("kotlin.Any", arena);
   case TYPE_JVM_INT:
-    return string_make_from_c("Int", arena);
+    return string_make_from_c("jvm.Int", arena);
   case TYPE_KOTLIN_UNIT:
-    return string_make_from_c("Unit", arena);
+    return string_make_from_c("kotlin.Unit", arena);
   case TYPE_JVM_BOOL:
-    return string_make_from_c("Boolean", arena);
+    return string_make_from_c("jvm.Boolean", arena);
   case TYPE_JVM_BYTE:
-    return string_make_from_c("Byte", arena);
+    return string_make_from_c("jvm.Byte", arena);
   case TYPE_JVM_CHAR:
-    return string_make_from_c("Char", arena);
+    return string_make_from_c("jvm.Char", arena);
   case TYPE_JVM_SHORT:
-    return string_make_from_c("Short", arena);
+    return string_make_from_c("jvm.Short", arena);
+  case TYPE_JVM_FLOAT:
+    return string_make_from_c("jvm.Float", arena);
   case TYPE_JVM_LONG:
-    return string_make_from_c("Long", arena);
+    return string_make_from_c("jvm.Long", arena);
   case TYPE_JVM_DOUBLE:
-    return string_make_from_c("Double", arena);
+    return string_make_from_c("jvm.Double", arena);
   case TYPE_JVM_STRING:
-    return string_make_from_c("String", arena);
+    return string_make_from_c("jvm.String", arena);
   case TYPE_JVM_ARRAY_REFERENCE:
-    return string_make_from_c("Array<todo>", arena);
+    return string_make_from_c("jvm.Array<todo>", arena);
   case TYPE_KOTLIN_INSTANCE_REFERENCE:
     return type->v.class_name;
   case TYPE_KOTLIN_METHOD: {
@@ -4359,8 +4361,6 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
   case TYPE_JVM_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
-  case TYPE_JVM_FLOAT:
-    return string_make_from_c("Float", arena);
   }
 }
 
@@ -6343,13 +6343,13 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       type->kind = TYPE_JVM_BOOL;
       break;
 
-    case TOKEN_KIND_MINUS:{
+    case TOKEN_KIND_MINUS: {
       lo_lower_ast_node(resolver, node->lhs, arena);
-    par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
-    ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
-      type->kind=lhs_type->kind;
+      par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
+      ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
+      type->kind = lhs_type->kind;
       break;
-                          }
+    }
 
     default:
       pg_assert(0 && "unimplemented");
