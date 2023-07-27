@@ -611,23 +611,23 @@ typedef struct {
 } cf_stack_map_frame_t;
 
 enum __attribute__((packed)) ty_type_kind_t {
-  TYPE_ANY,
-  TYPE_UNIT, // i.e.: void.
-  TYPE_INSTANCE_REFERENCE,
-  TYPE_METHOD,
+  TYPE_KOTLIN_ANY,
+  TYPE_KOTLIN_UNIT, // i.e.: void.
+  TYPE_KOTLIN_INSTANCE_REFERENCE,
+  TYPE_KOTLIN_METHOD,
 
   // After lowering
-  TYPE_BYTE,
-  TYPE_CHAR,
-  TYPE_SHORT,
-  TYPE_INT,
-  TYPE_STRING,
-  TYPE_BOOL,
-  TYPE_FLOAT,
-  TYPE_LONG,
-  TYPE_DOUBLE,
-  TYPE_ARRAY_REFERENCE,
-  TYPE_CONSTRUCTOR,
+  TYPE_JVM_BYTE,
+  TYPE_JVM_CHAR,
+  TYPE_JVM_SHORT,
+  TYPE_JVM_INT,
+  TYPE_JVM_STRING,
+  TYPE_JVM_BOOL,
+  TYPE_JVM_FLOAT,
+  TYPE_JVM_LONG,
+  TYPE_JVM_DOUBLE,
+  TYPE_JVM_ARRAY_REFERENCE,
+  TYPE_JVM_CONSTRUCTOR,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
 
@@ -659,11 +659,12 @@ struct ty_type_t {
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
   ty_type_kind_t kind;
-  pg_pad(1);
+  u8 flag;
   u16 constant_pool_item_i;
   u32 class_file_i;
   u16 field_i;
-  pg_pad(6);
+  pg_pad(2);
+  u32 extra_data_i;
 };
 
 typedef struct ty_type_t ty_type_t;
@@ -778,19 +779,19 @@ static cf_verification_info_t
 cg_type_to_verification_info(const ty_type_t *type) {
 
   switch (type->kind) {
-  case TYPE_BOOL:
-  case TYPE_CHAR:
-  case TYPE_SHORT:
-  case TYPE_INT:
+  case TYPE_JVM_BOOL:
+  case TYPE_JVM_CHAR:
+  case TYPE_JVM_SHORT:
+  case TYPE_JVM_INT:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_INT};
-  case TYPE_LONG:
+  case TYPE_JVM_LONG:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG};
-  case TYPE_FLOAT:
+  case TYPE_JVM_FLOAT:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_FLOAT};
-  case TYPE_DOUBLE:
+  case TYPE_JVM_DOUBLE:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
-  case TYPE_INSTANCE_REFERENCE:
-  case TYPE_STRING:
+  case TYPE_KOTLIN_INSTANCE_REFERENCE:
+  case TYPE_JVM_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = type->constant_pool_item_i,
@@ -846,7 +847,6 @@ static u16 cg_frame_locals_push(cg_frame_t *frame,
   pg_assert(frame != NULL);
   pg_assert(variable != NULL);
   pg_assert(arena != NULL);
-  pg_assert(variable->node_i > 0);
   pg_assert(variable->type_i > 0);
 
   const u64 word_count =
@@ -1038,41 +1038,41 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
-  case TYPE_ANY:
+  case TYPE_KOTLIN_ANY:
     return;
-  case TYPE_UNIT: {
+  case TYPE_KOTLIN_UNIT: {
     string_append_char(descriptor, 'V', arena);
     break;
   }
-  case TYPE_BYTE: {
+  case TYPE_JVM_BYTE: {
     string_append_char(descriptor, 'B', arena);
     break;
   }
-  case TYPE_CHAR: {
+  case TYPE_JVM_CHAR: {
     string_append_char(descriptor, 'C', arena);
     break;
   }
-  case TYPE_DOUBLE: {
+  case TYPE_JVM_DOUBLE: {
     string_append_char(descriptor, 'D', arena);
     break;
   }
-  case TYPE_FLOAT: {
+  case TYPE_JVM_FLOAT: {
     string_append_char(descriptor, 'F', arena);
     break;
   }
-  case TYPE_INT: {
+  case TYPE_JVM_INT: {
     string_append_char(descriptor, 'I', arena);
     break;
   }
-  case TYPE_LONG: {
+  case TYPE_JVM_LONG: {
     string_append_char(descriptor, 'J', arena);
     break;
   }
-  case TYPE_STRING: {
+  case TYPE_JVM_STRING: {
     string_append_cstring(descriptor, "Ljava/lang/String;", arena);
     break;
   }
-  case TYPE_INSTANCE_REFERENCE: {
+  case TYPE_KOTLIN_INSTANCE_REFERENCE: {
     const string_t class_name = type->v.class_name;
 
     string_append_char(descriptor, 'L', arena);
@@ -1081,23 +1081,23 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
 
     break;
   }
-  case TYPE_SHORT: {
+  case TYPE_JVM_SHORT: {
     string_append_char(descriptor, 'S', arena);
     break;
   }
-  case TYPE_BOOL: {
+  case TYPE_JVM_BOOL: {
     string_append_char(descriptor, 'Z', arena);
     break;
   }
-  case TYPE_ARRAY_REFERENCE: {
+  case TYPE_JVM_ARRAY_REFERENCE: {
     string_append_char(descriptor, '[', arena);
 
     cf_fill_descriptor_string(types, type->v.array_type_i, descriptor, arena);
 
     break;
   }
-  case TYPE_CONSTRUCTOR:
-  case TYPE_METHOD: {
+  case TYPE_JVM_CONSTRUCTOR:
+  case TYPE_KOTLIN_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
 
@@ -1127,28 +1127,28 @@ static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
 
   switch (descriptor.value[0]) {
   case 'B':
-    type->kind = TYPE_BYTE;
+    type->kind = TYPE_JVM_BYTE;
     return;
   case 'C':
-    type->kind = TYPE_CHAR;
+    type->kind = TYPE_JVM_CHAR;
     return;
   case 'D':
-    type->kind = TYPE_DOUBLE;
+    type->kind = TYPE_JVM_DOUBLE;
     return;
   case 'F':
-    type->kind = TYPE_FLOAT;
+    type->kind = TYPE_JVM_FLOAT;
     return;
   case 'I':
-    type->kind = TYPE_INT;
+    type->kind = TYPE_JVM_INT;
     return;
   case 'J':
-    type->kind = TYPE_LONG;
+    type->kind = TYPE_JVM_LONG;
     return;
   case 'Z':
-    type->kind = TYPE_BOOL;
+    type->kind = TYPE_JVM_BOOL;
     return;
   case 'L':
-    type->kind = TYPE_INSTANCE_REFERENCE;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
     string_t class_name = {
         .value = descriptor.value + 1, // Skip starting `L`.
         .len = descriptor.len - 1,
@@ -1160,7 +1160,7 @@ static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
     type->v.class_name = class_name;
     return;
   case '[':
-    type->kind = TYPE_ARRAY_REFERENCE;
+    type->kind = TYPE_JVM_ARRAY_REFERENCE;
     ty_type_t item_type = {0};
 
     string_t descriptor_remaining = {
@@ -4316,31 +4316,31 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
-  case TYPE_ANY:
+  case TYPE_KOTLIN_ANY:
     return string_make_from_c("Any", arena);
-  case TYPE_INT:
+  case TYPE_JVM_INT:
     return string_make_from_c("Int", arena);
-  case TYPE_UNIT:
+  case TYPE_KOTLIN_UNIT:
     return string_make_from_c("Unit", arena);
-  case TYPE_BOOL:
+  case TYPE_JVM_BOOL:
     return string_make_from_c("Boolean", arena);
-  case TYPE_BYTE:
+  case TYPE_JVM_BYTE:
     return string_make_from_c("Byte", arena);
-  case TYPE_CHAR:
+  case TYPE_JVM_CHAR:
     return string_make_from_c("Char", arena);
-  case TYPE_SHORT:
+  case TYPE_JVM_SHORT:
     return string_make_from_c("Short", arena);
-  case TYPE_LONG:
+  case TYPE_JVM_LONG:
     return string_make_from_c("Long", arena);
-  case TYPE_DOUBLE:
+  case TYPE_JVM_DOUBLE:
     return string_make_from_c("Double", arena);
-  case TYPE_STRING:
+  case TYPE_JVM_STRING:
     return string_make_from_c("String", arena);
-  case TYPE_ARRAY_REFERENCE:
+  case TYPE_JVM_ARRAY_REFERENCE:
     return string_make_from_c("Array<todo>", arena);
-  case TYPE_INSTANCE_REFERENCE:
+  case TYPE_KOTLIN_INSTANCE_REFERENCE:
     return type->v.class_name;
-  case TYPE_METHOD: {
+  case TYPE_KOTLIN_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
 
     string_t res = string_reserve(128, arena);
@@ -4357,9 +4357,9 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return res;
   }
 
-  case TYPE_CONSTRUCTOR:
+  case TYPE_JVM_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
-  case TYPE_FLOAT:
+  case TYPE_JVM_FLOAT:
     return string_make_from_c("Float", arena);
   }
 }
@@ -4577,17 +4577,21 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
   }
 }
 
-static const u8 NUMBER_FLAGS_OVERFLOW = 0x1;
-static const u8 NUMBER_FLAGS_LONG = 0x2;
+static const u8 NUMBER_FLAGS_OVERFLOW = 1 << 0;
+static const u8 NUMBER_FLAGS_BYTE = 1 << 1;
+static const u8 NUMBER_FLAGS_SHORT = 1 << 2;
+static const u8 NUMBER_FLAGS_INT = 1 << 3;
+static const u8 NUMBER_FLAGS_FLOAT = 1 << 4;
+static const u8 NUMBER_FLAGS_DOUBLE = 1 << 5;
+static const u8 NUMBER_FLAGS_LONG = 1 << 6;
 
-static u64 par_number(const par_parser_t *parser, lex_token_t token,
-                      u8 *number_flags) {
+static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(number_flags != NULL);
+  pg_assert(flag != NULL);
 
   pg_assert(token.kind == TOKEN_KIND_NUMBER);
 
@@ -4609,19 +4613,28 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token,
     if (c == '_')
       continue;
     if (c == 'L') {
-      *number_flags |= NUMBER_FLAGS_LONG;
+      *flag |= NUMBER_FLAGS_LONG;
       continue;
     }
 
     const u64 delta = ten_unit * (c - '0');
     i64 number_i64 = (i64)number;
     if (__builtin_add_overflow((i64)number_i64, delta, &number_i64)) {
-      *number_flags |= NUMBER_FLAGS_OVERFLOW;
+      *flag |= NUMBER_FLAGS_OVERFLOW;
       return 0;
     }
     number += delta;
     ten_unit *= 10;
   }
+
+  // Apparently, without type hint, a number literal fitting within an Int, is
+  // an Int, e.g. `val one = 1`. Not, say, a Byte.
+  if (number <= INT32_MAX)
+    *flag |= NUMBER_FLAGS_INT;
+  else if (number <= INT64_MAX)
+    *flag |= NUMBER_FLAGS_LONG;
+
+  // TODO: Float, Double.
 
   return number;
 }
@@ -5696,8 +5709,8 @@ static bool ty_merge_types(const ty_type_t *types, u32 lhs_i, u32 rhs_i,
   const ty_type_t *const lhs = &types[lhs_i];
   const ty_type_t *const rhs = &types[rhs_i];
   if (lhs->kind == rhs->kind) {
-    if (lhs->kind == TYPE_INSTANCE_REFERENCE &&
-        rhs->kind == TYPE_INSTANCE_REFERENCE) {
+    if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+        rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       if (lhs->class_file_i == rhs->class_file_i) {
         *result_i = lhs_i;
         return true;
@@ -5711,13 +5724,13 @@ static bool ty_merge_types(const ty_type_t *types, u32 lhs_i, u32 rhs_i,
   }
 
   // Any is compatible with everything.
-  if (lhs->kind == TYPE_ANY) {
+  if (lhs->kind == TYPE_KOTLIN_ANY) {
     *result_i = rhs_i;
     return true;
   }
 
   // Any is compatible with everything.
-  if (rhs->kind == TYPE_ANY) {
+  if (rhs->kind == TYPE_KOTLIN_ANY) {
     *result_i = lhs_i;
     return true;
   }
@@ -5834,12 +5847,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_ANY},
-                    arena);
+    pg_array_append(resolver->parser->types,
+                    (ty_type_t){.kind = TYPE_KOTLIN_ANY}, arena);
 
     return node->type_i = pg_array_last_index(resolver->parser->types);
   case AST_KIND_BOOL:
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_BOOL},
+    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_JVM_BOOL},
                     arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
   case AST_KIND_BUILTIN_PRINTLN: {
@@ -5848,10 +5861,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs->type_i];
 
-    const ty_type_t void_type = {.kind = TYPE_UNIT};
+    const ty_type_t void_type = {.kind = TYPE_KOTLIN_UNIT};
     const u32 return_type_i =
         ty_add_type(&resolver->parser->types, &void_type, arena);
-    const ty_type_t println_type = {.kind = TYPE_METHOD,
+    const ty_type_t println_type = {.kind = TYPE_KOTLIN_METHOD,
                                     .v = {.method = {
                                               .argument_count = 1,
                                               .return_type_i = return_type_i,
@@ -5861,7 +5874,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     node->type_i = pg_array_last_index(resolver->parser->types);
 
     string_t method_descriptor = {0};
-    if (lhs_type->kind == TYPE_INSTANCE_REFERENCE) {
+    if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
     } else {
       method_descriptor = string_reserve(64, arena);
@@ -5894,20 +5907,18 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return return_type_i;
   }
   case AST_KIND_NUMBER: {
-    u8 number_flags = 0;
     ty_type_t type = {
-        .kind = TYPE_INSTANCE_REFERENCE,
+        .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
         .class_file_i = resolver->kotlin_int_class_i,
         .v = {.class_name = string_make_from_c("kotlin.Int", arena)},
     };
-    // TODO: should we memoize this to avoid parsing it twice?
-    const u64 number = par_number(resolver->parser, token, &number_flags);
-    if (number_flags & NUMBER_FLAGS_OVERFLOW) {
+    const u64 number = par_number(resolver->parser, token, &type.flag);
+    if (type.flag & NUMBER_FLAGS_OVERFLOW) {
       par_error(resolver->parser, token,
                 "Long literal is too big (> 9223372036854775807)");
       return 0;
 
-    } else if (number_flags & NUMBER_FLAGS_LONG) {
+    } else if (type.flag & NUMBER_FLAGS_LONG) {
       type.class_file_i = resolver->kotlin_long_class_i;
       type.v.class_name = string_make_from_c("kotlin.Long", arena);
     } else {
@@ -5917,6 +5928,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         return 0;
       }
     }
+    type.extra_data_i = (u32)arena->current_offset;
+    u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
+    *extra_data_number = number;
 
     pg_array_append(resolver->parser->types, type, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
@@ -5926,7 +5940,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_NOT:
       node->type_i = ty_resolve_node(resolver, node->lhs, arena);
       const ty_type_t *const type = &resolver->parser->types[node->type_i];
-      if (type->kind != TYPE_BOOL) {
+      if (type->kind != TYPE_JVM_BOOL) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(&error,
@@ -5974,14 +5988,14 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_GE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
-      pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_BOOL},
-                      arena);
+      pg_array_append(resolver->parser->types,
+                      (ty_type_t){.kind = TYPE_JVM_BOOL}, arena);
       return node->type_i = pg_array_last_index(resolver->parser->types);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_kind_t type_kind = resolver->parser->types[lhs_i].kind;
-      if (type_kind != TYPE_BOOL) {
+      if (type_kind != TYPE_JVM_BOOL) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6005,8 +6019,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       resolver->current_type_i = 0;
     }
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
-                    arena);
+    pg_array_append(resolver->parser->types,
+                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
 
     return node->type_i = pg_array_last_index(resolver->parser->types);
   }
@@ -6017,8 +6031,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->rhs, arena);
     par_end_scope(resolver->parser);
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
-                    arena);
+    pg_array_append(resolver->parser->types,
+                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
     return node->type_i = pg_array_last_index(resolver->parser->types);
 
   case AST_KIND_VAR_DEFINITION: {
@@ -6056,7 +6070,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
 
-    if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
+    if (resolver->parser->types[type_condition_i].kind != TYPE_JVM_BOOL) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6080,7 +6094,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
 
-    if (resolver->parser->types[type_condition_i].kind != TYPE_BOOL) {
+    if (resolver->parser->types[type_condition_i].kind != TYPE_JVM_BOOL) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6093,14 +6107,14 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     ty_resolve_node(resolver, node->rhs, arena);
 
-    pg_array_append(resolver->parser->types, (ty_type_t){.kind = TYPE_UNIT},
-                    arena);
+    pg_array_append(resolver->parser->types,
+                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
     const u32 void_type_i = pg_array_last_index(resolver->parser->types);
     return node->type_i = void_type_i;
   }
   case AST_KIND_STRING: {
     const ty_type_t type = {
-        .kind = TYPE_INSTANCE_REFERENCE,
+        .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
         .class_file_i = resolver->kotlin_string_class_i,
         .v = {.class_name = string_make_from_c("kotlin.String", arena)},
     };
@@ -6165,7 +6179,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
 
-    if (lhs_type->kind != TYPE_INSTANCE_REFERENCE) {
+    if (lhs_type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error,
@@ -6192,7 +6206,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const string_t type_literal_string =
         par_token_to_string(resolver->parser, node->main_token_i);
 
-    ty_type_t type = {.kind = TYPE_INSTANCE_REFERENCE};
+    ty_type_t type = {.kind = TYPE_KOTLIN_INSTANCE_REFERENCE};
     if (string_eq_c(type_literal_string, "Int") ||
         string_eq_c(type_literal_string, "kotlin.Int")) {
       type.class_file_i = resolver->kotlin_int_class_i;
@@ -6260,52 +6274,119 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 }
 
-// --------------------------------- IR
+// --------------------------------- Lowering
 
-#if 0
-typedef enum {
-  IR_TYPE_UNIT, // i.e.: void.
-  IR_TYPE_BYTE,
-  IR_TYPE_CHAR,
-  IR_TYPE_DOUBLE,
-  IR_TYPE_FLOAT,
-  IR_TYPE_INT,
-  IR_TYPE_LONG,
-  IR_TYPE_INSTANCE_REFERENCE,
-  IR_TYPE_SHORT,
-  IR_TYPE_BOOL,
-  IR_TYPE_STRING,
-  IR_TYPE_ARRAY_REFERENCE,
-  IR_TYPE_METHOD,
-  IR_TYPE_CLASS_REFERENCE,
-} ir_type_kind_t;
+void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(arena != NULL);
 
-struct ir_type_t;
+  if (node_i == 0)
+    return;
 
-typedef struct {
-  string_t descriptor;
-  u32 return_type_i;
-  u32 argument_types_i;
-  u8 argument_count; // TODO: use pg_array_* macros.
-  pg_pad(7);
-} ir_type_method_t;
-struct ty_type_t {
-  union {
-    string_t class_name;     // TYPE_INSTANCE_REFERENCE
-    ir_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;        // TYPE_ARRAY_REFERENCE
-  } v;
-  ir_type_kind_t kind;
-  pg_pad(1);
-  u16 constant_pool_item_i;
-  u32 class_file_i;
-  u16 field_i;
-  pg_pad(6);
-};
+  par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  ty_type_t *const type = &resolver->parser->types[node->type_i];
+  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
 
-typedef struct ir_type_t ir_type_t;
+  switch (node->kind) {
+  case AST_KIND_NUMBER:
+    pg_assert(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE);
+    if (type->flag & NUMBER_FLAGS_LONG) {
+      type->kind = TYPE_JVM_LONG;
+    } else if (type->flag & NUMBER_FLAGS_INT) {
+      type->kind = TYPE_JVM_INT;
+    } else if (type->flag & NUMBER_FLAGS_SHORT) {
+      type->kind = TYPE_JVM_SHORT;
+    } else if (type->flag & NUMBER_FLAGS_BYTE) {
+      type->kind = TYPE_JVM_BYTE;
+    }
+    break;
 
-#endif
+  case AST_KIND_STRING:
+    type->kind = TYPE_JVM_STRING;
+    break;
+
+  case AST_KIND_BOOL:
+    type->kind = TYPE_JVM_BOOL;
+    break;
+
+  case AST_KIND_LIST:
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      lo_lower_ast_node(resolver, node->nodes[i], arena);
+    }
+    break;
+
+  case AST_KIND_BINARY:
+    switch (token.kind) {
+    case TOKEN_KIND_LT:
+    case TOKEN_KIND_LE:
+    case TOKEN_KIND_GT:
+    case TOKEN_KIND_GE:
+    case TOKEN_KIND_NOT_EQUAL:
+    case TOKEN_KIND_EQUAL_EQUAL:
+    case TOKEN_KIND_AMPERSAND_AMPERSAND:
+    case TOKEN_KIND_PIPE_PIPE:
+      lo_lower_ast_node(resolver, node->lhs, arena);
+      lo_lower_ast_node(resolver, node->rhs, arena);
+      type->kind = TYPE_JVM_BOOL;
+      break;
+    default:
+      lo_lower_ast_node(resolver, node->lhs, arena);
+      lo_lower_ast_node(resolver, node->rhs, arena);
+      break;
+    }
+    break;
+
+  case AST_KIND_UNARY: {
+    switch (token.kind) {
+    case TOKEN_KIND_NOT:
+      lo_lower_ast_node(resolver, node->lhs, arena);
+      type->kind = TYPE_JVM_BOOL;
+      break;
+
+    case TOKEN_KIND_MINUS:{
+      lo_lower_ast_node(resolver, node->lhs, arena);
+    par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
+    ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
+      type->kind=lhs_type->kind;
+      break;
+                          }
+
+    default:
+      pg_assert(0 && "unimplemented");
+    }
+    break;
+  }
+
+  case AST_KIND_BUILTIN_PRINTLN: {
+    lo_lower_ast_node(resolver, node->lhs, arena);
+    par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
+    ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
+
+    string_t method_descriptor = {0};
+    if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
+      method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
+    } else {
+      method_descriptor = string_reserve(64, arena);
+      cf_fill_descriptor_string(resolver->parser->types, node->type_i,
+                                &method_descriptor, arena);
+    }
+
+    resolver->parser->types[node->type_i].v.method.descriptor =
+        method_descriptor;
+
+    pg_assert(cf_class_files_find_method_exactly(
+        resolver->class_files,
+        string_make_from_c_no_alloc("java/io/PrintStream"),
+        string_make_from_c_no_alloc("println"), method_descriptor));
+    break;
+  }
+
+  default:
+    lo_lower_ast_node(resolver, node->lhs, arena);
+    lo_lower_ast_node(resolver, node->rhs, arena);
+    break;
+  }
+}
 
 // --------------------------------- Code generation
 
@@ -6932,8 +7013,8 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
         cf_verification_info_kind_word_count(variable->verification_info.kind);
     if (word_count == 1)
       return (u32)i;
-    // Long/Double takes up 2 slots: [Top, Long|Double], and we need to return
-    // the first slot.
+    // Long/Double takes up 2 slots: [Top, Long|Double], and we need to
+    // return the first slot.
     else if (word_count == 2)
       return (u32)i - 1;
     else
@@ -7243,8 +7324,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   const u16 jump_from_i = cg_emit_jump(gen, arena);
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
-  // Save a clone of the frame after the `then` branch executed so that we can
-  // generate a stack map frame later.
+  // Save a clone of the frame after the `then` branch executed so that we
+  // can generate a stack map frame later.
   const cg_frame_t *const frame_after_then = cg_frame_clone(gen->frame, arena);
 
   // Emit `else` branch.
@@ -7401,16 +7482,15 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   case AST_KIND_NUMBER: {
     pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
 
-    u8 number_flags = 0;
-    const u64 number = par_number(parser, token, &number_flags);
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
-    if (number_flags & NUMBER_FLAGS_LONG) {
+    if (type->flag & NUMBER_FLAGS_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
     }
     // TODO: Float, Double, etc.
 
+    const u64 number = *(u64 *)(arena->base + type->extra_data_i);
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -7439,7 +7519,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
 
-    pg_assert(type->kind == TYPE_METHOD);
+    pg_assert(type->kind == TYPE_KOTLIN_METHOD);
 
     const par_type_method_t *const method = &type->v.method;
 
@@ -7491,11 +7571,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     // FIXME: hardcoded type.
 
-    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_UNIT}, arena);
+    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
+                    arena);
     const u32 void_type_i = pg_array_last_index(parser->types);
 
     const ty_type_t main_type = {
-        .kind = TYPE_METHOD,
+        .kind = TYPE_KOTLIN_METHOD,
         .v =
             {
                 .method =
@@ -7636,7 +7717,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_AMPERSAND_AMPERSAND: {
       // Since the if_xxx opcodes always pop the condition off the stack,
       // there is no simple way to push 0 on the stack if `lhs` is falsey.
-      // We have to use this contrived way, short of advanced CFG analysis. :(
+      // We have to use this contrived way, short of advanced CFG analysis.
+      // :(
       //
       // clang-format off
       //
@@ -7705,7 +7787,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     case TOKEN_KIND_PIPE_PIPE: {
       // Since the if_xxx opcodes always pop the condition off the stack,
       // there is no simple way to push 0 on the stack if `lhs` is falsey.
-      // We have to use this contrived way, short of advanced CFG analysis. :(
+      // We have to use this contrived way, short of advanced CFG analysis.
+      // :(
       //
       // clang-format off
       //
@@ -7819,10 +7902,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       pg_assert(var_i != (u32)-1);
 
       switch (type->kind) {
-      case TYPE_INT:
+      case TYPE_JVM_INT:
         cg_emit_store_variable_int(gen, var_i, arena);
         break;
-      case TYPE_LONG:
+      case TYPE_JVM_LONG:
         pg_assert(0 && "todo");
         break;
       default:
@@ -7847,7 +7930,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       }
       cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
 
-      // If the 'statement' was in fact an expression, we need to pop it out.
+      // If the 'statement' was in fact an expression, we need to pop it
+      // out.
       if (gen->frame != NULL) {
         pg_assert(pg_array_len(gen->frame->stack) == 0);
         while (gen->frame->stack_count > 0)
@@ -8207,9 +8291,9 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     if (!string_eq(descriptor, string_make_from_c_no_alloc("()V")))
       continue;
 
-    // At this point, the function is `fun main(){}` and we need to add an JVM
-    // entrypoint i.e. `fun main(args: Array<String){ main() }`.
-    // Record its index but keep going, in case a later function is already a
+    // At this point, the function is `fun main(){}` and we need to add an
+    // JVM entrypoint i.e. `fun main(args: Array<String){ main() }`. Record
+    // its index but keep going, in case a later function is already a
     // suitable JVM entrypoint, to avoid duplication.
 
     pg_assert(method_i == -1);
@@ -8250,7 +8334,8 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_UNIT}, arena);
+    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
+                    arena);
     const u32 void_type_i = pg_array_last_index(parser->types);
 
     const par_type_method_t target_method_type = {
@@ -8271,14 +8356,14 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       const string_t string_class_name =
           string_make_from_c("java/lang/String", arena);
       const ty_type_t string_type = {
-          .kind = TYPE_INSTANCE_REFERENCE,
+          .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
           .v = {.class_name = string_class_name},
       };
       pg_array_append(parser->types, string_type, arena);
       const u32 string_type_i = pg_array_last_index(parser->types);
 
       const ty_type_t source_method_argument_types = {
-          .kind = TYPE_ARRAY_REFERENCE,
+          .kind = TYPE_JVM_ARRAY_REFERENCE,
           .v = {.array_type_i = string_type_i},
       };
       pg_array_append(parser->types, source_method_argument_types, arena);
@@ -8296,6 +8381,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
           &class_file->constant_pool, &source_method_arg0_class, arena);
 
       const cf_variable_t arg0 = {
+          .node_i = 0,
           .type_i = source_argument_types_i,
           .scope_depth = gen->frame->scope_depth,
           .verification_info =

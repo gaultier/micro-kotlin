@@ -90,7 +90,6 @@ int main(int argc, char *argv[]) {
 
     resolver_t resolver = {.parser = &parser, .class_files = class_files};
     ty_find_known_types(&resolver, &arena);
-
     ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.
@@ -102,6 +101,14 @@ int main(int argc, char *argv[]) {
 
     if (parser.state != PARSER_STATE_OK)
       return 1;
+
+    lo_lower_ast_node(&resolver, root_i, &arena);
+    // Debug.
+    {
+      LOG("------ After lowering%s", "");
+      arena_t tmp_arena = arena;
+      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
+    }
 
     // Emit bytecode.
     cf_class_file_t class_file = {
