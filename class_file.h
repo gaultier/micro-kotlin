@@ -7905,8 +7905,30 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cg_emit_node(gen, class_file, node->lhs, arena);
     cg_emit_node(gen, class_file, node->rhs, arena);
 
-    if ((node->flags & NODE_FUNCTION_HAD_RETURN) == 0)
-      cg_emit_return_nothing(gen, arena);
+    { // Add return if there is none e.g. the function body is empty or the
+      // return type is Unit.
+      // TODO: Should it be in the lowering phase instead?
+
+      if (node->rhs == 0) { // Empty body
+        cg_emit_return_nothing(gen, arena);
+      } else {
+        const par_ast_node_t *const rhs =
+            &gen->resolver->parser->nodes[node->rhs];
+        pg_assert(rhs->kind == AST_KIND_LIST);
+
+        if (pg_array_len(rhs->nodes) == 0) {
+          cg_emit_return_nothing(gen, arena);
+        } else {
+          const u32 last_node_i = rhs->nodes[pg_array_len(rhs->nodes) - 1];
+          const par_ast_node_t *const last_node =
+              &gen->resolver->parser->nodes[last_node_i];
+
+          if (last_node->kind != AST_KIND_RETURN) {
+            cg_emit_return_nothing(gen, arena);
+          }
+        }
+      }
+    }
 
     cg_end_scope(gen);
 
