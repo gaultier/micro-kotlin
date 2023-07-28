@@ -64,6 +64,11 @@
   * Unreachable code (might require SSA/CFG?)
   * Mutable variables read from but never written to
   * Endless recursion
+  * Redundant conditions e.g. Byte > 128
+  * Redundant if-then-else branches e.g. `if (false) 1 else if (true) 2 else 3`
+  * All paths return a value in a function
+  * Switch (`when`): All cases are covered
+  * Switch (`when`): No redundant cases
   * ...
 
 **Later:**
