@@ -40,9 +40,9 @@
 - [ ] Control flow: When
 - [ ] Control flow: Do-while
 - [x] Control flow: Return
-- [ ] Checks around return
-- [ ] Move types to the resolver
-- [ ] Move flags to the node, not the type (or both?)
+- [ ] **Checks around return**
+- [ ] **Move types to the resolver**
+- [ ] **Move flags to the node, not the type (or both?)**
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Packages
