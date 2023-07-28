@@ -4688,6 +4688,7 @@ static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
 
     parser->nodes[parser->current_function_i].flags |= NODE_FUNCTION_HAD_RETURN;
     const par_ast_node_t node = {.kind = AST_KIND_RETURN,
+                                 .main_token_i = parser->tokens_i - 1,
                                  .lhs = par_parse_expression(parser, arena)};
     return par_add_node(parser, &node, arena);
   }
@@ -5582,6 +5583,29 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
+static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
+
+  pg_assert(types != NULL);
+  pg_assert(lhs_i < pg_array_len(types));
+  pg_assert(rhs_i < pg_array_len(types));
+
+  const ty_type_t *const lhs = &types[lhs_i];
+  const ty_type_t *const rhs = &types[rhs_i];
+
+  if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
+    if (lhs->class_file_i == rhs->class_file_i)
+      return true;
+
+    if (string_eq(lhs->v.class_name, rhs->v.class_name))
+      return true;
+
+    return false;
+  }
+
+  pg_assert(0 && "todo");
+}
+
 // TODO: Something smarter.
 // TODO: Find a better name.
 static bool ty_merge_types(const ty_type_t *types, u32 lhs_i, u32 rhs_i,
@@ -5650,6 +5674,8 @@ typedef struct {
   u32 kotlin_string_class_i;
   u32 kotlin_unit_type_i;
   u32 scope_depth;
+  u32 current_function_i;
+  pg_pad(4);
 } resolver_t;
 
 static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
@@ -6094,9 +6120,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         node->extra_data_i > 0
             ? ty_resolve_node(resolver, node->extra_data_i, arena)
             : resolver->kotlin_unit_type_i;
-    // Inspect body (rhs).
-    ty_resolve_node(resolver, node->rhs, arena);
-    ty_end_scope(resolver);
+
+    resolver->current_function_i = node_i;
 
     ty_type_t type = {
         .kind = TYPE_KOTLIN_METHOD,
@@ -6121,8 +6146,16 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     // TODO: Check that if the return type is not Unit, there was a return.
     // Ideally we would have a CFG to check that every path returns a value.
+    node->type_i = ty_add_type(&resolver->types, &type, arena);
 
-    return node->type_i = ty_add_type(&resolver->types, &type, arena);
+    // Inspect body (rhs).
+    ty_resolve_node(resolver, node->rhs, arena);
+
+    ty_end_scope(resolver);
+
+    resolver->current_function_i = 0;
+
+    return node->type_i;
   }
 
   case AST_KIND_VAR_DEFINITION: {
@@ -6412,8 +6445,46 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     return node->type_i = ty_resolve_node(resolver, node->rhs, arena);
 
-  case AST_KIND_RETURN:
-    return node->type_i = ty_resolve_node(resolver, node->lhs, arena);
+  case AST_KIND_RETURN: {
+    pg_assert(resolver->current_function_i);
+    node->type_i = ty_resolve_node(resolver, node->lhs, arena);
+    const par_ast_node_t *const current_function =
+        &resolver->parser->nodes[resolver->current_function_i];
+    const ty_type_t *const function_type =
+        &resolver->types[current_function->type_i];
+
+    pg_assert(function_type->kind == TYPE_KOTLIN_METHOD);
+    const u32 return_type_i = function_type->v.method.return_type_i;
+
+    if (!ty_types_equal(resolver->types, node->type_i, return_type_i)) {
+      string_t error = string_reserve(256, arena);
+      string_append_cstring(&error, "incompatible return type in function `",
+                            arena);
+      string_append_string(
+          &error,
+          par_token_to_string(resolver->parser, current_function->main_token_i),
+          arena);
+      string_append_cstring(&error, "` of type ", arena);
+      string_append_string(&error,
+                           ty_type_to_human_string(resolver->types,
+                                                   current_function->type_i,
+                                                   arena),
+                           arena);
+      string_append_cstring(&error, ": got ", arena);
+
+      string_append_string(
+          &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
+          arena);
+      string_append_cstring(&error, ", expected ", arena);
+      string_append_string(
+          &error,
+          ty_type_to_human_string(resolver->types, return_type_i, arena),
+          arena);
+      par_error(resolver->parser, token, error.value);
+    }
+
+    return node->type_i;
+  }
 
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
