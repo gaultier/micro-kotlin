@@ -556,6 +556,8 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IF_ICMPGT = 0xa3,
   BYTECODE_IF_ICMPLE = 0xa4,
   BYTECODE_GOTO = 0xa7,
+  BYTECODE_IRETURN = 0xac,
+  BYTECODE_LRETURN = 0xad,
   BYTECODE_RETURN = 0xb1,
   BYTECODE_INVOKE_VIRTUAL = 0xb6,
   BYTECODE_INVOKE_SPECIAL = 0xb7,
@@ -3547,6 +3549,7 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_RIGHT_BRACE,
   TOKEN_KIND_BUILTIN_PRINTLN,
   TOKEN_KIND_KEYWORD_FUN,
+  TOKEN_KIND_KEYWORD_RETURN,
   TOKEN_KIND_KEYWORD_FALSE,
   TOKEN_KIND_KEYWORD_TRUE,
   TOKEN_KIND_KEYWORD_VAR,
@@ -3784,6 +3787,12 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   } else if (mem_eq_c(identifier, identifier_len, "while")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_KEYWORD_WHILE,
+        .source_offset = start_offset,
+    };
+    pg_array_append(lexer->tokens, token, arena);
+  } else if (mem_eq_c(identifier, identifier_len, "return")) {
+    const lex_token_t token = {
+        .kind = TOKEN_KIND_KEYWORD_RETURN,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
@@ -4156,6 +4165,8 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
   case TOKEN_KIND_KEYWORD_FALSE:
   case TOKEN_KIND_KEYWORD_WHILE:
     return 5;
+  case TOKEN_KIND_KEYWORD_RETURN:
+    return 6;
   case TOKEN_KIND_BUILTIN_PRINTLN:
     return 7;
 
@@ -4193,6 +4204,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_STRING,
   AST_KIND_FIELD_ACCESS,
   AST_KIND_UNRESOLVED_NAME,
+  AST_KIND_RETURN,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -4217,6 +4229,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_STRING] = "STRING",
     [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
     [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
+    [AST_KIND_RETURN] = "RETURN",
 };
 
 // TODO: compact fields.
@@ -4228,7 +4241,8 @@ typedef struct {
   // TODO: should it be separate?
   u32 *nodes; // AST_KIND_LIST
   par_ast_node_kind_t kind;
-  pg_pad(3);
+  pg_pad(1);
+  u16 flags;
   u32 extra_data_i;
 } par_ast_node_t;
 
@@ -4539,13 +4553,14 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
   }
 }
 
-static const u8 NUMBER_FLAGS_OVERFLOW = 1 << 0;
-static const u8 NUMBER_FLAGS_BYTE = 1 << 1;
-static const u8 NUMBER_FLAGS_SHORT = 1 << 2;
-static const u8 NUMBER_FLAGS_INT = 1 << 3;
-static const u8 NUMBER_FLAGS_FLOAT = 1 << 4;
-static const u8 NUMBER_FLAGS_DOUBLE = 1 << 5;
-static const u8 NUMBER_FLAGS_LONG = 1 << 6;
+static const u16 NODE_NUMBER_FLAGS_OVERFLOW = 1 << 0;
+static const u16 NODE_NUMBER_FLAGS_BYTE = 1 << 1;
+static const u16 NODE_NUMBER_FLAGS_SHORT = 1 << 2;
+static const u16 NODE_NUMBER_FLAGS_INT = 1 << 3;
+static const u16 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
+static const u16 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
+static const u16 NODE_NUMBER_FLAGS_LONG = 1 << 6;
+static const u16 NODE_FUNCTION_HAD_RETURN = 1 << 7;
 
 static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
   pg_assert(parser != NULL);
@@ -4575,14 +4590,14 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
     if (c == '_')
       continue;
     if (c == 'L') {
-      *flag |= NUMBER_FLAGS_LONG;
+      *flag |= NODE_NUMBER_FLAGS_LONG;
       continue;
     }
 
     const u64 delta = ten_unit * (c - '0');
     i64 number_i64 = (i64)number;
     if (__builtin_add_overflow((i64)number_i64, delta, &number_i64)) {
-      *flag |= NUMBER_FLAGS_OVERFLOW;
+      *flag |= NODE_NUMBER_FLAGS_OVERFLOW;
       return 0;
     }
     number += delta;
@@ -4592,9 +4607,9 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
   // Apparently, without type hint, a number literal fitting within an Int, is
   // an Int, e.g. `val one = 1`. Not, say, a Byte.
   if (number <= INT32_MAX)
-    *flag |= NUMBER_FLAGS_INT;
+    *flag |= NODE_NUMBER_FLAGS_INT;
   else if (number <= INT64_MAX)
-    *flag |= NUMBER_FLAGS_LONG;
+    *flag |= NODE_NUMBER_FLAGS_LONG;
 
   // TODO: Float, Double.
 
@@ -4735,6 +4750,28 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &if_node, arena);
 }
 
+// jumpExpression:
+//     ('throw' {NL} expression)
+//     | (('return' | RETURN_AT) [expression])
+//     | 'continue'
+//     | CONTINUE_AT
+//     | 'break'
+//     | BREAK_AT
+static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
+  pg_assert(parser != NULL);
+  pg_assert(arena != NULL);
+
+  // TODO: check we are in a function.
+  if (par_match_token(parser, TOKEN_KIND_KEYWORD_RETURN)) {
+    pg_assert(parser->current_function_i > 0);
+    parser->nodes[parser->current_function_i].flags |= NODE_FUNCTION_HAD_RETURN;
+    const par_ast_node_t node = {.kind = AST_KIND_RETURN,
+                                 .lhs = par_parse_expression(parser, arena)};
+    return par_add_node(parser, &node, arena);
+  }
+  return 0;
+}
+
 // primaryExpression:
 //     parenthesizedExpression
 //     | simpleIdentifier
@@ -4794,6 +4831,9 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_IF)) {
     return par_parse_if_expression(parser, arena);
+  } else if (par_peek_token(parser).kind ==
+             TOKEN_KIND_KEYWORD_RETURN) { // TODO: More.
+    return par_parse_jump_expression(parser, arena);
   }
 
   return 0;
@@ -5944,12 +5984,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         .v = {.class_name = string_make_from_c("kotlin.Int", arena)},
     };
     const u64 number = par_number(resolver->parser, token, &type.flag);
-    if (type.flag & NUMBER_FLAGS_OVERFLOW) {
+    if (type.flag & NODE_NUMBER_FLAGS_OVERFLOW) {
       par_error(resolver->parser, token,
                 "Long literal is too big (> 9223372036854775807)");
       return 0;
 
-    } else if (type.flag & NUMBER_FLAGS_LONG) {
+    } else if (type.flag & NODE_NUMBER_FLAGS_LONG) {
       type.class_file_i = resolver->kotlin_long_class_i;
       type.v.class_name = string_make_from_c("kotlin.Long", arena);
     } else {
@@ -6093,6 +6133,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         pg_array_append(type.v.method.argument_types_i, type_i, arena);
       }
     }
+
+    // TODO: Check that if the return type is not Unit, there was a return.
+    // Ideally we would have a CFG to check that every path returns a value.
 
     return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
   }
@@ -6389,6 +6432,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     return node->type_i = ty_resolve_node(resolver, node->rhs, arena);
 
+  case AST_KIND_RETURN:
+    return node->type_i = ty_resolve_node(resolver, node->lhs, arena);
+
   case AST_KIND_MAX:
     pg_assert(0 && "unreachable");
   }
@@ -6444,13 +6490,13 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   switch (node->kind) {
   case AST_KIND_NUMBER:
-    if (type->flag & NUMBER_FLAGS_LONG) {
+    if (type->flag & NODE_NUMBER_FLAGS_LONG) {
       type->kind = TYPE_JVM_LONG;
-    } else if (type->flag & NUMBER_FLAGS_INT) {
+    } else if (type->flag & NODE_NUMBER_FLAGS_INT) {
       type->kind = TYPE_JVM_INT;
-    } else if (type->flag & NUMBER_FLAGS_SHORT) {
+    } else if (type->flag & NODE_NUMBER_FLAGS_SHORT) {
       type->kind = TYPE_JVM_SHORT;
-    } else if (type->flag & NUMBER_FLAGS_BYTE) {
+    } else if (type->flag & NODE_NUMBER_FLAGS_BYTE) {
       type->kind = TYPE_JVM_BYTE;
     }
     break;
@@ -7124,13 +7170,36 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_return(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_return_nothing(cg_generator_t *gen, arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
   pg_assert(arena != NULL);
 
   cf_code_array_push_u8(&gen->code->code, BYTECODE_RETURN, arena);
+}
+
+static void cg_emit_return_value(cg_generator_t *gen, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(arena != NULL);
+
+  pg_assert(pg_array_len(gen->frame->stack) >= 1);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  const cf_verification_info_kind_t kind =
+      pg_array_last(gen->frame->stack)->kind;
+
+  switch (kind) {
+  case VERIFICATION_INFO_INT:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_IRETURN, arena);
+    break;
+  case VERIFICATION_INFO_LONG:
+    cf_code_array_push_u8(&gen->code->code, BYTECODE_LRETURN, arena);
+    break;
+  default:
+    pg_assert(0 && "todo");
+  }
 }
 
 static void cg_begin_scope(cg_generator_t *gen) {
@@ -7668,7 +7737,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
-    if (type->flag & NUMBER_FLAGS_LONG) {
+    if (type->flag & NODE_NUMBER_FLAGS_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
     }
@@ -7779,7 +7848,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_node(gen, parser, class_file, node->lhs, arena);
     cg_emit_node(gen, parser, class_file, node->rhs, arena);
 
-    cg_emit_return(gen, arena);
+    if ((node->flags & NODE_FUNCTION_HAD_RETURN) == 0)
+      cg_emit_return_nothing(gen, arena);
+
     cg_end_scope(gen);
 
     gen->code->max_stack = gen->frame->max_stack;
@@ -8074,7 +8145,9 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
-      if (gen->frame != NULL) {
+      const par_ast_node_t *const last_node = &parser->nodes[node->nodes[i]];
+      if (last_node->kind != AST_KIND_RETURN &&// Avoid: `return; pop;`
+          gen->frame != NULL) { 
         while (gen->frame->stack_count > 0)
           cg_emit_pop(gen, arena);
       }
@@ -8297,6 +8370,12 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     default:
       pg_assert(0 && "todo");
     }
+    break;
+
+  case AST_KIND_RETURN:
+    cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    type->kind == TYPE_JVM_VOID ? cg_emit_return_nothing(gen, arena)
+                                : cg_emit_return_value(gen, arena);
     break;
 
   case AST_KIND_MAX:
@@ -8558,7 +8637,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     }
 
     cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
-    cg_emit_return(gen, arena);
+    cg_emit_return_nothing(gen, arena);
 
     gen->code->max_stack = gen->frame->max_stack;
     gen->code->max_locals = gen->frame->max_locals;
