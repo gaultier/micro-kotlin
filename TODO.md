@@ -50,6 +50,7 @@
 - [x] Read .jmod files
 - [ ] Convert jvm types to kotlin types when reading .class, .jar, .jmod
 - [ ] **Merge functions to read .jmod, .jar if possible**
+- [ ] **Avoid duplicating method resolution in the resolver and the lowerer**
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
