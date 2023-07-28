@@ -2,9 +2,11 @@ fun main() {
   println("Hello, world!")
 }
 
-fun foo(a: Int, b: Int){
+fun print_arguments(a: Int, b: Int){
   println(a)
   println(b)
 }
 
-fun bar(){}
+fun empty_body(){}
+
+fun plus(a: Long, b: Long) : Long { }
