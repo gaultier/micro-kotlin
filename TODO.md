@@ -48,6 +48,8 @@
 - [ ] Packages
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
 - [x] Read .jmod files
+- [ ] Convert jvm types to kotlin types when reading .class, .jar, .jmod
+- [ ] **Merge functions to read .jmod, .jar if possible**
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
