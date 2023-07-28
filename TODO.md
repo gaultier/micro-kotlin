@@ -54,6 +54,9 @@
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
 - [ ] Hashes/Hashtables in judicious places in the compiler
+- [ ] Package name
+- [ ] Default imports
+- [ ] Imports
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
