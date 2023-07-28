@@ -42,6 +42,7 @@
 - [x] Control flow: Return
 - [x] Checks around return
 - [x] Move types to the resolver
+- [ ] **Track all local variables inside a function (during lowering?) and assign a slot to each one to make stack map frames consistent with back jumps**
 - [ ] **Move flags to the node, not the type (or both?)**
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
