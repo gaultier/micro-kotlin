@@ -10,3 +10,4 @@ fun print_arguments(a: Int, b: Int){
 fun empty_body(){}
 
 fun plus(a: Long, b: Long) : Long { return a+b }
+

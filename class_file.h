@@ -4680,7 +4680,12 @@ static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
 
   // TODO: check we are in a function.
   if (par_match_token(parser, TOKEN_KIND_KEYWORD_RETURN)) {
-    pg_assert(parser->current_function_i > 0);
+    if (parser->current_function_i == 0) {
+      par_error(parser, par_peek_token(parser),
+                "code outside of a function body");
+      return 0;
+    }
+
     parser->nodes[parser->current_function_i].flags |= NODE_FUNCTION_HAD_RETURN;
     const par_ast_node_t node = {.kind = AST_KIND_RETURN,
                                  .lhs = par_parse_expression(parser, arena)};
@@ -5547,6 +5552,11 @@ static u32 par_parse_kotlin_file(par_parser_t *parser, arena_t *arena) {
     pg_array_append(node.nodes, node_i, arena);
   }
 
+  if (parser->tokens_i != pg_array_len(parser->lexer->tokens)) {
+    par_error(parser, parser->lexer->tokens[parser->tokens_i],
+              "Unexpected trailing code");
+  }
+
   return par_add_node(parser, &node, arena);
 }
 
@@ -5649,7 +5659,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   pg_assert(resolver->parser->lexer != NULL);
   pg_assert(resolver->parser->lexer->tokens != NULL);
   pg_assert(resolver->parser->nodes != NULL);
-  pg_assert(resolver->parser->tokens_i <= pg_array_len(resolver->parser->lexer->tokens));
+  pg_assert(resolver->parser->tokens_i <=
+            pg_array_len(resolver->parser->lexer->tokens));
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
 #ifdef PG_WITH_LOG
