@@ -1,4 +1,7 @@
 #include "class_file.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 
 int main(int argc, char *argv[]) {
@@ -11,14 +14,30 @@ int main(int argc, char *argv[]) {
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 1 << 18, &arena);
   {
-    LOG("'arena before reading class files'=%lu", arena.current_offset);
-    cf_read_jmod_file("/usr/lib/jvm/java-17-openjdk-amd64/jmods/java.base.jmod",
-                      &class_files, &arena);
-    LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
-        arena.current_offset);
-    cf_read_jar_and_class_files_recursively(
-        "/usr/share/java/", strlen("/usr/share/java/"), &class_files, &arena);
-    cf_read_jar_and_class_files_recursively(".", 1, &class_files, &arena);
+    char *const java_home = getenv("JAVA_HOME");
+
+    if (java_home == NULL || strlen(java_home) == 0) {
+      fprintf(stderr,
+              "The environment variable JAVA_HOME is mandatory for now\n");
+      return EINVAL;
+    }
+
+    char *const kotlin_home = getenv("KOTLIN_HOME");
+    if (kotlin_home == NULL || strlen(kotlin_home) == 0) {
+      fprintf(stderr,
+              "The environment variable KOTLIN_HOME is mandatory for now\n");
+      return EINVAL;
+    }
+
+    cf_read_jmod_and_jar_and_class_files_recursively(
+        java_home, strlen(java_home), &class_files, &arena);
+    cf_read_jmod_and_jar_and_class_files_recursively(
+        kotlin_home, strlen(kotlin_home), &class_files, &arena);
+
+    // FIXME: It should be the basename of the source file.
+    cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
+                                                     &arena);
+
     LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
         arena.current_offset);
   }
@@ -101,7 +120,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    lo_lower_types(&resolver,&arena);
+    lo_lower_types(&resolver, &arena);
     // Debug.
     {
       LOG("------ After lowering%s", "");

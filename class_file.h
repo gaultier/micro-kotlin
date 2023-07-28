@@ -3312,7 +3312,7 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
 
 // TODO: one thread that walks the directory recursively and one/many worker
 // threads to parse class files?
-static void cf_read_jar_and_class_files_recursively(
+static void cf_read_jmod_and_jar_and_class_files_recursively(
     char *path, u64 path_len, cf_class_file_t **class_files, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path_len > 0);
@@ -3349,6 +3349,9 @@ static void cf_read_jar_and_class_files_recursively(
              string_ends_with_cstring(last_path_component, ".jar") &&
              string_eq_c(last_path_component, "kotlin-stdlib.jar")) {
     cf_read_jar_file(path, class_files, arena);
+  } else if (S_ISREG(st.st_mode) &&
+             string_ends_with_cstring(last_path_component, ".jmod")) {
+    cf_read_jmod_file(path, class_files, arena);
   }
 
   if (!S_ISDIR(st.st_mode))
@@ -3388,8 +3391,8 @@ static void cf_read_jar_and_class_files_recursively(
     memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
     pathbuf[pathbuf_len + d_name_len] = 0;
 
-    cf_read_jar_and_class_files_recursively(pathbuf, pathbuf_len + d_name_len,
-                                            class_files, arena);
+    cf_read_jmod_and_jar_and_class_files_recursively(
+        pathbuf, pathbuf_len + d_name_len, class_files, arena);
   }
   closedir(dirp);
 #undef PATH_MAX
@@ -6055,6 +6058,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     default:
       pg_assert(0 && "todo");
     }
+    break;
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
