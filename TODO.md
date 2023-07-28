@@ -108,6 +108,8 @@
 - [ ] Complicated OOP stuff (companion objects, singleton, extension methods, etc)
 - [ ] Inline
 - [ ] Async stuff (suspend, etc)
+- [ ] Java <-> Kotlin interop e.g. @JvmName, etc
+- [ ] Runtime reflection
 
 ## Naive approach for reading external class files to know what fields/methods are available
 
