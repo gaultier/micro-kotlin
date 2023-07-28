@@ -4257,7 +4257,6 @@ typedef struct {
   char *buf;
   lex_lexer_t *lexer;
   par_ast_node_t *nodes;
-  ty_type_t *types;
   u32 current_function_i;
   pg_pad(4);
   u32 buf_len;
@@ -4371,88 +4370,6 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_JVM_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
   }
-}
-
-static void par_ast_fprint_node(const par_parser_t *parser, u32 node_i,
-                                FILE *file, u16 indent, arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(node_i < pg_array_len(parser->nodes));
-
-#ifdef PG_WITH_LOG
-  const par_ast_node_t *const node = &parser->nodes[node_i];
-  if (node->kind == AST_KIND_NONE)
-    return;
-
-  const char *const kind_string = par_ast_node_kind_to_string[node->kind];
-  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
-  u32 line = 0;
-  u32 column = 0;
-  string_t token_string = {0};
-  par_find_token_position(parser, token, &line, &column, &token_string);
-
-  ut_fwrite_indent(file, indent);
-
-  const string_t human_type =
-      ty_type_to_human_string(parser->types, node->type_i, arena);
-
-  pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
-  switch (node->kind) {
-  case AST_KIND_BOOL:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-        kind_string, token_string.len, token_string.value, human_type.len,
-        human_type.value, parser->lexer->file_path.len,
-        parser->lexer->file_path.value, line, column, token.source_offset);
-    break;
-  case AST_KIND_LIST:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-        kind_string, token_string.len, token_string.value, human_type.len,
-        human_type.value, parser->lexer->file_path.len,
-        parser->lexer->file_path.value, line, column, token.source_offset);
-
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
-      par_ast_fprint_node(parser, node->nodes[i], file, indent + 2, arena);
-    break;
-#if 0
-  case AST_KIND_FIELD_ACCESS: {
-    if (node->rhs == 0) // End of the chain.
-    {
-      pg_assert(node->main_token_i + 1 < pg_array_len(parser->lexer->tokens));
-      const lex_token_t field = parser->lexer->tokens[node->main_token_i + 1];
-
-      LOG("[%ld] %s .%.*s  : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-          kind_string,
-          lex_find_token_length(parser->lexer, parser->buf, parser->buf_len,
-                                field),
-          &parser->buf[field.source_offset], human_type.len, human_type.value,
-          parser->lexer->file_path.len, parser->lexer->file_path.value, line,
-          column, token.source_offset);
-    } else {
-      LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-          kind_string, token_string.len, token_string.value, human_type.len,
-          human_type.value, parser->lexer->file_path.len,
-          parser->lexer->file_path.value, line, column, token.source_offset);
-    }
-  }
-    par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
-    par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
-
-    break;
-
-#endif
-  default:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)", node - parser->nodes,
-        kind_string, token_string.len, token_string.value, human_type.len,
-        human_type.value, parser->lexer->file_path.len,
-        parser->lexer->file_path.value, line, column, token.source_offset);
-    par_ast_fprint_node(parser, node->lhs, file, indent + 2, arena);
-    par_ast_fprint_node(parser, node->rhs, file, indent + 2, arena);
-    break;
-  }
-#endif
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -5650,8 +5567,6 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
   const u32 root_i = par_parse_kotlin_file(parser, arena);
 
-  pg_array_init_reserve(parser->types, pg_array_len(parser->nodes) + 32, arena);
-  pg_array_append(parser->types, (ty_type_t){0}, arena); // Default value.
   return root_i;
 }
 
@@ -5712,6 +5627,7 @@ typedef struct {
   par_parser_t *parser;
   cf_class_file_t *class_files;
   ty_variable_t *variables;
+  ty_type_t *types;
   u32 current_type_i;
   u32 kotlin_bool_class_i;
   u32 kotlin_char_class_i;
@@ -5726,6 +5642,70 @@ typedef struct {
   u32 scope_depth;
 } resolver_t;
 
+static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
+                                     FILE *file, u16 indent, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->parser != NULL);
+  pg_assert(resolver->parser->lexer != NULL);
+  pg_assert(resolver->parser->lexer->tokens != NULL);
+  pg_assert(resolver->parser->nodes != NULL);
+  pg_assert(resolver->parser->tokens_i <= pg_array_len(resolver->parser->lexer->tokens));
+  pg_assert(node_i < pg_array_len(resolver->parser->nodes));
+
+#ifdef PG_WITH_LOG
+  const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  if (node->kind == AST_KIND_NONE)
+    return;
+
+  const char *const kind_string = par_ast_node_kind_to_string[node->kind];
+  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
+  u32 line = 0;
+  u32 column = 0;
+  string_t token_string = {0};
+  par_find_token_position(resolver->parser, token, &line, &column,
+                          &token_string);
+
+  ut_fwrite_indent(file, indent);
+
+  const string_t human_type =
+      ty_type_to_human_string(resolver->types, node->type_i, arena);
+
+  pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
+  switch (node->kind) {
+  case AST_KIND_BOOL:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+        node - resolver->parser->nodes, kind_string, token_string.len,
+        token_string.value, human_type.len, human_type.value,
+        resolver->parser->lexer->file_path.len,
+        resolver->parser->lexer->file_path.value, line, column,
+        token.source_offset);
+    break;
+  case AST_KIND_LIST:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+        node - resolver->parser->nodes, kind_string, token_string.len,
+        token_string.value, human_type.len, human_type.value,
+        resolver->parser->lexer->file_path.len,
+        resolver->parser->lexer->file_path.value, line, column,
+        token.source_offset);
+
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+      resolver_ast_fprint_node(resolver, node->nodes[i], file, indent + 2,
+                               arena);
+    break;
+  default:
+    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+        node - resolver->parser->nodes, kind_string, token_string.len,
+        token_string.value, human_type.len, human_type.value,
+        resolver->parser->lexer->file_path.len,
+        resolver->parser->lexer->file_path.value, line, column,
+        token.source_offset);
+    resolver_ast_fprint_node(resolver, node->lhs, file, indent + 2, arena);
+    resolver_ast_fprint_node(resolver, node->rhs, file, indent + 2, arena);
+    break;
+  }
+#endif
+}
+
 static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver);
   pg_assert(resolver->class_files);
@@ -5733,7 +5713,7 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
 
   const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
   resolver->kotlin_unit_type_i =
-      ty_add_type(&resolver->parser->types, &unit_type, arena);
+      ty_add_type(&resolver->types, &unit_type, arena);
 
   const string_t kotlin_int_class_name =
       string_make_from_c_no_alloc("java/lang/Integer");
@@ -5915,23 +5895,23 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(resolver->parser->types,
-                    (ty_type_t){.kind = TYPE_KOTLIN_ANY}, arena);
+    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_ANY},
+                    arena);
 
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+    return node->type_i = pg_array_last_index(resolver->types);
   case AST_KIND_BOOL: {
     ty_type_t type = {
         .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
         .class_file_i = resolver->kotlin_bool_class_i,
         .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
     };
-    return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
+    return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
   case AST_KIND_BUILTIN_PRINTLN: {
     ty_resolve_node(resolver, node->lhs, arena);
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    const ty_type_t *const lhs_type = &resolver->parser->types[lhs->type_i];
+    const ty_type_t *const lhs_type = &resolver->types[lhs->type_i];
 
     ty_type_t println_type = {
         .kind = TYPE_KOTLIN_METHOD,
@@ -5941,21 +5921,20 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_init_reserve(println_type.v.method.argument_types_i, 1, arena);
     pg_array_append(println_type.v.method.argument_types_i, lhs->type_i, arena);
 
-    pg_array_append(resolver->parser->types, println_type, arena);
-    node->type_i = pg_array_last_index(resolver->parser->types);
+    pg_array_append(resolver->types, println_type, arena);
+    node->type_i = pg_array_last_index(resolver->types);
 
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
     } else {
       method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(resolver->parser->types,
-                                pg_array_last_index(resolver->parser->types),
+      cf_fill_descriptor_string(resolver->types,
+                                pg_array_last_index(resolver->types),
                                 &method_descriptor, arena);
     }
 
-    pg_array_last(resolver->parser->types)->v.method.descriptor =
-        method_descriptor;
+    pg_array_last(resolver->types)->v.method.descriptor = method_descriptor;
 
     if (!cf_class_files_find_method_exactly(
             resolver->class_files,
@@ -5964,13 +5943,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, node->type_i, arena),
+          &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
           arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, lhs->type_i, arena),
+          &error, ty_type_to_human_string(resolver->types, lhs->type_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -6003,22 +5980,22 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
     *extra_data_number = number;
 
-    pg_array_append(resolver->parser->types, type, arena);
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+    pg_array_append(resolver->types, type, arena);
+    return node->type_i = pg_array_last_index(resolver->types);
   }
   case AST_KIND_UNARY:
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       node->type_i = ty_resolve_node(resolver, node->lhs, arena);
-      const ty_type_t *const type = &resolver->parser->types[node->type_i];
+      const ty_type_t *const type = &resolver->types[node->type_i];
       if (!(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
             type->class_file_i == resolver->kotlin_bool_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
-        string_append_string(&error,
-                             ty_type_to_human_string(resolver->parser->types,
-                                                     node->type_i, arena),
-                             arena);
+        string_append_string(
+            &error,
+            ty_type_to_human_string(resolver->types, node->type_i, arena),
+            arena);
         string_append_cstring(&error, ", expected Boolean ", arena);
         par_error(resolver->parser, token, error.value);
         return 0;
@@ -6038,17 +6015,15 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_i = ty_resolve_node(resolver, node->lhs, arena);
     const u32 rhs_i = ty_resolve_node(resolver, node->rhs, arena);
 
-    if (!ty_merge_types(resolver->parser->types, lhs_i, rhs_i, &node->type_i)) {
+    if (!ty_merge_types(resolver->types, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, lhs_i, arena),
+          &error, ty_type_to_human_string(resolver->types, lhs_i, arena),
           arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, rhs_i, arena),
+          &error, ty_type_to_human_string(resolver->types, rhs_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -6065,19 +6040,18 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
           .class_file_i = resolver->kotlin_bool_class_i,
           .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
       };
-      return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
+      return node->type_i = ty_add_type(&resolver->types, &type, arena);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const ty_type_t *const lhs_type = &resolver->parser->types[lhs_i];
+      const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (!(lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
             lhs_type->class_file_i == resolver->kotlin_bool_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
         string_append_string(
-            &error,
-            ty_type_to_human_string(resolver->parser->types, lhs_i, arena),
+            &error, ty_type_to_human_string(resolver->types, lhs_i, arena),
             arena);
         par_error(resolver->parser, token, error.value);
       }
@@ -6095,10 +6069,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       resolver->current_type_i = 0;
     }
 
-    pg_array_append(resolver->parser->types,
-                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
+    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
+                    arena);
 
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+    return node->type_i = pg_array_last_index(resolver->types);
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     ty_begin_scope(resolver);
@@ -6137,7 +6111,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     // TODO: Check that if the return type is not Unit, there was a return.
     // Ideally we would have a CFG to check that every path returns a value.
 
-    return node->type_i = ty_add_type(&resolver->parser->types, &type, arena);
+    return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
 
   case AST_KIND_VAR_DEFINITION: {
@@ -6153,12 +6127,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
 
-    if (!ty_merge_types(resolver->parser->types, lhs_type_i, rhs_type_i,
+    if (!ty_merge_types(resolver->types, lhs_type_i, rhs_type_i,
                         &node->type_i)) {
       const string_t lhs_type_human =
-          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
+          ty_type_to_human_string(resolver->types, lhs_type_i, arena);
       const string_t rhs_type_human =
-          ty_type_to_human_string(resolver->parser->types, rhs_type_i, arena);
+          ty_type_to_human_string(resolver->types, rhs_type_i, arena);
 
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
@@ -6183,8 +6157,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
-    const ty_type_t *const type_condition =
-        &resolver->parser->types[type_condition_i];
+    const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
           type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
@@ -6192,8 +6165,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
 
-      const string_t type_inferred_string = ty_type_to_human_string(
-          resolver->parser->types, type_condition_i, arena);
+      const string_t type_inferred_string =
+          ty_type_to_human_string(resolver->types, type_condition_i, arena);
       string_append_string(&error, type_inferred_string, arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -6207,8 +6180,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i = ty_resolve_node(resolver, node->lhs, arena);
-    const ty_type_t *const type_condition =
-        &resolver->parser->types[type_condition_i];
+    const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
           type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
@@ -6216,8 +6188,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
 
-      const string_t type_inferred_string = ty_type_to_human_string(
-          resolver->parser->types, type_condition_i, arena);
+      const string_t type_inferred_string =
+          ty_type_to_human_string(resolver->types, type_condition_i, arena);
       string_append_string(&error, type_inferred_string, arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -6226,9 +6198,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->rhs, arena);
     ty_end_scope(resolver);
 
-    pg_array_append(resolver->parser->types,
-                    (ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
-    const u32 void_type_i = pg_array_last_index(resolver->parser->types);
+    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
+                    arena);
+    const u32 void_type_i = pg_array_last_index(resolver->types);
     return node->type_i = void_type_i;
   }
   case AST_KIND_STRING: {
@@ -6237,8 +6209,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         .class_file_i = resolver->kotlin_string_class_i,
         .v = {.class_name = string_make_from_c("kotlin.String", arena)},
     };
-    pg_array_append(resolver->parser->types, type, arena);
-    const u32 type_i = pg_array_last_index(resolver->parser->types);
+    pg_array_append(resolver->types, type, arena);
+    const u32 type_i = pg_array_last_index(resolver->types);
     return node->type_i = type_i;
   }
 
@@ -6253,7 +6225,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       // FIXME: also search within the current class.
 
       const ty_type_t *const current_type =
-          &resolver->parser->types[resolver->current_type_i];
+          &resolver->types[resolver->current_type_i];
 
       const string_t class_name = cf_constant_array_get_as_string(
           &resolver->class_files[current_type->class_file_i].constant_pool,
@@ -6289,14 +6261,13 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       const u16 descriptor_i = class_file->fields[type.field_i].descriptor;
       const string_t descriptor = cf_constant_array_get_as_string(
           &class_file->constant_pool, descriptor_i);
-      cf_parse_field_descriptor(descriptor, &type, &resolver->parser->types,
-                                arena);
-      pg_array_append(resolver->parser->types, type, arena);
-      return node->type_i = pg_array_last_index(resolver->parser->types);
+      cf_parse_field_descriptor(descriptor, &type, &resolver->types, arena);
+      pg_array_append(resolver->types, type, arena);
+      return node->type_i = pg_array_last_index(resolver->types);
     }
 
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
-    const ty_type_t *const lhs_type = &resolver->parser->types[lhs_type_i];
+    const ty_type_t *const lhs_type = &resolver->types[lhs_type_i];
 
     if (lhs_type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE) {
       string_t error = string_reserve(256, arena);
@@ -6306,7 +6277,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
           arena);
 
       const string_t type_inferred_string =
-          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena);
+          ty_type_to_human_string(resolver->types, lhs_type_i, arena);
       string_append_string(&error, type_inferred_string, arena);
 
       par_error(resolver->parser, token, error.value);
@@ -6370,8 +6341,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
     }
 
-    pg_array_append(resolver->parser->types, type, arena);
-    return node->type_i = pg_array_last_index(resolver->parser->types);
+    pg_array_append(resolver->types, type, arena);
+    return node->type_i = pg_array_last_index(resolver->types);
     break;
   }
 
@@ -6402,18 +6373,16 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
     ty_end_scope(resolver);
 
-    if (!ty_merge_types(resolver->parser->types, lhs_type_i, rhs_type_i,
+    if (!ty_merge_types(resolver->types, lhs_type_i, rhs_type_i,
                         &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, lhs_type_i, arena),
+          &error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
           arena);
       string_append_cstring(&error, " vs ", arena);
       string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->parser->types, rhs_type_i, arena),
+          &error, ty_type_to_human_string(resolver->types, rhs_type_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -6485,7 +6454,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     return;
 
   par_ast_node_t *const node = &resolver->parser->nodes[node_i];
-  ty_type_t *const type = &resolver->parser->types[node->type_i];
+  ty_type_t *const type = &resolver->types[node->type_i];
   const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
 
   switch (node->kind) {
@@ -6550,7 +6519,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_MINUS: {
       lo_lower_ast_node(resolver, node->lhs, arena);
       par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
-      ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
+      ty_type_t *const lhs_type = &resolver->types[lhs_node->type_i];
       type->kind = lhs_type->kind;
       break;
     }
@@ -6564,24 +6533,23 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_BUILTIN_PRINTLN: {
     lo_lower_ast_node(resolver, node->lhs, arena);
     lo_unbox_type_maybe(resolver,
-                        &resolver->parser->types[type->v.method.return_type_i]);
+                        &resolver->types[type->v.method.return_type_i]);
 
     par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
-    ty_type_t *const lhs_type = &resolver->parser->types[lhs_node->type_i];
+    ty_type_t *const lhs_type = &resolver->types[lhs_node->type_i];
 
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
-      par_ast_fprint_node(resolver->parser, 17, stderr, 0, arena);
+      resolver_ast_fprint_node(resolver, 17, stderr, 0, arena);
       pg_assert(0 && "should not happen until OOP is implemented");
     } else {
       method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(resolver->parser->types, node->type_i,
+      cf_fill_descriptor_string(resolver->types, node->type_i,
                                 &method_descriptor, arena);
     }
 
-    resolver->parser->types[node->type_i].v.method.descriptor =
-        method_descriptor;
+    resolver->types[node->type_i].v.method.descriptor = method_descriptor;
 
     pg_assert(cf_class_files_find_method_exactly(
         resolver->class_files,
@@ -6595,7 +6563,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     lo_lower_ast_node(resolver, node->rhs, arena);
 
     par_ast_node_t *const rhs_node = &resolver->parser->nodes[node->rhs];
-    ty_type_t *const rhs_type = &resolver->parser->types[rhs_node->type_i];
+    ty_type_t *const rhs_type = &resolver->types[rhs_node->type_i];
 
     type->kind = rhs_type->kind;
     break;
@@ -6621,6 +6589,7 @@ void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 // --------------------------------- Code generation
 
 typedef struct {
+  resolver_t *resolver;
   cf_attribute_code_t *code;
   cg_frame_t *frame;
   const cf_class_file_t *class_files;
@@ -7277,9 +7246,8 @@ static u32 cf_find_variable(const cg_frame_t *frame, u32 node_i) {
   return (u32)-1;
 }
 
-static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                         cf_class_file_t *class_file, u32 node_i,
-                         arena_t *arena);
+static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
+                         u32 node_i, arena_t *arena);
 
 static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
@@ -7516,7 +7484,7 @@ static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
+static void cg_emit_if_then_else(cg_generator_t *gen,
                                  cf_class_file_t *class_file, u32 node_i,
                                  arena_t *arena) {
   // clang-format off
@@ -7541,30 +7509,30 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // clang-format on
 
   pg_assert(gen != NULL);
-  pg_assert(parser != NULL);
+  pg_assert(gen->resolver->parser != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
-  pg_assert(node_i < pg_array_len(parser->nodes));
+  pg_assert(node_i < pg_array_len(gen->resolver->parser->nodes));
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->locals != NULL);
   pg_assert(gen->frame->stack != NULL);
   pg_assert(gen->stack_map_frames != NULL);
 
-  const par_ast_node_t *const node = &parser->nodes[node_i];
+  const par_ast_node_t *const node = &gen->resolver->parser->nodes[node_i];
   pg_assert(node->type_i > 0);
   pg_assert(node->lhs > 0);
-  pg_assert(node->lhs < pg_array_len(parser->nodes));
+  pg_assert(node->lhs < pg_array_len(gen->resolver->parser->nodes));
   pg_assert(node->rhs > 0);
-  pg_assert(node->rhs < pg_array_len(parser->nodes));
+  pg_assert(node->rhs < pg_array_len(gen->resolver->parser->nodes));
 
   // Emit condition.
-  cg_emit_node(gen, parser, class_file, node->lhs, arena);
+  cg_emit_node(gen, class_file, node->lhs, arena);
 
   const u16 jump_conditionally_from_i =
       cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
-  const par_ast_node_t *const rhs = &parser->nodes[node->rhs];
+  const par_ast_node_t *const rhs = &gen->resolver->parser->nodes[node->rhs];
   pg_assert(rhs->kind == AST_KIND_THEN_ELSE);
 
   // Emit `then` branch.
@@ -7573,7 +7541,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   const cg_frame_t *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
-  cg_emit_node(gen, parser, class_file, rhs->lhs, arena);
+  cg_emit_node(gen, class_file, rhs->lhs, arena);
   const u16 jump_from_i = cg_emit_jump(gen, arena);
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
@@ -7585,7 +7553,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen, par_parser_t *parser,
   // Restore the frame as if the `then` branch never executed.
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
 
-  cg_emit_node(gen, parser, class_file, rhs->rhs, arena);
+  cg_emit_node(gen, class_file, rhs->rhs, arena);
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   gen->frame->max_stack =
@@ -7696,28 +7664,30 @@ static u16 cg_add_class_name_in_constant_pool(cf_class_file_t *class_file,
   return class_i;
 }
 
-static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
-                         cf_class_file_t *class_file, u32 node_i,
-                         arena_t *arena) {
+static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
+                         u32 node_i, arena_t *arena) {
   pg_assert(gen != NULL);
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(pg_array_len(parser->nodes) > 0);
+  pg_assert(gen->resolver->parser != NULL);
+  pg_assert(gen->resolver->parser->lexer != NULL);
+  pg_assert(gen->resolver->parser->lexer->tokens != NULL);
+  pg_assert(gen->resolver->parser->nodes != NULL);
+  pg_assert(gen->resolver->parser->tokens_i <=
+            pg_array_len(gen->resolver->parser->lexer->tokens));
+  pg_assert(pg_array_len(gen->resolver->parser->nodes) > 0);
   pg_assert(class_file != NULL);
-  pg_assert(node_i < pg_array_len(parser->nodes));
+  pg_assert(node_i < pg_array_len(gen->resolver->parser->nodes));
 
-  const par_ast_node_t *const node = &parser->nodes[node_i];
-  const lex_token_t token = parser->lexer->tokens[node->main_token_i];
-  const ty_type_t *const type = &parser->types[node->type_i];
+  const par_ast_node_t *const node = &gen->resolver->parser->nodes[node_i];
+  const lex_token_t token =
+      gen->resolver->parser->lexer->tokens[node->main_token_i];
+  const ty_type_t *const type = &gen->resolver->types[node->type_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
     return;
   case AST_KIND_BOOL: {
-    pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
+    pg_assert(node->main_token_i <
+              pg_array_len(gen->resolver->parser->lexer->tokens));
     const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = node->lhs}};
     const u16 number_i =
@@ -7733,7 +7703,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_NUMBER: {
-    pg_assert(node->main_token_i < pg_array_len(parser->lexer->tokens));
+    pg_assert(node->main_token_i <
+              pg_array_len(gen->resolver->parser->lexer->tokens));
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
@@ -7770,7 +7741,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
                        arena);
 
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, class_file, node->lhs, arena);
 
     pg_assert(type->kind == TYPE_KOTLIN_METHOD);
 
@@ -7810,20 +7781,24 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     const u32 token_name_i = node->main_token_i;
-    pg_assert(token_name_i < pg_array_len(parser->lexer->tokens));
-    const lex_token_t token_name = parser->lexer->tokens[token_name_i];
+    pg_assert(token_name_i <
+              pg_array_len(gen->resolver->parser->lexer->tokens));
+    const lex_token_t token_name =
+        gen->resolver->parser->lexer->tokens[token_name_i];
     pg_assert(token_name.kind == TOKEN_KIND_IDENTIFIER);
 
     string_t method_name = {
-        .len = lex_identifier_length(parser->buf, parser->buf_len,
+        .len = lex_identifier_length(gen->resolver->parser->buf,
+                                     gen->resolver->parser->buf_len,
                                      token_name.source_offset),
-        .value = &parser->buf[token_name.source_offset],
+        .value = &gen->resolver->parser->buf[token_name.source_offset],
     };
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name, arena);
 
     string_t descriptor = string_reserve(64, arena);
-    cf_fill_descriptor_string(parser->types, node->type_i, &descriptor, arena);
+    cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
+                              arena);
     const u16 descriptor_i =
         cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
 
@@ -7845,8 +7820,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     // `lhs` is the arguments, `rhs` is the body.
 
     cg_begin_scope(gen);
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    cg_emit_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, class_file, node->lhs, arena);
+    cg_emit_node(gen, class_file, node->rhs, arena);
 
     if ((node->flags & NODE_FUNCTION_HAD_RETURN) == 0)
       cg_emit_return_nothing(gen, arena);
@@ -7892,13 +7867,13 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
       cg_emit_bipush(gen, 1, arena);
       cg_emit_ixor(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
       cg_emit_neg(gen, arena);
       break;
 
@@ -7911,41 +7886,41 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame != NULL);
     pg_assert(gen->frame->locals != NULL);
 
-    pg_assert(node->lhs < pg_array_len(parser->nodes));
-    pg_assert(node->rhs < pg_array_len(parser->nodes));
+    pg_assert(node->lhs < pg_array_len(gen->resolver->parser->nodes));
+    pg_assert(node->rhs < pg_array_len(gen->resolver->parser->nodes));
 
     switch (token.kind) {
     case TOKEN_KIND_NONE:
       break; // Nothing to do.
 
     case TOKEN_KIND_PLUS:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_neg(gen, arena);
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
       cg_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_STAR:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_mul(gen, arena);
       break;
 
     case TOKEN_KIND_SLASH:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_div(gen, arena);
       break;
 
     case TOKEN_KIND_PERCENT:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_rem(gen, arena);
       break;
 
@@ -7983,7 +7958,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       //  +      ......> ...           
       //
       // clang-format on
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
 
       cf_code_array_push_u8(&gen->code->code, BYTECODE_IFEQ, arena);
       const u16 conditional_jump_location = pg_array_len(gen->code->code);
@@ -7992,7 +7967,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       const cg_frame_t *const frame_before_rhs =
           cg_frame_clone(gen->frame, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
 
       const cg_frame_t *const frame_after_rhs =
           cg_frame_clone(gen->frame, arena);
@@ -8054,7 +8029,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       //  +      ......> ...           
       //
       // clang-format on
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
 
       cf_code_array_push_u8(&gen->code->code, BYTECODE_IFNE, arena);
       const u16 conditional_jump_location = pg_array_len(gen->code->code);
@@ -8063,7 +8038,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
       const cg_frame_t *const frame_before_rhs =
           cg_frame_clone(gen->frame, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
 
       const cg_frame_t *const frame_after_rhs =
           cg_frame_clone(gen->frame, arena);
@@ -8091,38 +8066,38 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     }
 
     case TOKEN_KIND_EQUAL_EQUAL:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_eq(gen, arena);
       break;
 
     case TOKEN_KIND_LE:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_le(gen, arena);
       break;
 
     case TOKEN_KIND_LT:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_lt(gen, arena);
       break;
 
     case TOKEN_KIND_GT:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_gt(gen, arena);
       break;
 
     case TOKEN_KIND_GE:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_ge(gen, arena);
       break;
 
     case TOKEN_KIND_NOT_EQUAL:
-      cg_emit_node(gen, parser, class_file, node->lhs, arena);
-      cg_emit_node(gen, parser, class_file, node->rhs, arena);
+      cg_emit_node(gen, class_file, node->lhs, arena);
+      cg_emit_node(gen, class_file, node->rhs, arena);
       cg_emit_ne(gen, arena);
       break;
 
@@ -8141,13 +8116,14 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
       if (gen->frame != NULL) {
         pg_assert(pg_array_len(gen->frame->stack) == 0);
       }
-      cg_emit_node(gen, parser, class_file, node->nodes[i], arena);
+      cg_emit_node(gen, class_file, node->nodes[i], arena);
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
-      const par_ast_node_t *const last_node = &parser->nodes[node->nodes[i]];
-      if (last_node->kind != AST_KIND_RETURN &&// Avoid: `return; pop;`
-          gen->frame != NULL) { 
+      const par_ast_node_t *const last_node =
+          &gen->resolver->parser->nodes[node->nodes[i]];
+      if (last_node->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
+          gen->frame != NULL) {
         while (gen->frame->stack_count > 0)
           cg_emit_pop(gen, arena);
       }
@@ -8160,8 +8136,8 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(gen->frame->locals != NULL);
     pg_assert(node->type_i > 0);
 
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
-    cg_emit_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, class_file, node->lhs, arena);
+    cg_emit_node(gen, class_file, node->rhs, arena);
 
     const cf_verification_info_t verification_info =
         cg_type_to_verification_info(type);
@@ -8188,8 +8164,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     pg_assert(node->type_i > 0);
 
     pg_assert(node->lhs > 0);
-    pg_assert(parser->nodes[node->lhs].kind == AST_KIND_VAR_DEFINITION ||
-              parser->nodes[node->lhs].kind == AST_KIND_FUNCTION_PARAMETER);
+    pg_assert(gen->resolver->parser->nodes[node->lhs].kind ==
+                  AST_KIND_VAR_DEFINITION ||
+              gen->resolver->parser->nodes[node->lhs].kind ==
+                  AST_KIND_FUNCTION_PARAMETER);
     const u32 var_i = cf_find_variable(gen->frame, node->lhs);
     pg_assert(var_i != (u32)-1);
 
@@ -8207,7 +8185,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
   }
   case AST_KIND_IF: {
-    cg_emit_if_then_else(gen, parser, class_file, node_i, arena);
+    cg_emit_if_then_else(gen, class_file, node_i, arena);
     break;
   }
   case AST_KIND_WHILE_LOOP: {
@@ -8215,10 +8193,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     const cg_frame_t *const frame_before_loop =
         cg_frame_clone(gen->frame, arena);
 
-    cg_emit_node(gen, parser, class_file, node->lhs, arena); // Condition.
+    cg_emit_node(gen, class_file, node->lhs, arena); // Condition.
     const u16 conditional_jump =
         cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
-    cg_emit_node(gen, parser, class_file, node->rhs, arena); // Body.
+    cg_emit_node(gen, class_file, node->rhs, arena); // Body.
     const u16 unconditional_jump = cg_emit_jump(gen, arena);
 
     const i16 unconditional_jump_delta = -(unconditional_jump - 1 - pc_start);
@@ -8244,9 +8222,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
   }
   case AST_KIND_STRING: {
     const u32 length =
-        lex_string_length(parser->buf, parser->buf_len, token.source_offset);
+        lex_string_length(gen->resolver->parser->buf,
+                          gen->resolver->parser->buf_len, token.source_offset);
     const string_t s = {
-        .value = parser->buf + token.source_offset,
+        .value = gen->resolver->parser->buf + token.source_offset,
         .len = length,
     };
     const u16 string_i =
@@ -8303,7 +8282,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
         &class_file->constant_pool, &field_name_and_type, arena);
 
     pg_assert(lhs->kind == AST_KIND_CLASS_REFERENCE);
-    const ty_type_t *const lhs_type = &parser->types[lhs->type_i];
+    const ty_type_t *const lhs_type = &gen->resolver->types[lhs->type_i];
     pg_assert(lhs_type->class_file_i != (u32)-1);
     pg_assert(lhs_type->constant_pool_item_i != (u16)-1);
     pg_assert(lhs_type->constant_pool_item_i > 0);
@@ -8352,10 +8331,10 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
 
   case AST_KIND_ASSIGNMENT:
     pg_assert(node->lhs > 0);
-    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
+    const par_ast_node_t *const lhs = &gen->resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
 
-    cg_emit_node(gen, parser, class_file, node->rhs, arena);
+    cg_emit_node(gen, class_file, node->rhs, arena);
 
     const u32 var_i = cf_find_variable(gen->frame, lhs->lhs);
     pg_assert(var_i != (u32)-1);
@@ -8373,7 +8352,7 @@ static void cg_emit_node(cg_generator_t *gen, par_parser_t *parser,
     break;
 
   case AST_KIND_RETURN:
-    cg_emit_node(gen, parser, class_file, node->lhs, arena);
+    cg_emit_node(gen, class_file, node->lhs, arena);
     type->kind == TYPE_JVM_VOID ? cg_emit_return_nothing(gen, arena)
                                 : cg_emit_return_value(gen, arena);
     break;
@@ -8399,16 +8378,18 @@ static string_t cg_make_class_name_from_path(string_t path, arena_t *arena) {
   return class_name;
 }
 
-static void cg_emit_synthetic_class(cg_generator_t *gen, par_parser_t *parser,
+static void cg_emit_synthetic_class(cg_generator_t *gen,
                                     cf_class_file_t *class_file,
                                     arena_t *arena) {
   pg_assert(gen != NULL);
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(pg_array_len(parser->nodes) > 0);
+  pg_assert(gen->resolver != NULL);
+  pg_assert(gen->resolver->parser != NULL);
+  pg_assert(gen->resolver->parser->lexer != NULL);
+  pg_assert(gen->resolver->parser->lexer->tokens != NULL);
+  pg_assert(gen->resolver->parser->nodes != NULL);
+  pg_assert(gen->resolver->parser->tokens_i <=
+            pg_array_len(gen->resolver->parser->lexer->tokens));
+  pg_assert(pg_array_len(gen->resolver->parser->nodes) > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
@@ -8498,11 +8479,10 @@ static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
 }
 
 static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
-                                               par_parser_t *parser,
                                                cf_class_file_t *class_file,
                                                arena_t *arena) {
   pg_assert(gen != NULL);
-  pg_assert(parser != NULL);
+  pg_assert(gen->resolver->parser != NULL);
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
@@ -8578,9 +8558,9 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    pg_array_append(parser->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
+    pg_array_append(gen->resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
                     arena);
-    const u32 void_type_i = pg_array_last_index(parser->types);
+    const u32 void_type_i = pg_array_last_index(gen->resolver->types);
 
     const par_type_method_t target_method_type = {
         .return_type_i = void_type_i,
@@ -8602,16 +8582,18 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
           .v = {.class_name = string_class_name},
       };
-      pg_array_append(parser->types, string_type, arena);
-      const u32 string_type_i = pg_array_last_index(parser->types);
+      pg_array_append(gen->resolver->types, string_type, arena);
+      const u32 string_type_i = pg_array_last_index(gen->resolver->types);
 
       const ty_type_t source_method_argument_types = {
           .kind = TYPE_JVM_ARRAY_REFERENCE,
           .v = {.array_type_i = string_type_i},
       };
-      pg_array_append(parser->types, source_method_argument_types, arena);
+      pg_array_append(gen->resolver->types, source_method_argument_types,
+                      arena);
 
-      const u32 source_argument_types_i = pg_array_last_index(parser->types);
+      const u32 source_argument_types_i =
+          pg_array_last_index(gen->resolver->types);
       const u16 source_method_arg0_string = cf_add_constant_cstring(
           &class_file->constant_pool, "[Ljava/lang/String;", arena);
 
@@ -8665,27 +8647,24 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
   }
 }
 
-static void cg_emit(par_parser_t *parser, cf_class_file_t *class_file,
+static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
                     const cf_class_file_t *class_files, u32 root_i,
                     arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-  pg_assert(pg_array_len(parser->nodes) > 0);
+  pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
+  pg_assert(class_files != NULL);
+  pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  cg_generator_t gen = {.class_files = class_files};
+  cg_generator_t gen = {.class_files = class_files, .resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
 
-  cg_emit_synthetic_class(&gen, parser, class_file, arena);
+  cg_emit_synthetic_class(&gen, class_file, arena);
 
-  if (pg_array_len(parser->nodes) == 1)
+  if (pg_array_len(resolver->parser->nodes) == 1)
     return;
 
-  cg_emit_node(&gen, parser, class_file, root_i, arena);
+  cg_emit_node(&gen, class_file, root_i, arena);
 
-  cg_supplement_entrypoint_if_exists(&gen, parser, class_file, arena);
+  cg_supplement_entrypoint_if_exists(&gen, class_file, arena);
 }

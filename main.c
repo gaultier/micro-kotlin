@@ -80,16 +80,14 @@ int main(int argc, char *argv[]) {
     };
     const u32 root_i = par_parse(&parser, &arena);
 
-    // Debug AST.
-    {
-      arena_t tmp_arena = arena;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
-    }
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
     resolver_t resolver = {.parser = &parser, .class_files = class_files};
     pg_array_init_reserve(resolver.variables, 512, &arena);
+    pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
+                          &arena);
+    pg_array_append(resolver.types, (ty_type_t){0}, &arena); // Default value.
     ty_find_known_types(&resolver, &arena);
     ty_resolve_node(&resolver, root_i, &arena);
 
@@ -97,7 +95,7 @@ int main(int argc, char *argv[]) {
     {
       LOG("------ After type checking%s", "");
       arena_t tmp_arena = arena;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
+      resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
 
     if (parser.state != PARSER_STATE_OK)
@@ -108,7 +106,7 @@ int main(int argc, char *argv[]) {
     {
       LOG("------ After lowering%s", "");
       arena_t tmp_arena = arena;
-      par_ast_fprint_node(&parser, root_i, stderr, 0, &tmp_arena);
+      resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
 
     // Emit bytecode.
@@ -119,7 +117,7 @@ int main(int argc, char *argv[]) {
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
-    cg_emit(&parser, &class_file, class_files, root_i, &arena);
+    cg_emit(&resolver, &class_file, class_files, root_i, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
