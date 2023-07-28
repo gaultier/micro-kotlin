@@ -101,7 +101,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    lo_lower_ast_node(&resolver, root_i, &arena);
+    lo_lower_types(&resolver,&arena);
     // Debug.
     {
       LOG("------ After lowering%s", "");

@@ -6535,143 +6535,24 @@ void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
   }
 }
 
-void lo_lower_ast_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
+// TODO: As long as types are not nullable, we can do a naive linear unboxing of
+// all types. When nullable types are implemented, we need a tree walk to unbox
+// a node if leaves are unboxed.
+void lo_lower_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(arena != NULL);
+  pg_assert(resolver->types != NULL);
 
-  if (node_i == 0)
-    return;
+  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
+    ty_type_t *const type = &resolver->types[i];
 
-  par_ast_node_t *const node = &resolver->parser->nodes[node_i];
-  ty_type_t *const type = &resolver->types[node->type_i];
-  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
-
-  switch (node->kind) {
-  case AST_KIND_NUMBER:
-    if (type->flag & NODE_NUMBER_FLAGS_LONG) {
-      type->kind = TYPE_JVM_LONG;
-    } else if (type->flag & NODE_NUMBER_FLAGS_INT) {
-      type->kind = TYPE_JVM_INT;
-    } else if (type->flag & NODE_NUMBER_FLAGS_SHORT) {
-      type->kind = TYPE_JVM_SHORT;
-    } else if (type->flag & NODE_NUMBER_FLAGS_BYTE) {
-      type->kind = TYPE_JVM_BYTE;
-    }
-    break;
-
-  case AST_KIND_STRING:
-    type->kind = TYPE_JVM_STRING;
-    break;
-
-  case AST_KIND_BOOL:
-    type->kind = TYPE_JVM_BOOL;
-    break;
-
-  case AST_KIND_LIST:
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      lo_lower_ast_node(resolver, node->nodes[i], arena);
-    }
     lo_unbox_type_maybe(resolver, type);
-    break;
 
-  case AST_KIND_TYPE:
-    lo_unbox_type_maybe(resolver, type);
-    break;
+    if (type->kind == TYPE_KOTLIN_METHOD) {
+      string_t method_descriptor = string_reserve(64, arena);
+      cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
 
-  case AST_KIND_BINARY:
-    lo_lower_ast_node(resolver, node->lhs, arena);
-    lo_lower_ast_node(resolver, node->rhs, arena);
-
-    switch (token.kind) {
-    case TOKEN_KIND_LT:
-    case TOKEN_KIND_LE:
-    case TOKEN_KIND_GT:
-    case TOKEN_KIND_GE:
-    case TOKEN_KIND_NOT_EQUAL:
-    case TOKEN_KIND_EQUAL_EQUAL:
-    case TOKEN_KIND_AMPERSAND_AMPERSAND:
-    case TOKEN_KIND_PIPE_PIPE:
-      type->kind = TYPE_JVM_BOOL;
-      break;
-    default:
-      break;
+      type->v.method.descriptor=method_descriptor;
     }
-    break;
-
-  case AST_KIND_UNARY: {
-    switch (token.kind) {
-    case TOKEN_KIND_NOT:
-      lo_lower_ast_node(resolver, node->lhs, arena);
-      type->kind = TYPE_JVM_BOOL;
-      break;
-
-    case TOKEN_KIND_MINUS: {
-      lo_lower_ast_node(resolver, node->lhs, arena);
-      par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
-      ty_type_t *const lhs_type = &resolver->types[lhs_node->type_i];
-      type->kind = lhs_type->kind;
-      break;
-    }
-
-    default:
-      pg_assert(0 && "unimplemented");
-    }
-    break;
-  }
-
-  case AST_KIND_BUILTIN_PRINTLN: {
-    lo_lower_ast_node(resolver, node->lhs, arena);
-    lo_unbox_type_maybe(resolver,
-                        &resolver->types[type->v.method.return_type_i]);
-
-    par_ast_node_t *const lhs_node = &resolver->parser->nodes[node->lhs];
-    ty_type_t *const lhs_type = &resolver->types[lhs_node->type_i];
-
-    string_t method_descriptor = {0};
-    if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-      method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
-      resolver_ast_fprint_node(resolver, 17, stderr, 0, arena);
-      pg_assert(0 && "should not happen until OOP is implemented");
-    } else {
-      method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(resolver->types, node->type_i,
-                                &method_descriptor, arena);
-    }
-
-    resolver->types[node->type_i].v.method.descriptor = method_descriptor;
-
-    pg_assert(cf_class_files_find_method_exactly(
-        resolver->class_files,
-        string_make_from_c_no_alloc("java/io/PrintStream"),
-        string_make_from_c_no_alloc("println"), method_descriptor));
-    break;
-  }
-
-  case AST_KIND_VAR_DEFINITION: {
-    pg_assert(node->rhs > 0);
-    lo_lower_ast_node(resolver, node->rhs, arena);
-
-    par_ast_node_t *const rhs_node = &resolver->parser->nodes[node->rhs];
-    ty_type_t *const rhs_type = &resolver->types[rhs_node->type_i];
-
-    type->kind = rhs_type->kind;
-    break;
-  }
-  case AST_KIND_FUNCTION_PARAMETER: {
-    lo_unbox_type_maybe(resolver, type);
-    break;
-  }
-
-  case AST_KIND_FUNCTION_DEFINITION: {
-    lo_lower_ast_node(resolver, node->lhs, arena);
-    lo_lower_ast_node(resolver, node->extra_data_i, arena);
-    lo_lower_ast_node(resolver, node->rhs, arena);
-    break;
-  }
-  default:
-    lo_lower_ast_node(resolver, node->lhs, arena);
-    lo_lower_ast_node(resolver, node->rhs, arena);
-    break;
   }
 }
 
