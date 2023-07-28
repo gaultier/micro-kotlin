@@ -4470,14 +4470,13 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
   }
 }
 
-static const u16 NODE_NUMBER_FLAGS_OVERFLOW = 1 << 0;
-static const u16 NODE_NUMBER_FLAGS_BYTE = 1 << 1;
-static const u16 NODE_NUMBER_FLAGS_SHORT = 1 << 2;
-static const u16 NODE_NUMBER_FLAGS_INT = 1 << 3;
-static const u16 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
-static const u16 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
-static const u16 NODE_NUMBER_FLAGS_LONG = 1 << 6;
-static const u16 NODE_FUNCTION_HAD_RETURN = 1 << 7;
+static const u8 NODE_NUMBER_FLAGS_OVERFLOW = 1 << 0;
+static const u8 NODE_NUMBER_FLAGS_BYTE = 1 << 1;
+static const u8 NODE_NUMBER_FLAGS_SHORT = 1 << 2;
+static const u8 NODE_NUMBER_FLAGS_INT = 1 << 3;
+static const u8 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
+static const u8 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
+static const u8 NODE_NUMBER_FLAGS_LONG = 1 << 6;
 
 static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
   pg_assert(parser != NULL);
@@ -4686,7 +4685,6 @@ static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
       return 0;
     }
 
-    parser->nodes[parser->current_function_i].flags |= NODE_FUNCTION_HAD_RETURN;
     const par_ast_node_t node = {.kind = AST_KIND_RETURN,
                                  .main_token_i = parser->tokens_i - 1,
                                  .lhs = par_parse_expression(parser, arena)};
