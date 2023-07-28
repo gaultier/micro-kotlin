@@ -5968,6 +5968,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_append(resolver->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->types);
 
+    // TODO: Migrate from looking up method descriptors to using our own custom
+    // format.
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
@@ -6551,7 +6553,7 @@ void lo_lower_types(resolver_t *resolver, arena_t *arena) {
       string_t method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
 
-      type->v.method.descriptor=method_descriptor;
+      type->v.method.descriptor = method_descriptor;
     }
   }
 }
