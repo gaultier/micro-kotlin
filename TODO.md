@@ -132,15 +132,8 @@
 - How to implement generics
 - Method resolution (complex)
 - Type inference (complex)
-- ~~Do we want to implement both code for values and for references, or just for references a la Kotlin (but will it work with Java interop?)~~ => Turns out Kotlin uses Java unboxed types for non-nullable cases.
 - Lazily scan classpath as needed?
-
-
-## Points where I'm not sure about in the code
-
-- ~~Should the different arrays be macros~~ Yes.
-- Should the array len/cap be u16 when that's the class file format
-- Tagged unions vs a big struct with flags? => Memory usage issue with big structs for 30k+ class files.
+- Is scanning for `MethodRef` in the constant pool of classes enough to know about the existance and signature of a method?
 
 ## Non-goals
 
