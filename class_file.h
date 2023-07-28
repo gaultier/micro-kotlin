@@ -843,7 +843,7 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
   frame->stack_count -= word_count;
 }
 
-// Probably should not behave like a FIFO and rather like an array.
+// FIXME: Probably should not behave like a FIFO and rather like an array.
 static u16 cg_frame_locals_push(cg_frame_t *frame,
                                 const cf_variable_t *variable, arena_t *arena) {
   pg_assert(frame != NULL);
@@ -5831,6 +5831,15 @@ static void ty_end_scope(resolver_t *resolver) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
 
+  for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
+    const ty_variable_t *const variable = &resolver->variables[i];
+    if (variable->scope_depth == resolver->scope_depth)
+      pg_array_drop_last(resolver->variables);
+    else if (variable->scope_depth < resolver->scope_depth)
+      break;
+    else
+      pg_assert(0 && "unreachable");
+  }
   resolver->scope_depth -= 1;
 }
 
@@ -6760,8 +6769,7 @@ static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_count);
-  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
+  pg_assert(pg_array_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
 
   cf_code_array_push_u8(&gen->code->code, BYTECODE_ISTORE, arena);
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
