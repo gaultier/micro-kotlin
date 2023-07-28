@@ -86,6 +86,7 @@
 - [ ] Defining generics (BIG!)
 - [ ] Casts
 - [ ] Nullability checks
+- [ ] Output jar file with all the classes inside
 
 **Probably much later (not necessary for a MVP):**
 
