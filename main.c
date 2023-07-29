@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static const char *usage = "./a.out (-c classpath) source.kt";
+static const char *usage = "./a.out [-h] (-c classpath) source.kt";
 
 static void print_usage_and_exit() {
   puts(usage);
@@ -40,8 +40,8 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
     print_usage_and_exit();
   }
-  if (classpath==NULL) {
-    classpath=".";
+  if (classpath == NULL) {
+    classpath = ".";
   }
 
   arena_t arena = {0};
