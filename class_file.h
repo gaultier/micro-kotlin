@@ -5396,6 +5396,27 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
+typedef struct {
+  par_parser_t *parser;
+  cf_class_file_t *class_files;
+  ty_variable_t *variables;
+  ty_type_t *types;
+  u32 current_type_i;
+  u32 kotlin_bool_class_i;
+  u32 kotlin_char_class_i;
+  u32 kotlin_byte_class_i;
+  u32 kotlin_short_class_i;
+  u32 kotlin_int_class_i;
+  u32 kotlin_float_class_i;
+  u32 kotlin_double_class_i;
+  u32 kotlin_long_class_i;
+  u32 kotlin_string_class_i;
+  u32 kotlin_unit_type_i;
+  u32 scope_depth;
+  u32 current_function_i;
+  pg_pad(4);
+} resolver_t;
+
 static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
   pg_assert(types != NULL);
@@ -5421,19 +5442,28 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
 // TODO: Something smarter.
 // TODO: Find a better name.
-static bool ty_merge_types(const ty_type_t *types, u32 lhs_i, u32 rhs_i,
+static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
                            u32 *result_i) {
-  pg_assert(types != NULL);
-  pg_assert(lhs_i < pg_array_len(types));
-  pg_assert(rhs_i < pg_array_len(types));
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->types != NULL);
+  pg_assert(lhs_i < pg_array_len(resolver->types));
+  pg_assert(rhs_i < pg_array_len(resolver->types));
   pg_assert(result_i != NULL);
 
-  const ty_type_t *const lhs = &types[lhs_i];
-  const ty_type_t *const rhs = &types[rhs_i];
+  const ty_type_t *const lhs = &resolver->types[lhs_i];
+  const ty_type_t *const rhs = &resolver->types[rhs_i];
   if (lhs->kind == rhs->kind) {
     if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
         rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       if (lhs->class_file_i == rhs->class_file_i) {
+        *result_i = lhs_i;
+        return true;
+      } else if (lhs->class_file_i == resolver->kotlin_byte_class_i &&
+                 rhs->class_file_i == resolver->kotlin_int_class_i) {
+        *result_i = lhs_i;
+        return true;
+      } else if (lhs->class_file_i == resolver->kotlin_short_class_i &&
+                 rhs->class_file_i == resolver->kotlin_int_class_i) {
         *result_i = lhs_i;
         return true;
       } else {
@@ -5469,27 +5499,6 @@ static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
   pg_array_append(*types, *type, arena);
   return pg_array_last_index(*types);
 }
-
-typedef struct {
-  par_parser_t *parser;
-  cf_class_file_t *class_files;
-  ty_variable_t *variables;
-  ty_type_t *types;
-  u32 current_type_i;
-  u32 kotlin_bool_class_i;
-  u32 kotlin_char_class_i;
-  u32 kotlin_byte_class_i;
-  u32 kotlin_short_class_i;
-  u32 kotlin_int_class_i;
-  u32 kotlin_float_class_i;
-  u32 kotlin_double_class_i;
-  u32 kotlin_long_class_i;
-  u32 kotlin_string_class_i;
-  u32 kotlin_unit_type_i;
-  u32 scope_depth;
-  u32 current_function_i;
-  pg_pad(4);
-} resolver_t;
 
 static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
                                      FILE *file, u16 indent, arena_t *arena) {
@@ -5882,7 +5891,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_i = ty_resolve_node(resolver, node->lhs, arena);
     const u32 rhs_i = ty_resolve_node(resolver, node->rhs, arena);
 
-    if (!ty_merge_types(resolver->types, lhs_i, rhs_i, &node->type_i)) {
+    if (!ty_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(
@@ -6001,8 +6010,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
     const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
 
-    if (!ty_merge_types(resolver->types, lhs_type_i, rhs_type_i,
-                        &node->type_i)) {
+    if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
       const string_t lhs_type_human =
           ty_type_to_human_string(resolver->types, lhs_type_i, arena);
       const string_t rhs_type_human =
@@ -6014,6 +6022,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_append_cstring(&error, " vs ", arena);
       string_append_string(&error, rhs_type_human, arena);
       par_error(resolver->parser, token, error.value);
+
+      // Still assign a type to be able to proceed to catch as many errors as
+      // possible.
+      node->type_i = lhs_type_i;
     }
 
     ty_mark_variable_as_initialized(resolver, variable_i);
@@ -6247,8 +6259,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
     ty_end_scope(resolver);
 
-    if (!ty_merge_types(resolver->types, lhs_type_i, rhs_type_i,
-                        &node->type_i)) {
+    if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible types: ", arena);
       string_append_string(

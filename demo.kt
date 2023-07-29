@@ -53,3 +53,11 @@ fun fibonacci_10_long() {
       println(b)
   }
 }
+
+fun byte_short(){
+  var x: Byte = 1
+  println(x)
+
+  var y: Short = 128
+  println(y)
+}
