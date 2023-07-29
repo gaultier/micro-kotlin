@@ -49,8 +49,8 @@
 - [ ] Packages
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
 - [x] Read .jmod files
-- [ ] Add class path CLI option
-- [ ] Scan known locations for jmod files
+- [x] Add class path CLI option
+- [x] Scan known locations for jmod files
 - [ ] Convert jvm types to kotlin types when reading .class, .jar, .jmod
 - [ ] **Merge functions to read .jmod, .jar if possible**
 - [ ] **Avoid duplicating method resolution in the resolver and the lowerer**
