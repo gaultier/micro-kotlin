@@ -54,7 +54,6 @@ int main(int argc, char *argv[]) {
     char *class_path_sep = NULL;
     while ((class_path_sep = strchr(classpath, ':')) != NULL) {
       const u64 classpath_len = class_path_sep - classpath;
-      LOG("Searching %.*s", (int)classpath_len, classpath);
 
       char pathbuf[4096] = "";
       memcpy(pathbuf, classpath, classpath_len);

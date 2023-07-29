@@ -782,6 +782,7 @@ cg_type_to_verification_info(const ty_type_t *type) {
 
   switch (type->kind) {
   case TYPE_JVM_BOOL:
+  case TYPE_JVM_BYTE:
   case TYPE_JVM_CHAR:
   case TYPE_JVM_SHORT:
   case TYPE_JVM_INT:
