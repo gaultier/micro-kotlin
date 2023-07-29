@@ -637,7 +637,7 @@ typedef enum ty_type_kind_t ty_type_kind_t;
 struct cg_frame_t {
   cf_variable_t *locals;
   cf_verification_info_t *stack;
-  u16 max_stack;
+  u16 max_physical_stack;
   u16 max_physical_locals;
   u32 scope_depth;
   u16 locals_physical_count;
@@ -817,14 +817,14 @@ static void cg_frame_stack_push(cg_frame_t *frame,
   pg_array_append(frame->stack, verification_info, arena);
 
   frame->stack_physical_count += word_count;
-  frame->max_stack = pg_max(frame->max_stack, frame->stack_physical_count);
+  frame->max_physical_stack = pg_max(frame->max_physical_stack, frame->stack_physical_count);
 }
 
 static void cg_frame_stack_pop(cg_frame_t *frame) {
   pg_assert(frame != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(frame->stack_physical_count >= 1);
-  pg_assert(frame->max_stack >= 1);
+  pg_assert(frame->max_physical_stack >= 1);
 
   pg_array_drop_last(frame->stack);
 
@@ -960,7 +960,7 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
   cg_frame_t *dst = arena_alloc(arena, 1, sizeof(cg_frame_t));
   cg_frame_init(dst, arena);
 
-  dst->max_stack = src->max_stack;
+  dst->max_physical_stack = src->max_physical_stack;
   dst->max_physical_locals = src->max_physical_locals;
   dst->scope_depth = src->scope_depth;
   dst->stack_physical_count = src->stack_physical_count;
@@ -1212,8 +1212,8 @@ typedef struct {
 struct cf_attribute_t {
   union {
     struct cf_attribute_code_t {
-      u16 max_stack;
-      u16 max_locals;
+      u16 max_physical_stack;
+      u16 max_physical_locals;
       pg_pad(4);
       u8 *code;
       cf_exception_t *exceptions;
@@ -1483,8 +1483,8 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
   const char *const current_start = *current;
 
   cf_attribute_code_t code = {0};
-  code.max_stack = buf_read_be_u16(buf, buf_len, current);
-  code.max_locals = buf_read_be_u16(buf, buf_len, current);
+  code.max_physical_stack = buf_read_be_u16(buf, buf_len, current);
+  code.max_physical_locals = buf_read_be_u16(buf, buf_len, current);
   const u32 code_len = buf_read_be_u32(buf, buf_len, current);
   pg_assert(*current + code_len <= buf + buf_len);
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
@@ -2464,7 +2464,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   case ATTRIBUTE_KIND_CODE: {
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    u32 size = sizeof(code->max_stack) + sizeof(code->max_locals) +
+    u32 size = sizeof(code->max_physical_stack) + sizeof(code->max_physical_locals) +
                sizeof(u32) + pg_array_len(code->code) +
                sizeof(u16) /* exception count */ +
                +pg_array_len(code->exceptions) * sizeof(cf_exception_t) +
@@ -2652,9 +2652,9 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    file_write_be_u16(file, code->max_stack);
+    file_write_be_u16(file, code->max_physical_stack);
 
-    file_write_be_u16(file, code->max_locals);
+    file_write_be_u16(file, code->max_physical_locals);
 
     file_write_be_u32(file, pg_array_len(code->code));
     fwrite(code->code, pg_array_len(code->code), sizeof(u8), file);
@@ -7534,8 +7534,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
   cg_emit_node(gen, class_file, rhs->rhs, arena);
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
-  gen->frame->max_stack =
-      pg_max(frame_after_then->max_stack, gen->frame->max_stack);
+  gen->frame->max_physical_stack =
+      pg_max(frame_after_then->max_physical_stack, gen->frame->max_physical_stack);
   gen->frame->max_physical_locals = pg_max(
       frame_after_then->max_physical_locals, gen->frame->max_physical_locals);
   // TODO: assert that the stack/locals count is the same?
@@ -7832,8 +7832,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     cg_end_scope(gen);
 
-    gen->code->max_stack = gen->frame->max_stack;
-    gen->code->max_locals = gen->frame->max_physical_locals;
+    gen->code->max_physical_stack = gen->frame->max_physical_stack;
+    gen->code->max_physical_locals = gen->frame->max_physical_locals;
 
     stack_map_resolve_frames(first_method_frame, gen->stack_map_frames, arena);
 
@@ -8638,8 +8638,8 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
     cg_emit_return_nothing(gen, arena);
 
-    gen->code->max_stack = gen->frame->max_stack;
-    gen->code->max_locals = gen->frame->max_physical_locals;
+    gen->code->max_physical_stack = gen->frame->max_physical_stack;
+    gen->code->max_physical_locals = gen->frame->max_physical_locals;
     gen->code = NULL;
     gen->frame = NULL;
 
