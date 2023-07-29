@@ -817,7 +817,8 @@ static void cg_frame_stack_push(cg_frame_t *frame,
   pg_array_append(frame->stack, verification_info, arena);
 
   frame->stack_physical_count += word_count;
-  frame->max_physical_stack = pg_max(frame->max_physical_stack, frame->stack_physical_count);
+  frame->max_physical_stack =
+      pg_max(frame->max_physical_stack, frame->stack_physical_count);
 }
 
 static void cg_frame_stack_pop(cg_frame_t *frame) {
@@ -2464,9 +2465,9 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   case ATTRIBUTE_KIND_CODE: {
     const cf_attribute_code_t *const code = &attribute->v.code;
 
-    u32 size = sizeof(code->max_physical_stack) + sizeof(code->max_physical_locals) +
-               sizeof(u32) + pg_array_len(code->code) +
-               sizeof(u16) /* exception count */ +
+    u32 size = sizeof(code->max_physical_stack) +
+               sizeof(code->max_physical_locals) + sizeof(u32) +
+               pg_array_len(code->code) + sizeof(u16) /* exception count */ +
                +pg_array_len(code->exceptions) * sizeof(cf_exception_t) +
                sizeof(u16) // attributes length
         ;
@@ -7534,8 +7535,8 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
   cg_emit_node(gen, class_file, rhs->rhs, arena);
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
-  gen->frame->max_physical_stack =
-      pg_max(frame_after_then->max_physical_stack, gen->frame->max_physical_stack);
+  gen->frame->max_physical_stack = pg_max(frame_after_then->max_physical_stack,
+                                          gen->frame->max_physical_stack);
   gen->frame->max_physical_locals = pg_max(
       frame_after_then->max_physical_locals, gen->frame->max_physical_locals);
   // TODO: assert that the stack/locals count is the same?
@@ -7617,7 +7618,7 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
                offset_delta <= 63) {
       pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
     } else if (frame->stack_physical_count == 0 &&
-               (1 <= locals_delta && locals_delta <= 3)) {
+               (1 <= locals_delta && locals_delta <= 3)) { // append_frame
       stack_map_frame->kind = 251 + locals_delta;
       stack_map_frame->offset_delta = offset_delta;
     } else if (frame->stack_physical_count == 0 &&
