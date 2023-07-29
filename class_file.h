@@ -8125,6 +8125,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
+      // IMPROVEMENT: If we emit the pop earlier, some stack map frames don't
+      // have to be a full_frame but can be something smaller e.g. append_frame.
       const par_ast_node_t *const last_node =
           &gen->resolver->parser->nodes[node->nodes[i]];
       if (last_node->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
