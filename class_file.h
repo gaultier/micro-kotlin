@@ -3316,8 +3316,7 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
 
     return;
   } else if (S_ISREG(st.st_mode) &&
-             string_ends_with_cstring(last_path_component, ".jar") &&
-             string_eq_c(last_path_component, "kotlin-stdlib.jar")) {
+             string_ends_with_cstring(last_path_component, ".jar")) {
     cf_read_jar_file(path, class_files, arena);
   } else if (S_ISREG(st.st_mode) &&
              string_ends_with_cstring(last_path_component, ".jmod")) {

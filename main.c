@@ -51,10 +51,16 @@ int main(int argc, char *argv[]) {
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 1 << 18, &arena);
   {
-    // TODO: Colon or semi-colon separated paths in the classpath.
+    char *class_path_sep = NULL;
+    while ((class_path_sep = strchr(classpath, ':')) != NULL) {
+      cf_read_jmod_and_jar_and_class_files_recursively(
+          classpath, class_path_sep - classpath, &class_files, &arena);
+      classpath = class_path_sep + 1;
+    }
 
     cf_read_jmod_and_jar_and_class_files_recursively(
         classpath, strlen(classpath), &class_files, &arena);
+
     // FIXME: It should be the basename of the source file.
     cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
                                                      &arena);
