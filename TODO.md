@@ -1,4 +1,4 @@
-**TODO now:**
+**TODO now!:**
 
 - [x] Add JVM function types
 - [x] Generate type descriptors as strings
