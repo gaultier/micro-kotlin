@@ -59,12 +59,11 @@ int main(int argc, char *argv[]) {
       char pathbuf[4096] = "";
       memcpy(pathbuf, classpath, classpath_len);
 
-      cf_read_jmod_and_jar_and_class_files_recursively(
-          pathbuf, classpath_len, &class_files, &arena);
+      cf_read_jmod_and_jar_and_class_files_recursively(pathbuf, classpath_len,
+                                                       &class_files, &arena);
       classpath = class_path_sep + 1;
     }
 
-    LOG("Searching %.*s", strlen(classpath), classpath);
     cf_read_jmod_and_jar_and_class_files_recursively(
         classpath, strlen(classpath), &class_files, &arena);
 

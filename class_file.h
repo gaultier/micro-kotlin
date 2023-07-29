@@ -2426,19 +2426,14 @@ static u32 cf_compute_verification_infos_size(
     return 0;
   } else if (252 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 254) { // append_frame
-    u64 count = 255 - stack_map_frame->kind;
-
+    const u64 count = stack_map_frame->kind - 251;
     u32 size = 0;
-    for (i64 i = stack_map_frame->frame->locals_count - 1;
-         i >= 0 && count > 0;) {
+
+    for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
+         i < pg_array_len(stack_map_frame->frame->locals); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->locals[i].verification_info;
-      const u64 word_count =
-          cf_verification_info_kind_word_count(verification_info.kind);
       size += cf_compute_verification_info_size(verification_info);
-
-      i -= word_count;
-      count -= 1;
     }
 
     return size;
@@ -2596,8 +2591,14 @@ static void cf_write_stack_map_table_attribute(
              stack_map_frame->kind <= 254) { // append_frame
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
-    cf_write_verification_info(
-        file, pg_array_last(stack_map_frame->frame->locals)->verification_info);
+
+    const u64 count = stack_map_frame->kind - 251;
+    for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
+         i < pg_array_len(stack_map_frame->frame->locals); i++) {
+      cf_write_verification_info(
+          file, stack_map_frame->frame->locals[i].verification_info);
+    }
+
   } else { // full_frame
 
     file_write_u8(file, stack_map_frame->kind);
@@ -7623,9 +7624,10 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
     } else if (frame->stack_count == 1 && locals_delta == 0 &&
                offset_delta <= 63) {
       pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
-    } else if (frame->stack_count == 0 && locals_delta == 1 &&
-               offset_delta <= 3) {
-      pg_assert(0 && "todo"); // append_frame
+    } else if (frame->stack_count == 0 &&
+               (1 <= locals_delta && locals_delta <= 3)) {
+      stack_map_frame->kind = 251 + locals_delta;
+      stack_map_frame->offset_delta = offset_delta;
     } else if (frame->stack_count == 0 &&
                (locals_delta == -1 || locals_delta == -2 ||
                 locals_delta == -3) &&
@@ -8218,8 +8220,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 pc_end = pg_array_len(gen->code->code);
 
     // This stack map frame covers the unconditional jump.
-    stack_map_record_frame_at_pc(cg_frame_clone(gen->frame, arena),
-                                 &gen->stack_map_frames, pc_start, arena);
+    stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
+                                 pc_start, arena);
 
     // Patch first, conditional, jump.
     {

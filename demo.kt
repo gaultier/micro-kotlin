@@ -18,9 +18,22 @@ fun fibonacci(n: Int) {
 
   var i : Int = 1
   while (i < n) {
-      var tmp : Int = b
       b = b + a
-      a = tmp
+      a = b - a
+      i = i + 1
+
+      println(b)
+  }
+}
+
+fun fibonacci_10() {
+  var a : Int = 0
+  var b : Int = 1
+
+  var i : Int = 1
+  while (i < 10) {
+      b = b + a
+      a = b - a
       i = i + 1
 
       println(b)
