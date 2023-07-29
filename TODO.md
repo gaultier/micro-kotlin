@@ -93,7 +93,6 @@
 - [ ] Interfaces
 - [ ] Using generics (BIG!)
 - [ ] Defining generics (BIG!)
-- [ ] Casts
 - [ ] Nullability checks
 - [ ] Output jar file with all the classes inside
 
