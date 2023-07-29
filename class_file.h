@@ -8160,7 +8160,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         .scope_depth = gen->frame->scope_depth,
         .verification_info = verification_info,
     };
-    const u16 local_i = cg_frame_locals_push(gen->frame, &variable, arena);
+    const u16 local_i = cg_frame_locals_push(gen, &variable, arena);
 
     if (verification_info.kind == VERIFICATION_INFO_INT) {
       cg_emit_store_variable_int(gen, local_i, arena);
@@ -8330,7 +8330,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         .scope_depth = gen->frame->scope_depth,
         .verification_info = verification_info,
     };
-    cg_frame_locals_push(gen->frame, &argument, arena);
+    cg_frame_locals_push(gen, &argument, arena);
     break;
   }
 
@@ -8628,7 +8628,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
                   .extra_data = source_method_arg0_class_i,
               },
       };
-      cg_frame_locals_push(gen->frame, &arg0, arena);
+      cg_frame_locals_push(gen, &arg0, arena);
     }
 
     cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);

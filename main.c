@@ -1,11 +1,48 @@
+#define _POSIX_C_SOURCE 200809L
 #include "class_file.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
+
+static const char *usage = "./a.out (-c classpath) source.kt";
+
+static void print_usage_and_exit() {
+  puts(usage);
+  exit(0);
+}
 
 int main(int argc, char *argv[]) {
-  pg_assert(argc == 2);
+  int opt = 0;
+  char *classpath = NULL;
+
+  while ((opt = getopt(argc, argv, "c:")) != -1) {
+    switch (opt) {
+    case 'c':
+      classpath = optarg;
+      break;
+    case 'h':
+      print_usage_and_exit();
+      break;
+
+    default:
+      fprintf(stderr, "Unknown option: %c\n", opt);
+      print_usage_and_exit();
+    }
+  }
+
+  if (optind == argc) {
+    fprintf(stderr, "Missing source file.\n");
+    print_usage_and_exit();
+  }
+  if (optind != argc - 1) {
+    fprintf(stderr, "Multiple source files not yet supported.\n");
+    print_usage_and_exit();
+  }
+  if (classpath==NULL) {
+    classpath=".";
+  }
 
   arena_t arena = {0};
   arena_init(&arena, 1L << 32);
@@ -14,26 +51,10 @@ int main(int argc, char *argv[]) {
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 1 << 18, &arena);
   {
-    char *const java_home = getenv("JAVA_HOME");
-
-    if (java_home == NULL || strlen(java_home) == 0) {
-      fprintf(stderr,
-              "The environment variable JAVA_HOME is mandatory for now\n");
-      return EINVAL;
-    }
-
-    char *const kotlin_home = getenv("KOTLIN_HOME");
-    if (kotlin_home == NULL || strlen(kotlin_home) == 0) {
-      fprintf(stderr,
-              "The environment variable KOTLIN_HOME is mandatory for now\n");
-      return EINVAL;
-    }
+    // TODO: Colon or semi-colon separated paths in the classpath.
 
     cf_read_jmod_and_jar_and_class_files_recursively(
-        java_home, strlen(java_home), &class_files, &arena);
-    cf_read_jmod_and_jar_and_class_files_recursively(
-        kotlin_home, strlen(kotlin_home), &class_files, &arena);
-
+        classpath, strlen(classpath), &class_files, &arena);
     // FIXME: It should be the basename of the source file.
     cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
                                                      &arena);
@@ -44,8 +65,8 @@ int main(int argc, char *argv[]) {
   {
     // TODO: when parsing multiple files, need to allocate that.
     const string_t source_file_name = {
-        .value = argv[1],
-        .len = strlen(argv[1]),
+        .value = argv[optind],
+        .len = strlen(argv[optind]),
     };
     const int fd = open(source_file_name.value, O_RDONLY);
     if (fd == -1) {
