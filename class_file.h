@@ -6535,16 +6535,21 @@ void lo_lower_types(resolver_t *resolver, arena_t *arena) {
 // --------------------------------- Code generation
 
 typedef struct {
+  cf_variable_t variable;
+  u32 scope_id;
+} cg_scope_variable_t;
+
+typedef struct {
   resolver_t *resolver;
   cf_attribute_code_t *code;
   cg_frame_t *frame;
-  cf_variable_t *locals;
+  cg_scope_variable_t *locals;
 
   const cf_class_file_t *class_files;
   cf_stack_map_frame_t *stack_map_frames;
   u16 out_field_ref_i;
   u16 out_field_ref_class_i;
-  pg_pad(4);
+  u32 scope_id;
 } cg_generator_t;
 
 // FIXME: Probably should not behave like a FIFO and rather like an array.
@@ -6576,7 +6581,9 @@ static u16 cg_frame_locals_push(cg_generator_t *gen,
   gen->frame->max_locals =
       pg_max(gen->frame->max_locals, gen->frame->locals_count);
 
-  pg_array_append(gen->locals, *variable, arena);
+  cg_scope_variable_t scope_variable = {.variable = *variable,
+                                        .scope_id = gen->scope_id};
+  pg_array_append(gen->locals, scope_variable, arena);
 
   return result_index;
 }
@@ -7157,6 +7164,7 @@ static void cg_begin_scope(cg_generator_t *gen) {
   pg_assert(gen->frame->scope_depth < UINT32_MAX);
 
   gen->frame->scope_depth += 1;
+  gen->scope_id += 1;
 }
 
 static void
