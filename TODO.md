@@ -19,8 +19,8 @@
 - [x] Local variables
 - [ ] Comments
 - [x] Local variable mutation
-- [ ] Function definition
-- [ ] [DOING] Field access
+- [x] Function definition
+- [ ] Field access
 - [x] String literals
 - [x] Grouping
 - [ ] Casts
@@ -42,7 +42,6 @@
 - [x] Control flow: Return
 - [x] Checks around return
 - [x] Move types to the resolver
-- [ ] **Track all local variables inside a function (during lowering?) and assign a slot to each one to make stack map frames consistent with back jumps**
 - [ ] **Move flags to the node, not the type (or both?)**
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
