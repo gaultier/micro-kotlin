@@ -5623,17 +5623,19 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     }
   }
 
-if   ((resolver->kotlin_int_class_i == (u32)-1) ||
-(resolver->kotlin_byte_class_i == (u32)-1) ||
-(resolver->kotlin_char_class_i == (u32)-1) ||
-(resolver->kotlin_short_class_i == (u32)-1) ||
-(resolver->kotlin_float_class_i == (u32)-1) ||
-(resolver->kotlin_long_class_i == (u32)-1) ||
-(resolver->kotlin_double_class_i == (u32)-1) ||
-(resolver->kotlin_string_class_i == (u32)-1)) {
-  fprintf(stderr, "Standard library types could not be found, a valid classpath containing the standard library jar must be provided.");
-  exit(EINVAL);
-}
+  if ((resolver->kotlin_int_class_i == (u32)-1) ||
+      (resolver->kotlin_byte_class_i == (u32)-1) ||
+      (resolver->kotlin_char_class_i == (u32)-1) ||
+      (resolver->kotlin_short_class_i == (u32)-1) ||
+      (resolver->kotlin_float_class_i == (u32)-1) ||
+      (resolver->kotlin_long_class_i == (u32)-1) ||
+      (resolver->kotlin_double_class_i == (u32)-1) ||
+      (resolver->kotlin_string_class_i == (u32)-1)) {
+    fprintf(stderr,
+            "Standard library types could not be found, a valid classpath "
+            "containing the standard library jar must be provided.");
+    exit(EINVAL);
+  }
 }
 
 static void ty_begin_scope(resolver_t *resolver) {
