@@ -3105,10 +3105,8 @@ static void cf_buf_read_jar_file(string_t content, char *path,
             .avail_out = dst_len,
         };
 
+        // `inflateInit2` is required instead of `inflateInit` because this is a raw compressed stream and not a zlib compressed stream which contains a header.
         int res = inflateInit2(&stream, -8);
-        //        const int res =
-        //            uncompress(dst, &dst_len, (u8 *)local_file_header,
-        //                       compressed_size_according_to_directory_entry);
         pg_assert(res == Z_OK);
 
         res = inflate(&stream, Z_SYNC_FLUSH);
