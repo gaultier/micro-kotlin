@@ -53,11 +53,18 @@ int main(int argc, char *argv[]) {
   {
     char *class_path_sep = NULL;
     while ((class_path_sep = strchr(classpath, ':')) != NULL) {
+      const u64 classpath_len = class_path_sep - classpath;
+      LOG("Searching %.*s", (int)classpath_len, classpath);
+
+      char pathbuf[4096] = "";
+      memcpy(pathbuf, classpath, classpath_len);
+
       cf_read_jmod_and_jar_and_class_files_recursively(
-          classpath, class_path_sep - classpath, &class_files, &arena);
+          pathbuf, classpath_len, &class_files, &arena);
       classpath = class_path_sep + 1;
     }
 
+    LOG("Searching %.*s", strlen(classpath), classpath);
     cf_read_jmod_and_jar_and_class_files_recursively(
         classpath, strlen(classpath), &class_files, &arena);
 

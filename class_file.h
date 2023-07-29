@@ -3313,8 +3313,6 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
     };
     cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
     pg_array_append(*class_files, class_file, arena);
-
-    return;
   } else if (S_ISREG(st.st_mode) &&
              string_ends_with_cstring(last_path_component, ".jar")) {
     cf_read_jar_file(path, class_files, arena);
