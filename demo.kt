@@ -55,7 +55,7 @@ fun fibonacci_10_long() {
 }
 
 fun byte_short(){
-  var x: Byte = 1
+  var x: Byte = - 1
   println(x)
 
   var y: Short = 128
