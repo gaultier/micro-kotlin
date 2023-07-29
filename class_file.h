@@ -843,36 +843,6 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
   frame->stack_count -= word_count;
 }
 
-// FIXME: Probably should not behave like a FIFO and rather like an array.
-static u16 cg_frame_locals_push(cg_frame_t *frame,
-                                const cf_variable_t *variable, arena_t *arena) {
-  pg_assert(frame != NULL);
-  pg_assert(variable != NULL);
-  pg_assert(arena != NULL);
-  pg_assert(variable->type_i > 0);
-
-  const u64 word_count =
-      cf_verification_info_kind_word_count(variable->verification_info.kind);
-  pg_assert(frame->locals_count + word_count < UINT16_MAX);
-
-  const u16 result_index = pg_array_len(frame->locals);
-
-  if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
-      variable->verification_info.kind == VERIFICATION_INFO_DOUBLE) {
-    cf_variable_t top_variable = *variable;
-    top_variable.verification_info =
-        (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP};
-
-    pg_array_append(frame->locals, top_variable, arena);
-  }
-  pg_array_append(frame->locals, *variable, arena);
-
-  frame->locals_count += word_count;
-  frame->max_locals = pg_max(frame->max_locals, frame->locals_count);
-
-  return result_index;
-}
-
 static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena);
 
 static void cf_code_array_push_u8(u8 **array, u8 x, arena_t *arena) {
@@ -6568,12 +6538,48 @@ typedef struct {
   resolver_t *resolver;
   cf_attribute_code_t *code;
   cg_frame_t *frame;
+  cf_variable_t *locals;
+
   const cf_class_file_t *class_files;
   cf_stack_map_frame_t *stack_map_frames;
   u16 out_field_ref_i;
   u16 out_field_ref_class_i;
   pg_pad(4);
 } cg_generator_t;
+
+// FIXME: Probably should not behave like a FIFO and rather like an array.
+static u16 cg_frame_locals_push(cg_generator_t *gen,
+                                const cf_variable_t *variable, arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->frame != NULL);
+  pg_assert(variable != NULL);
+  pg_assert(arena != NULL);
+  pg_assert(variable->type_i > 0);
+
+  const u64 word_count =
+      cf_verification_info_kind_word_count(variable->verification_info.kind);
+  pg_assert(gen->frame->locals_count + word_count < UINT16_MAX);
+
+  const u16 result_index = pg_array_len(gen->frame->locals);
+
+  if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
+      variable->verification_info.kind == VERIFICATION_INFO_DOUBLE) {
+    cf_variable_t top_variable = *variable;
+    top_variable.verification_info =
+        (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP};
+
+    pg_array_append(gen->frame->locals, top_variable, arena);
+  }
+  pg_array_append(gen->frame->locals, *variable, arena);
+
+  gen->frame->locals_count += word_count;
+  gen->frame->max_locals =
+      pg_max(gen->frame->max_locals, gen->frame->locals_count);
+
+  pg_array_append(gen->locals, *variable, arena);
+
+  return result_index;
+}
 
 static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
                                       arena_t *arena) {
@@ -7755,6 +7761,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
+    pg_array_clear(gen->locals);
+
     const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
@@ -8655,6 +8663,7 @@ static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
 
   cg_generator_t gen = {.class_files = class_files, .resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
+  pg_array_init_reserve(gen.locals, UINT16_MAX, arena);
 
   cg_emit_synthetic_class(&gen, class_file, arena);
 
