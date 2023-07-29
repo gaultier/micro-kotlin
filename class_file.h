@@ -3105,7 +3105,9 @@ static void cf_buf_read_jar_file(string_t content, char *path,
             .avail_out = dst_len,
         };
 
-        // `inflateInit2` is required instead of `inflateInit` because this is a raw compressed stream and not a zlib compressed stream which contains a header.
+        // `inflateInit2` is required instead of `inflateInit` because this is a
+        // raw compressed stream and not a zlib compressed stream which contains
+        // a header.
         int res = inflateInit2(&stream, -8);
         pg_assert(res == Z_OK);
 
@@ -5621,14 +5623,17 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     }
   }
 
-  pg_assert(resolver->kotlin_int_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_byte_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_char_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_short_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_float_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_long_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_double_class_i != (u32)-1);
-  pg_assert(resolver->kotlin_string_class_i != (u32)-1);
+if   ((resolver->kotlin_int_class_i == (u32)-1) ||
+(resolver->kotlin_byte_class_i == (u32)-1) ||
+(resolver->kotlin_char_class_i == (u32)-1) ||
+(resolver->kotlin_short_class_i == (u32)-1) ||
+(resolver->kotlin_float_class_i == (u32)-1) ||
+(resolver->kotlin_long_class_i == (u32)-1) ||
+(resolver->kotlin_double_class_i == (u32)-1) ||
+(resolver->kotlin_string_class_i == (u32)-1)) {
+  fprintf(stderr, "Standard library types could not be found, a valid classpath containing the standard library jar must be provided.");
+  exit(EINVAL);
+}
 }
 
 static void ty_begin_scope(resolver_t *resolver) {

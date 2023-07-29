@@ -1,5 +1,7 @@
 .PHONY: test_debug test_release clean
 
+OPTS :=  -c /usr/lib/jvm/java-17-openjdk-amd64/jmods 
+
 WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
 main_debug: main.c class_file.h
@@ -9,12 +11,12 @@ clean:
 	rm *.class || true
 	rm -r META-INF/ || true
 
-test_debug: main_debug clean
-	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
+test_debug: clean main_debug
+	for f in kotlin_corpus/*.kt; do echo $$f; ./main_debug $(OPTS) "$$f" || true;  done
 	for f in *.class; do echo $$f; java `basename -s .class $$f`;  done
 
-test_release: main_release clean
-	for f in kotlin_corpus/*.kt; do echo $$f; ./$< "$$f" || true;  done
+test_release: clean main_release
+	for f in kotlin_corpus/*.kt; do echo $$f; ./main_release $(OPTS) "$$f" || true;  done
 	for f in *.class; do echo $$f; java `basename -s .class $$f`;  done
 
 main_release: main.c class_file.h
