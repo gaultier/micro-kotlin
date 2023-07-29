@@ -23,11 +23,13 @@
 - [ ] Field access
 - [x] String literals
 - [x] Grouping
-- [ ] Casts
+- [ ] Explicit casts
 - [x] Long
 - [ ] Refactor/rename stuff
 - [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
-- [ ] Byte, Char, Short
+- [ ] Byte
+- [ ] Char
+- [x] Short
 - [ ] Double, Float
 - [x] Control flow: If
 - [x] Logical operator !
