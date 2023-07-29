@@ -39,3 +39,17 @@ fun fibonacci_10() {
       println(b)
   }
 }
+
+fun fibonacci_10_long() {
+  var a : Long = 0L
+  var b : Long = 1L
+
+  var i : Long = 1L
+  while (i < 10L) {
+      b = b + a
+      a = b - a
+      i = i + 1L
+
+      println(b)
+  }
+}

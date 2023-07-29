@@ -2406,6 +2406,7 @@ static u32 cf_compute_verification_infos_size(
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     const cf_verification_info_t verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
+    pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return cf_compute_verification_info_size(verification_info);
   } else if (128 <= stack_map_frame->kind &&
@@ -2416,6 +2417,7 @@ static u32 cf_compute_verification_infos_size(
                  247) { // same_locals_1_stack_item_frame_extended
     const cf_verification_info_t verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
+    pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return cf_compute_verification_info_size(verification_info);
   } else if (248 <= stack_map_frame->kind &&
@@ -2433,6 +2435,10 @@ static u32 cf_compute_verification_infos_size(
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->locals[i].verification_info;
+
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
       size += cf_compute_verification_info_size(verification_info);
     }
 
@@ -2442,12 +2448,20 @@ static u32 cf_compute_verification_infos_size(
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->locals[i].verification_info;
+
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
       size += cf_compute_verification_info_size(verification_info);
     }
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
       const cf_verification_info_t verification_info =
           stack_map_frame->frame->stack[i];
+
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
       size += cf_compute_verification_info_size(verification_info);
     }
 
@@ -2595,8 +2609,12 @@ static void cf_write_stack_map_table_attribute(
     const u64 count = stack_map_frame->kind - 251;
     for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      cf_write_verification_info(
-          file, stack_map_frame->frame->locals[i].verification_info);
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->locals[i].verification_info;
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
+      cf_write_verification_info(file, verification_info);
     }
 
   } else { // full_frame
@@ -2606,13 +2624,23 @@ static void cf_write_stack_map_table_attribute(
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->locals));
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      cf_write_verification_info(
-          file, stack_map_frame->frame->locals[i].verification_info);
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->locals[i].verification_info;
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
+      cf_write_verification_info(file, verification_info);
     }
 
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->stack));
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-      cf_write_verification_info(file, stack_map_frame->frame->stack[i]);
+      const cf_verification_info_t verification_info =
+          stack_map_frame->frame->stack[i];
+
+      if (verification_info.kind == VERIFICATION_INFO_TOP)
+        continue;
+
+      cf_write_verification_info(file, verification_info);
     }
   }
 }
@@ -8356,7 +8384,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       cg_emit_store_variable_int(gen, var_i, arena);
       break;
     case TYPE_JVM_LONG:
-      pg_assert(0 && "todo");
+      cg_emit_store_variable_long(gen, var_i, arena);
       break;
     default:
       pg_assert(0 && "todo");
