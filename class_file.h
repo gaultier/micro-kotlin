@@ -5403,7 +5403,6 @@ typedef struct {
   ty_variable_t *variables;
   ty_type_t *types;
   u32 current_type_i;
-  u32 kotlin_bool_class_i;
   u32 kotlin_char_class_i;
   u32 kotlin_byte_class_i;
   u32 kotlin_short_class_i;
@@ -5413,6 +5412,7 @@ typedef struct {
   u32 kotlin_long_class_i;
   u32 kotlin_string_class_i;
   u32 kotlin_unit_type_i;
+  u32 kotlin_boolean_class_i;
   u32 scope_depth;
   u32 current_function_i;
   pg_pad(4);
@@ -5575,6 +5575,8 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   resolver->kotlin_unit_type_i =
       ty_add_type(&resolver->types, &unit_type, arena);
 
+  const string_t kotlin_boolean_class_name =
+      string_make_from_c_no_alloc("java/lang/Boolean");
   const string_t kotlin_int_class_name =
       string_make_from_c_no_alloc("java/lang/Integer");
   const string_t kotlin_byte_class_name =
@@ -5607,6 +5609,10 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
 
+    if (string_eq(this_class_name, kotlin_boolean_class_name)) {
+      resolver->kotlin_boolean_class_i = i;
+    }
+
     if (string_eq(this_class_name, kotlin_int_class_name)) {
       resolver->kotlin_int_class_i = i;
     }
@@ -5634,6 +5640,7 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   }
 
   if ((resolver->kotlin_int_class_i == (u32)-1) ||
+      (resolver->kotlin_boolean_class_i == (u32)-1) ||
       (resolver->kotlin_byte_class_i == (u32)-1) ||
       (resolver->kotlin_char_class_i == (u32)-1) ||
       (resolver->kotlin_short_class_i == (u32)-1) ||
@@ -5776,7 +5783,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_BOOL: {
     ty_type_t type = {
         .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-        .class_file_i = resolver->kotlin_bool_class_i,
+        .class_file_i = resolver->kotlin_boolean_class_i,
         .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
     };
     return node->type_i = ty_add_type(&resolver->types, &type, arena);
@@ -5798,8 +5805,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_append(resolver->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->types);
 
-    // TODO: Migrate from looking up method descriptors to using our own custom
-    // format.
+    // TODO: Migrate from looking up method descriptors to using our own
+    // custom format.
     string_t method_descriptor = {0};
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
       method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
@@ -5865,7 +5872,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       node->type_i = ty_resolve_node(resolver, node->lhs, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (!(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-            type->class_file_i == resolver->kotlin_bool_class_i)) {
+            type->class_file_i == resolver->kotlin_boolean_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(
@@ -5914,7 +5921,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_EQUAL_EQUAL: {
       const ty_type_t type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-          .class_file_i = resolver->kotlin_bool_class_i,
+          .class_file_i = resolver->kotlin_boolean_class_i,
           .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
       };
       return node->type_i = ty_add_type(&resolver->types, &type, arena);
@@ -5923,7 +5930,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (!(lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-            lhs_type->class_file_i == resolver->kotlin_bool_class_i)) {
+            lhs_type->class_file_i == resolver->kotlin_boolean_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6047,7 +6054,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-          type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
+          type_condition->class_file_i == resolver->kotlin_boolean_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6070,7 +6077,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-          type_condition->class_file_i == resolver->kotlin_bool_class_i)) {
+          type_condition->class_file_i == resolver->kotlin_boolean_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6195,6 +6202,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         string_eq_c(type_literal_string, "kotlin.Int")) {
       type.class_file_i = resolver->kotlin_int_class_i;
       type.v.class_name = string_make_from_c("kotlin.Int", arena);
+    } else if (string_eq_c(type_literal_string, "Boolean") ||
+               string_eq_c(type_literal_string, "kotlin.Boolean")) {
+      type.class_file_i = resolver->kotlin_boolean_class_i;
+      type.v.class_name = string_make_from_c("kotlin.Short", arena);
     } else if (string_eq_c(type_literal_string, "Byte") ||
                string_eq_c(type_literal_string, "kotlin.Byte")) {
       type.class_file_i = resolver->kotlin_byte_class_i;
@@ -6370,9 +6381,9 @@ void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
   }
 }
 
-// TODO: As long as types are not nullable, we can do a naive linear unboxing of
-// all types. When nullable types are implemented, we need a tree walk to unbox
-// a node if leaves are unboxed.
+// TODO: As long as types are not nullable, we can do a naive linear unboxing
+// of all types. When nullable types are implemented, we need a tree walk to
+// unbox a node if leaves are unboxed.
 void lo_lower_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
@@ -6695,10 +6706,6 @@ static void cg_emit_ixor(cg_generator_t *gen, arena_t *arena) {
   cf_code_array_push_u8(&gen->code->code, BYTECODE_IXOR, arena);
 
   cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
-                      arena);
 }
 
 static void cg_emit_mul(cg_generator_t *gen, arena_t *arena) {
@@ -6730,9 +6737,6 @@ static void cg_emit_mul(cg_generator_t *gen, arena_t *arena) {
   }
 
   cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
-                      arena);
 }
 
 static void cg_emit_div(cg_generator_t *gen, arena_t *arena) {
@@ -6764,9 +6768,6 @@ static void cg_emit_div(cg_generator_t *gen, arena_t *arena) {
   }
 
   cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
-                      arena);
 }
 
 static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
@@ -6798,9 +6799,6 @@ static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
   }
 
   cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
-                      arena);
 }
 
 #if 0
@@ -7974,7 +7972,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames don't
-      // have to be a full_frame but can be something smaller e.g. append_frame.
+      // have to be a full_frame but can be something smaller e.g.
+      // append_frame.
       const par_ast_node_t *const last_node =
           &gen->resolver->parser->nodes[node->nodes[i]];
       if (last_node->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
