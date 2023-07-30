@@ -655,8 +655,9 @@ typedef struct {
 } par_type_method_t;
 
 struct ty_type_t {
+  string_t java_class_name;
+  string_t kotlin_class_name;
   union {
-    string_t class_name;      // TYPE_INSTANCE_REFERENCE
     par_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;         // TYPE_ARRAY_REFERENCE
   } v;
@@ -858,8 +859,8 @@ typedef struct {
     struct cf_constant_method_ref_t {
       u16 class;
       u16 name_and_type;
-    } method_ref;   // CONSTANT_POOL_KIND_METHOD_REF
-    u16 class_name; // CONSTANT_POOL_KIND_CLASS_INFO
+    } method_ref;        // CONSTANT_POOL_KIND_METHOD_REF
+    u16 java_class_name; // CONSTANT_POOL_KIND_CLASS_INFO
     struct cf_constant_name_and_type_t {
       u16 name;
       u16 descriptor;
@@ -1033,10 +1034,10 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     break;
   }
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
-    const string_t class_name = type->v.class_name;
+    const string_t java_class_name = type->java_class_name;
 
     string_append_char(descriptor, 'L', arena);
-    string_append_string(descriptor, class_name, arena);
+    string_append_string(descriptor, java_class_name, arena);
     string_append_char(descriptor, ';', arena);
 
     break;
@@ -1111,15 +1112,15 @@ static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
     return;
   case 'L':
     type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
-    string_t class_name = {
+    string_t java_class_name = {
         .value = descriptor.value + 1, // Skip starting `L`.
         .len = descriptor.len - 1,
     };
-    pg_assert(class_name.len >= 2);
-    pg_assert(class_name.value[class_name.len - 1] = ';');
+    pg_assert(java_class_name.len >= 2);
+    pg_assert(java_class_name.value[java_class_name.len - 1] = ';');
     // `Drop ending `;`.
-    class_name.len -= 1;
-    type->v.class_name = class_name;
+    java_class_name.len -= 1;
+    type->java_class_name = java_class_name;
     return;
   case '[':
     type->kind = TYPE_JVM_ARRAY_REFERENCE;
@@ -1968,12 +1969,13 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     return 1;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
-    const u16 class_name_i = buf_read_be_u16(buf, buf_len, current);
-    pg_assert(class_name_i > 0);
-    pg_assert(class_name_i <= constant_pool_count);
+    const u16 java_class_name_i = buf_read_be_u16(buf, buf_len, current);
+    pg_assert(java_class_name_i > 0);
+    pg_assert(java_class_name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
-                                    .v = {.class_name = class_name_i}};
+    const cf_constant_t constant = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {.java_class_name = java_class_name_i}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2304,7 +2306,7 @@ static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
     file_write_be_u64(file, constant->v.number);
     return 1;
   case CONSTANT_POOL_KIND_CLASS_INFO:
-    file_write_be_u16(file, constant->v.class_name);
+    file_write_be_u16(file, constant->v.java_class_name);
     break;
   case CONSTANT_POOL_KIND_STRING:
     file_write_be_u16(file, constant->v.string_utf8_i);
@@ -3234,7 +3236,7 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
     pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.class_name;
+    const u16 this_class_i = this_class->v.java_class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
 
@@ -3279,7 +3281,7 @@ static bool cf_class_files_find_class_exactly(
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
     pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.class_name;
+    const u16 this_class_i = this_class->v.java_class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
 
@@ -3315,7 +3317,7 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
     pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.class_name;
+    const u16 this_class_i = this_class->v.java_class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
 
@@ -4162,7 +4164,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_JVM_ARRAY_REFERENCE:
     return string_make_from_c("jvm.Array<todo>", arena);
   case TYPE_KOTLIN_INSTANCE_REFERENCE:
-    return type->v.class_name;
+    return type->java_class_name;
   case TYPE_KOTLIN_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
 
@@ -5403,16 +5405,16 @@ typedef struct {
   ty_variable_t *variables;
   ty_type_t *types;
   u32 current_type_i;
-  u32 kotlin_char_class_i;
-  u32 kotlin_byte_class_i;
-  u32 kotlin_short_class_i;
-  u32 kotlin_int_class_i;
-  u32 kotlin_float_class_i;
-  u32 kotlin_double_class_i;
-  u32 kotlin_long_class_i;
-  u32 kotlin_string_class_i;
-  u32 kotlin_unit_type_i;
-  u32 kotlin_boolean_class_i;
+  u32 jvm_char_class_i;
+  u32 jvm_byte_class_i;
+  u32 jvm_short_class_i;
+  u32 jvm_int_class_i;
+  u32 jvm_float_class_i;
+  u32 jvm_double_class_i;
+  u32 jvm_long_class_i;
+  u32 jvm_string_class_i;
+  u32 jvm_unit_type_i;
+  u32 jvm_boolean_class_i;
   u32 scope_depth;
   u32 current_function_i;
   pg_pad(4);
@@ -5432,7 +5434,7 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
     if (lhs->class_file_i == rhs->class_file_i)
       return true;
 
-    if (string_eq(lhs->v.class_name, rhs->v.class_name))
+    if (string_eq(lhs->java_class_name, rhs->java_class_name))
       return true;
 
     return false;
@@ -5459,12 +5461,12 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
       if (lhs->class_file_i == rhs->class_file_i) {
         *result_i = lhs_i;
         return true;
-      } else if (lhs->class_file_i == resolver->kotlin_byte_class_i &&
-                 rhs->class_file_i == resolver->kotlin_int_class_i) {
+      } else if (lhs->class_file_i == resolver->jvm_byte_class_i &&
+                 rhs->class_file_i == resolver->jvm_int_class_i) {
         *result_i = lhs_i;
         return true;
-      } else if (lhs->class_file_i == resolver->kotlin_short_class_i &&
-                 rhs->class_file_i == resolver->kotlin_int_class_i) {
+      } else if (lhs->class_file_i == resolver->jvm_short_class_i &&
+                 rhs->class_file_i == resolver->jvm_int_class_i) {
         *result_i = lhs_i;
         return true;
       } else {
@@ -5566,35 +5568,36 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 #endif
 }
 
+// FIXME: Should probably be removed and we should use a general purpose cache
+// instead.
 static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver);
   pg_assert(resolver->class_files);
   pg_assert(arena);
 
   const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
-  resolver->kotlin_unit_type_i =
-      ty_add_type(&resolver->types, &unit_type, arena);
+  resolver->jvm_unit_type_i = ty_add_type(&resolver->types, &unit_type, arena);
 
-  const string_t kotlin_boolean_class_name =
+  const string_t java_boolean_class_name =
       string_make_from_c_no_alloc("java/lang/Boolean");
-  const string_t kotlin_int_class_name =
+  const string_t java_int_class_name =
       string_make_from_c_no_alloc("java/lang/Integer");
-  const string_t kotlin_byte_class_name =
+  const string_t java_byte_class_name =
       string_make_from_c_no_alloc("java/lang/Byte");
-  const string_t kotlin_char_class_name =
+  const string_t java_char_class_name =
       string_make_from_c_no_alloc("java/lang/Char");
-  const string_t kotlin_short_class_name =
+  const string_t java_short_class_name =
       string_make_from_c_no_alloc("java/lang/Short");
-  const string_t kotlin_float_class_name =
+  const string_t java_float_class_name =
       string_make_from_c_no_alloc("java/lang/Float");
-  const string_t kotlin_double_class_name =
+  const string_t java_double_class_name =
       string_make_from_c_no_alloc("java/lang/Double");
-  const string_t kotlin_long_class_name =
+  const string_t java_long_class_name =
       string_make_from_c_no_alloc("java/lang/Long");
-  const string_t kotlin_string_class_name =
+  const string_t java_string_class_name =
       string_make_from_c_no_alloc("java/lang/String");
 
-  resolver->kotlin_int_class_i = (u32)-1;
+  resolver->jvm_int_class_i = (u32)-1;
 
   for (u64 i = 0; i < pg_array_len(resolver->class_files); i++) {
     const cf_class_file_t *const class_file = &resolver->class_files[i];
@@ -5605,49 +5608,49 @@ static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
     const cf_constant_t *const this_class = cf_constant_array_get(
         &class_file->constant_pool, class_file->this_class);
     pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.class_name;
+    const u16 this_class_i = this_class->v.java_class_name;
     const string_t this_class_name = cf_constant_array_get_as_string(
         &class_file->constant_pool, this_class_i);
 
-    if (string_eq(this_class_name, kotlin_boolean_class_name)) {
-      resolver->kotlin_boolean_class_i = i;
+    if (string_eq(this_class_name, java_boolean_class_name)) {
+      resolver->jvm_boolean_class_i = i;
     }
 
-    if (string_eq(this_class_name, kotlin_int_class_name)) {
-      resolver->kotlin_int_class_i = i;
+    if (string_eq(this_class_name, java_int_class_name)) {
+      resolver->jvm_int_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_byte_class_name)) {
-      resolver->kotlin_byte_class_i = i;
+    if (string_eq(this_class_name, java_byte_class_name)) {
+      resolver->jvm_byte_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_char_class_name)) {
-      resolver->kotlin_char_class_i = i;
+    if (string_eq(this_class_name, java_char_class_name)) {
+      resolver->jvm_char_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_short_class_name)) {
-      resolver->kotlin_short_class_i = i;
+    if (string_eq(this_class_name, java_short_class_name)) {
+      resolver->jvm_short_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_float_class_name)) {
-      resolver->kotlin_float_class_i = i;
+    if (string_eq(this_class_name, java_float_class_name)) {
+      resolver->jvm_float_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_long_class_name)) {
-      resolver->kotlin_long_class_i = i;
+    if (string_eq(this_class_name, java_long_class_name)) {
+      resolver->jvm_long_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_double_class_name)) {
-      resolver->kotlin_double_class_i = i;
+    if (string_eq(this_class_name, java_double_class_name)) {
+      resolver->jvm_double_class_i = i;
     }
-    if (string_eq(this_class_name, kotlin_string_class_name)) {
-      resolver->kotlin_string_class_i = i;
+    if (string_eq(this_class_name, java_string_class_name)) {
+      resolver->jvm_string_class_i = i;
     }
   }
 
-  if ((resolver->kotlin_int_class_i == (u32)-1) ||
-      (resolver->kotlin_boolean_class_i == (u32)-1) ||
-      (resolver->kotlin_byte_class_i == (u32)-1) ||
-      (resolver->kotlin_char_class_i == (u32)-1) ||
-      (resolver->kotlin_short_class_i == (u32)-1) ||
-      (resolver->kotlin_float_class_i == (u32)-1) ||
-      (resolver->kotlin_long_class_i == (u32)-1) ||
-      (resolver->kotlin_double_class_i == (u32)-1) ||
-      (resolver->kotlin_string_class_i == (u32)-1)) {
+  if ((resolver->jvm_int_class_i == (u32)-1) ||
+      (resolver->jvm_boolean_class_i == (u32)-1) ||
+      (resolver->jvm_byte_class_i == (u32)-1) ||
+      (resolver->jvm_char_class_i == (u32)-1) ||
+      (resolver->jvm_short_class_i == (u32)-1) ||
+      (resolver->jvm_float_class_i == (u32)-1) ||
+      (resolver->jvm_long_class_i == (u32)-1) ||
+      (resolver->jvm_double_class_i == (u32)-1) ||
+      (resolver->jvm_string_class_i == (u32)-1)) {
     fprintf(stderr,
             "Standard library types could not be found, a valid classpath "
             "containing the standard library jar must be provided.");
@@ -5783,8 +5786,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_BOOL: {
     ty_type_t type = {
         .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-        .class_file_i = resolver->kotlin_boolean_class_i,
-        .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
+        .class_file_i = resolver->jvm_boolean_class_i,
+        .kotlin_class_name = string_make_from_c("kotlin.Boolean", arena),
+        .java_class_name = string_make_from_c("java/lang/Boolean", arena),
     };
     return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
@@ -5797,7 +5801,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_type_t println_type = {
         .kind = TYPE_KOTLIN_METHOD,
         .v = {.method = {
-                  .return_type_i = resolver->kotlin_unit_type_i,
+                  .return_type_i = resolver->jvm_unit_type_i,
               }}};
     pg_array_init_reserve(println_type.v.method.argument_types_i, 1, arena);
     pg_array_append(println_type.v.method.argument_types_i, lhs->type_i, arena);
@@ -5835,13 +5839,14 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       par_error(resolver->parser, token, error.value);
     }
 
-    return resolver->kotlin_unit_type_i;
+    return resolver->jvm_unit_type_i;
   }
   case AST_KIND_NUMBER: {
     ty_type_t type = {
         .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-        .class_file_i = resolver->kotlin_int_class_i,
-        .v = {.class_name = string_make_from_c("kotlin.Int", arena)},
+        .class_file_i = resolver->jvm_int_class_i,
+        .kotlin_class_name = string_make_from_c("kotlin.Int", arena),
+        .java_class_name = string_make_from_c("java/lang/Integer", arena),
     };
     const u64 number = par_number(resolver->parser, token, &type.flag);
     if (type.flag & NODE_NUMBER_FLAGS_OVERFLOW) {
@@ -5850,8 +5855,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
 
     } else if (type.flag & NODE_NUMBER_FLAGS_LONG) {
-      type.class_file_i = resolver->kotlin_long_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Long", arena);
+      type.class_file_i = resolver->jvm_long_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Long", arena);
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
@@ -5872,7 +5877,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       node->type_i = ty_resolve_node(resolver, node->lhs, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (!(type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-            type->class_file_i == resolver->kotlin_boolean_class_i)) {
+            type->class_file_i == resolver->jvm_boolean_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(
@@ -5921,8 +5926,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_EQUAL_EQUAL: {
       const ty_type_t type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-          .class_file_i = resolver->kotlin_boolean_class_i,
-          .v = {.class_name = string_make_from_c("kotlin.Boolean", arena)},
+          .class_file_i = resolver->jvm_boolean_class_i,
+          .kotlin_class_name = string_make_from_c("kotlin.Boolean", arena),
+          .java_class_name = string_make_from_c("java/lang/Boolean", arena),
       };
       return node->type_i = ty_add_type(&resolver->types, &type, arena);
     }
@@ -5930,7 +5936,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (!(lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-            lhs_type->class_file_i == resolver->kotlin_boolean_class_i)) {
+            lhs_type->class_file_i == resolver->jvm_boolean_class_i)) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -5966,7 +5972,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const u32 return_type_i =
         node->extra_data_i > 0
             ? ty_resolve_node(resolver, node->extra_data_i, arena)
-            : resolver->kotlin_unit_type_i;
+            : resolver->jvm_unit_type_i;
 
     resolver->current_function_i = node_i;
 
@@ -6054,7 +6060,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-          type_condition->class_file_i == resolver->kotlin_boolean_class_i)) {
+          type_condition->class_file_i == resolver->jvm_boolean_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6077,7 +6083,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-          type_condition->class_file_i == resolver->kotlin_boolean_class_i)) {
+          type_condition->class_file_i == resolver->jvm_boolean_class_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6100,8 +6106,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   case AST_KIND_STRING: {
     const ty_type_t type = {
         .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-        .class_file_i = resolver->kotlin_string_class_i,
-        .v = {.class_name = string_make_from_c("kotlin.String", arena)},
+        .class_file_i = resolver->jvm_string_class_i,
+        .kotlin_class_name = string_make_from_c("kotlin.String", arena),
+        .java_class_name = string_make_from_c("java/lang/String", arena),
     };
     pg_array_append(resolver->types, type, arena);
     const u32 type_i = pg_array_last_index(resolver->types);
@@ -6200,36 +6207,36 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_type_t type = {.kind = TYPE_KOTLIN_INSTANCE_REFERENCE};
     if (string_eq_c(type_literal_string, "Int") ||
         string_eq_c(type_literal_string, "kotlin.Int")) {
-      type.class_file_i = resolver->kotlin_int_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Int", arena);
+      type.class_file_i = resolver->jvm_int_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Int", arena);
     } else if (string_eq_c(type_literal_string, "Boolean") ||
                string_eq_c(type_literal_string, "kotlin.Boolean")) {
-      type.class_file_i = resolver->kotlin_boolean_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Short", arena);
+      type.class_file_i = resolver->jvm_boolean_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Short", arena);
     } else if (string_eq_c(type_literal_string, "Byte") ||
                string_eq_c(type_literal_string, "kotlin.Byte")) {
-      type.class_file_i = resolver->kotlin_byte_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Byte", arena);
+      type.class_file_i = resolver->jvm_byte_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Byte", arena);
     } else if (string_eq_c(type_literal_string, "Char") ||
                string_eq_c(type_literal_string, "kotlin.Char")) {
-      type.class_file_i = resolver->kotlin_char_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Char", arena);
+      type.class_file_i = resolver->jvm_char_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Char", arena);
     } else if (string_eq_c(type_literal_string, "Short") ||
                string_eq_c(type_literal_string, "kotlin.Short")) {
-      type.class_file_i = resolver->kotlin_short_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Short", arena);
+      type.class_file_i = resolver->jvm_short_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Short", arena);
     } else if (string_eq_c(type_literal_string, "Float") ||
                string_eq_c(type_literal_string, "kotlin.Float")) {
-      type.class_file_i = resolver->kotlin_float_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Float", arena);
+      type.class_file_i = resolver->jvm_float_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Float", arena);
     } else if (string_eq_c(type_literal_string, "Double") ||
                string_eq_c(type_literal_string, "kotlin.Double")) {
-      type.class_file_i = resolver->kotlin_double_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Double", arena);
+      type.class_file_i = resolver->jvm_double_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Double", arena);
     } else if (string_eq_c(type_literal_string, "Long") ||
                string_eq_c(type_literal_string, "kotlin.Long")) {
-      type.class_file_i = resolver->kotlin_long_class_i;
-      type.v.class_name = string_make_from_c("kotlin.Long", arena);
+      type.class_file_i = resolver->jvm_long_class_i;
+      type.java_class_name = string_make_from_c("kotlin.Long", arena);
     } else {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
@@ -6358,25 +6365,25 @@ void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
   if (type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE)
     return;
 
-  if (string_eq_c(type->v.class_name, "kotlin.Int")) {
+  if (string_eq_c(type->java_class_name, "kotlin.Int")) {
     type->kind = TYPE_JVM_INT;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Boolean")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Boolean")) {
     type->kind = TYPE_JVM_BOOL;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Char")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Char")) {
     type->kind = TYPE_JVM_CHAR;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Byte")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Byte")) {
     type->kind = TYPE_JVM_BYTE;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Short")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Short")) {
     type->kind = TYPE_JVM_SHORT;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Int")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Int")) {
     type->kind = TYPE_JVM_INT;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Float")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Float")) {
     type->kind = TYPE_JVM_FLOAT;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Long")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Long")) {
     type->kind = TYPE_JVM_LONG;
-  } else if (string_eq_c(type->v.class_name, "kotlin.Double")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.Double")) {
     type->kind = TYPE_JVM_DOUBLE;
-  } else if (string_eq_c(type->v.class_name, "kotlin.String")) {
+  } else if (string_eq_c(type->java_class_name, "kotlin.String")) {
     type->kind = TYPE_JVM_STRING;
   }
 }
@@ -7484,7 +7491,7 @@ static u16 cg_add_class_name_in_constant_pool(cf_class_file_t *class_file,
   const u16 class_name_i =
       cf_add_constant_string(&class_file->constant_pool, class_name, arena);
   const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
-                                   .v = {.class_name = class_name_i}};
+                                   .v = {.java_class_name = class_name_i}};
   const u16 class_i =
       cf_constant_array_push(&class_file->constant_pool, &out_class, arena);
 
@@ -7592,7 +7599,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     const cf_constant_t printstream_class = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.class_name = printstream_name_i}};
+        .v = {.java_class_name = printstream_name_i}};
     const u16 printstream_class_i = cf_constant_array_push(
         &class_file->constant_pool, &printstream_class, arena);
     const cf_constant_t method_ref = {
@@ -8273,8 +8280,9 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
 
     const u16 system_name_i = cf_add_constant_cstring(
         &class_file->constant_pool, "java/lang/System", arena);
-    const cf_constant_t system_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
-                                        .v = {.class_name = system_name_i}};
+    const cf_constant_t system_class = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {.java_class_name = system_name_i}};
     const u16 system_class_i = cf_constant_array_push(
         &class_file->constant_pool, &system_class, arena);
 
@@ -8289,8 +8297,9 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
 
     const u16 out_class_name_i = cf_add_constant_cstring(
         &class_file->constant_pool, "java/io/PrintStream", arena);
-    const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
-                                     .v = {.class_name = out_class_name_i}};
+    const cf_constant_t out_class = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {.java_class_name = out_class_name_i}};
     const u16 out_class_i =
         cf_constant_array_push(&class_file->constant_pool, &out_class, arena);
     gen->out_field_ref_class_i = out_class_i;
@@ -8302,11 +8311,11 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
     const u16 this_class_name_i =
         cf_add_constant_string(&class_file->constant_pool, class_name, arena);
 
-    const cf_constant_t this_class_info = {.kind =
-                                               CONSTANT_POOL_KIND_CLASS_INFO,
-                                           .v = {
-                                               .class_name = this_class_name_i,
-                                           }};
+    const cf_constant_t this_class_info = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {
+            .java_class_name = this_class_name_i,
+        }};
     class_file->this_class = cf_constant_array_push(&class_file->constant_pool,
                                                     &this_class_info, arena);
   }
@@ -8318,7 +8327,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
     const cf_constant_t super_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {
-            .class_name = constant_java_lang_object_string_i,
+            .java_class_name = constant_java_lang_object_string_i,
         }};
 
     class_file->super_class = cf_constant_array_push(&class_file->constant_pool,
@@ -8440,11 +8449,10 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     // Fill locals (method arguments).
     {
-      const string_t string_class_name =
-          string_make_from_c("java/lang/String", arena);
       const ty_type_t string_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-          .v = {.class_name = string_class_name},
+          .kotlin_class_name = string_make_from_c("kotlin.String", arena),
+          .java_class_name = string_make_from_c("java/lang/String", arena),
       };
       pg_array_append(gen->resolver->types, string_type, arena);
       const u32 string_type_i = pg_array_last_index(gen->resolver->types);
@@ -8464,7 +8472,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       const cf_constant_t source_method_arg0_class = {
           .kind = CONSTANT_POOL_KIND_CLASS_INFO,
           .v = {
-              .class_name = source_method_arg0_string,
+              .java_class_name = source_method_arg0_string,
           }};
       const u16 source_method_arg0_class_i = cf_constant_array_push(
           &class_file->constant_pool, &source_method_arg0_class, arena);
