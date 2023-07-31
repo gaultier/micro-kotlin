@@ -139,8 +139,8 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);
-    pg_array_append(resolver.types, (ty_type_t){0}, &arena); // Default value.
-    ty_find_known_types(&resolver, &arena);
+    pg_array_append(resolver.types, (ty_type_t){0},
+                    &arena); // Default value (Any).
     ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.
