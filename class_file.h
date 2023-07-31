@@ -666,8 +666,7 @@ struct ty_type_t {
   u16 constant_pool_item_i;
   u32 class_file_i;
   u16 field_i;
-  pg_pad(2);
-  u32 extra_data_i;
+  pg_pad(6);
 };
 
 typedef struct ty_type_t ty_type_t;
@@ -5864,12 +5863,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         return 0;
       }
     }
-    type.extra_data_i = (u32)arena->current_offset;
+    node->extra_data_i = (u32)arena->current_offset;
     u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
     *extra_data_number = number;
 
-    pg_array_append(resolver->types, type, arena);
-    return node->type_i = pg_array_last_index(resolver->types);
+    return node->type_i = ty_add_type(&resolver->types, &type,arena);
   }
   case AST_KIND_UNARY:
     switch (token.kind) {
@@ -7548,7 +7546,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
     // TODO: Float, Double, etc.
 
-    const u64 number = *(u64 *)(arena->base + type->extra_data_i);
+    const u64 number = *(u64 *)(arena->base + node->extra_data_i);
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant, arena);
