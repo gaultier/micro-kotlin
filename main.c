@@ -131,7 +131,11 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    resolver_t resolver = {.parser = &parser, .class_files = class_files};
+    resolver_t resolver = {
+        .parser = &parser,
+        .class_files = class_files,
+        .class_path_entries = class_path_entries,
+    };
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);

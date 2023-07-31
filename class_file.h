@@ -5401,6 +5401,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 typedef struct {
   par_parser_t *parser;
   cf_class_file_t *class_files;
+  string_t *class_path_entries;
   ty_variable_t *variables;
   ty_type_t *types;
   u32 current_type_i;
@@ -5567,93 +5568,66 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 #endif
 }
 
+static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
+                                  arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(class_name.value != NULL);
+  pg_assert(arena != NULL);
+
+  for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
+    const string_t class_path_entry = resolver->class_path_entries[i];
+
+    string_t tentative_path =
+        string_reserve(class_path_entry.len + 1 + class_name.len, arena);
+    string_append_string(&tentative_path, class_path_entry, arena);
+    string_append_char(&tentative_path, '/', arena);
+    string_append_string(&tentative_path, class_name, arena);
+
+    const int fd = open(tentative_path.value, O_RDONLY);
+    if (fd == -1)
+      continue;
+
+    struct stat st = {0};
+    if (stat(tentative_path.value, &st) == -1)
+      continue;
+
+    if (st.st_size == 0)
+      continue;
+
+    if (!S_ISREG(st.st_mode))
+      continue;
+
+    // TODO: Should we return more information?
+    return true;
+  }
+
+  return false;
+}
+
 // FIXME: Should probably be removed and we should use a general purpose cache
 // instead.
 static void ty_find_known_types(resolver_t *resolver, arena_t *arena) {
-  pg_assert(resolver);
-  pg_assert(resolver->class_files);
-  pg_assert(arena);
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->class_files != NULL);
+  pg_assert(arena != NULL);
 
   const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
   resolver->jvm_unit_type_i = ty_add_type(&resolver->types, &unit_type, arena);
 
-  const string_t java_boolean_class_name =
-      string_make_from_c_no_alloc("java/lang/Boolean");
-  const string_t java_int_class_name =
-      string_make_from_c_no_alloc("java/lang/Integer");
-  const string_t java_byte_class_name =
-      string_make_from_c_no_alloc("java/lang/Byte");
-  const string_t java_char_class_name =
-      string_make_from_c_no_alloc("java/lang/Char");
-  const string_t java_short_class_name =
-      string_make_from_c_no_alloc("java/lang/Short");
-  const string_t java_float_class_name =
-      string_make_from_c_no_alloc("java/lang/Float");
-  const string_t java_double_class_name =
-      string_make_from_c_no_alloc("java/lang/Double");
-  const string_t java_long_class_name =
-      string_make_from_c_no_alloc("java/lang/Long");
-  const string_t java_string_class_name =
-      string_make_from_c_no_alloc("java/lang/String");
+  const string_t to_search[] = {
+      string_make_from_c_no_alloc("java/lang/Boolean"),
+      string_make_from_c_no_alloc("java/lang/Integer"),
+      string_make_from_c_no_alloc("java/lang/Byte"),
+      string_make_from_c_no_alloc("java/lang/Char"),
+      string_make_from_c_no_alloc("java/lang/Short"),
+      string_make_from_c_no_alloc("java/lang/Float"),
+      string_make_from_c_no_alloc("java/lang/Double"),
+      string_make_from_c_no_alloc("java/lang/Long"),
+      string_make_from_c_no_alloc("java/lang/String"),
+  };
 
-  resolver->jvm_int_class_i = (u32)-1;
-
-  for (u64 i = 0; i < pg_array_len(resolver->class_files); i++) {
-    const cf_class_file_t *const class_file = &resolver->class_files[i];
-    pg_assert(class_file->class_file_path.len > 0);
-    pg_assert(class_file->class_file_path.value != NULL);
-    pg_assert(class_file->this_class > 0);
-
-    const cf_constant_t *const this_class = cf_constant_array_get(
-        &class_file->constant_pool, class_file->this_class);
-    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.java_class_name;
-    const string_t this_class_name = cf_constant_array_get_as_string(
-        &class_file->constant_pool, this_class_i);
-
-    if (string_eq(this_class_name, java_boolean_class_name)) {
-      resolver->jvm_boolean_class_i = i;
-    }
-
-    if (string_eq(this_class_name, java_int_class_name)) {
-      resolver->jvm_int_class_i = i;
-    }
-    if (string_eq(this_class_name, java_byte_class_name)) {
-      resolver->jvm_byte_class_i = i;
-    }
-    if (string_eq(this_class_name, java_char_class_name)) {
-      resolver->jvm_char_class_i = i;
-    }
-    if (string_eq(this_class_name, java_short_class_name)) {
-      resolver->jvm_short_class_i = i;
-    }
-    if (string_eq(this_class_name, java_float_class_name)) {
-      resolver->jvm_float_class_i = i;
-    }
-    if (string_eq(this_class_name, java_long_class_name)) {
-      resolver->jvm_long_class_i = i;
-    }
-    if (string_eq(this_class_name, java_double_class_name)) {
-      resolver->jvm_double_class_i = i;
-    }
-    if (string_eq(this_class_name, java_string_class_name)) {
-      resolver->jvm_string_class_i = i;
-    }
-  }
-
-  if ((resolver->jvm_int_class_i == (u32)-1) ||
-      (resolver->jvm_boolean_class_i == (u32)-1) ||
-      (resolver->jvm_byte_class_i == (u32)-1) ||
-      (resolver->jvm_char_class_i == (u32)-1) ||
-      (resolver->jvm_short_class_i == (u32)-1) ||
-      (resolver->jvm_float_class_i == (u32)-1) ||
-      (resolver->jvm_long_class_i == (u32)-1) ||
-      (resolver->jvm_double_class_i == (u32)-1) ||
-      (resolver->jvm_string_class_i == (u32)-1)) {
-    fprintf(stderr,
-            "Standard library types could not be found, a valid classpath "
-            "containing the standard library jar must be provided.");
-    exit(EINVAL);
+  for (u64 i = 0; i < sizeof(to_search) / sizeof(to_search[0]); i++) {
+    ty_resolve_class_name(resolver, to_search[i], arena);
   }
 }
 
@@ -5867,7 +5841,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
     *extra_data_number = number;
 
-    return node->type_i = ty_add_type(&resolver->types, &type,arena);
+    return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
   case AST_KIND_UNARY:
     switch (token.kind) {
