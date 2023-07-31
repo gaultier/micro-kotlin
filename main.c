@@ -50,28 +50,25 @@ int main(int argc, char *argv[]) {
   // Read class files (stdlib, etc).
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 1 << 18, &arena);
+
+  string_t *class_path_entries = NULL;
+  pg_array_init_reserve(class_path_entries, 16, &arena);
+  pg_array_append(class_path_entries, string_make_from_c_no_alloc("."), &arena);
+
   {
     char *class_path_sep = NULL;
     while ((class_path_sep = strchr(classpath, ':')) != NULL) {
-      const u64 classpath_len = class_path_sep - classpath;
+      const string_t class_path_entry = string_make_from_c(classpath, &arena);
+      pg_array_append(class_path_entries, class_path_entry, &arena);
 
-      char pathbuf[4096] = "";
-      memcpy(pathbuf, classpath, classpath_len);
-
-      cf_read_jmod_and_jar_and_class_files_recursively(pathbuf, classpath_len,
-                                                       &class_files, &arena);
       classpath = class_path_sep + 1;
     }
-
-    cf_read_jmod_and_jar_and_class_files_recursively(
-        classpath, strlen(classpath), &class_files, &arena);
+    const string_t class_path_entry = string_make_from_c(classpath, &arena);
+    pg_array_append(class_path_entries, class_path_entry, &arena);
 
     // FIXME: It should be the basename of the source file.
     cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
                                                      &arena);
-
-    LOG("class_files_len=%lu arena=%lu", pg_array_len(class_files),
-        arena.current_offset);
   }
   {
     // TODO: when parsing multiple files, need to allocate that.
