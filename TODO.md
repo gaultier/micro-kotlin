@@ -119,7 +119,9 @@
 - [ ] Java <-> Kotlin interop e.g. @JvmName, etc
 - [ ] Runtime reflection
 
-## Naive approach for reading external class files to know what fields/methods are available
+## Approach for reading external class files to know what class/fields/methods are available
+
+### Naive
 
 1. For each class file in the class path:
     1. Parse the whole class file
@@ -133,6 +135,28 @@
         2. Record the name and descriptor
         3. Sanity checks
         4. ~Put it in a map/array~
+
+### Better approach, mimicking javac/java: on-demand
+
+1 For each fully-qualified type to resolve e.g. `foo.bar.Baz` $TYPE:
+    1. For each colon-separated entry in the class path e.g. `/tmp:/usr/share` $ENTRY:
+      1. stat(2)  `$ENTRY/$TYPE.class` e.g. `/tmp/foo/bar/Baz.class`
+        - If it fails or is not a file, continue 
+        - If it succeeds: Parse the class file
+
+If not found or types do not match: type error.
+
+Same for methods/fields.
+
+Remaining questions:
+
+- How to deal with conflicts? E.g. both `/tmp/foo/bar/Baz.class` and `/usr/share/foo/bar/Baz.class` were found => First found (in order of appearance in the class path) wins.
+- How to involve jar and jmod files in this schema? Use the file path given by the zip file entries I guess.
+- Caching/cache eviction? => Naive first version when searching for methods/fields where parsing the class file is needed: keep every parsed class file in memory. More advanced: real cache.
+- How to prevent combinatorial explosion
+
+
+
 
 ## Open questions
 
