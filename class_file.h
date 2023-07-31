@@ -2279,8 +2279,11 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   const u64 remaining = buf + buf_len - *current;
   pg_assert(remaining == 0);
 
-  class_file->class_name = cf_constant_array_get_as_string(
-      &class_file->constant_pool, class_file->this_class);
+  const cf_constant_t *const this_class =
+      cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
+  pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+  class_file->class_name =
+      cf_constant_array_get_as_string(&class_file->constant_pool, this_class->v.string_utf8_i);
 }
 
 // Returns the number of incoming slots to skip:
