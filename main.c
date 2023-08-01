@@ -67,8 +67,8 @@ int main(int argc, char *argv[]) {
     pg_array_append(class_path_entries, class_path_entry, &arena);
 
     // FIXME: It should be the basename of the source file.
-    cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
-                                                     &arena);
+    //cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
+      //                                               &arena);
   }
   {
     // TODO: when parsing multiple files, need to allocate that.

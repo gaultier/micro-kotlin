@@ -2282,8 +2282,8 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   const cf_constant_t *const this_class =
       cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
   pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-  class_file->class_name =
-      cf_constant_array_get_as_string(&class_file->constant_pool, this_class->v.string_utf8_i);
+  class_file->class_name = cf_constant_array_get_as_string(
+      &class_file->constant_pool, this_class->v.string_utf8_i);
 }
 
 // Returns the number of incoming slots to skip:
@@ -2830,11 +2830,12 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
 
   return last_path_component;
 }
-static void cf_buf_read_jar_file(string_t content, char *path,
-                                 cf_class_file_t **class_files, arena_t *arena);
+static bool cf_buf_read_jar_file(string_t content, char *path,
+                                 cf_class_file_t **class_files,
+                                 string_t class_file_name, arena_t *arena);
 
-static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
-                              arena_t *arena) {
+static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
+                              string_t class_file_name, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2843,17 +2844,17 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
-    return;
+    return false;
   }
 
   struct stat st = {0};
   if (stat(path, &st) == -1) {
     fprintf(stderr, "Failed to get the file size %s: %s\n", path,
             strerror(errno));
-    return;
+    return false;
   }
   if (st.st_size == 0) {
-    return;
+    return false;
   }
 
   string_t content = {0};
@@ -2861,7 +2862,7 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
   if (res != -1) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
             strerror(res));
-    return;
+    return false;
   }
   close(fd);
 
@@ -2876,11 +2877,12 @@ static void cf_read_jmod_file(char *path, cf_class_file_t **class_files,
 
   content.value += 4;
   content.len -= 4;
-  cf_buf_read_jar_file(content, path, class_files, arena);
+  return cf_buf_read_jar_file(content, path, class_files, class_file_name,
+                              arena);
 }
 
-static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
-                             arena_t *arena) {
+static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
+                             string_t class_file_path, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2889,17 +2891,17 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
-    return;
+    return false;
   }
 
   struct stat st = {0};
   if (stat(path, &st) == -1) {
     fprintf(stderr, "Failed to get the file size %s: %s\n", path,
             strerror(errno));
-    return;
+    return false;
   }
   if (st.st_size == 0) {
-    return;
+    return false;
   }
 
   string_t content = {0};
@@ -2907,16 +2909,17 @@ static void cf_read_jar_file(char *path, cf_class_file_t **class_files,
   if (res != -1) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
             strerror(res));
-    return;
+    return false;
   }
   close(fd);
 
-  cf_buf_read_jar_file(content, path, class_files, arena);
+  return cf_buf_read_jar_file(content, path, class_files, class_file_path,
+                              arena);
 }
 
-static void cf_buf_read_jar_file(string_t content, char *path,
+static bool cf_buf_read_jar_file(string_t content, char *path,
                                  cf_class_file_t **class_files,
-                                 arena_t *arena) {
+                                 string_t class_file_name, arena_t *arena) {
   char *current = content.value;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
@@ -3024,6 +3027,7 @@ static void cf_buf_read_jar_file(string_t content, char *path,
         buf_read_le_u32(content.value, content.len, &cdfh);
 
     // file name
+    char *const file_name = cdfh;
     buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
 
     // extra field
@@ -3031,6 +3035,11 @@ static void cf_buf_read_jar_file(string_t content, char *path,
 
     // file comment
     buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
+
+    const string_t file_name_string = {.value = file_name,
+                                       .len = file_name_length};
+    if (!string_eq(file_name_string, class_file_name))
+      continue;
 
     // Read file header.
     {
@@ -3131,11 +3140,14 @@ static void cf_buf_read_jar_file(string_t content, char *path,
         inflateEnd(&stream);
       }
     }
+    return true;
   }
+  return false;
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
 // threads to parse class files?
+#if 0
 static void cf_read_jmod_and_jar_and_class_files_recursively(
     char *path, u64 path_len, cf_class_file_t **class_files, arena_t *arena) {
   pg_assert(path != NULL);
@@ -3218,6 +3230,7 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
   closedir(dirp);
 #undef PATH_MAX
 }
+#endif
 
 static bool
 cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
@@ -5586,45 +5599,69 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
     }
   }
 
-  // Otherwise scan the class path entries.
+  // Scan the class path entries for `$CLASS_PATH_ENTRY/$CLASS_NAME.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
     const string_t class_path_entry = resolver->class_path_entries[i];
 
-    string_t tentative_path =
-        string_reserve(class_path_entry.len + 1 + class_name.len, arena);
-    string_append_string(&tentative_path, class_path_entry, arena);
-    string_append_char(&tentative_path, '/', arena);
-    string_append_string(&tentative_path, class_name, arena);
+    string_t tentative_class_file_path =
+        string_reserve(class_path_entry.len + 1 + class_name.len + 6, arena);
+    string_append_string(&tentative_class_file_path, class_path_entry, arena);
+    string_append_char(&tentative_class_file_path, '/', arena);
+    string_append_string(&tentative_class_file_path, class_name, arena);
+    string_append_cstring(&tentative_class_file_path, ".class", arena);
 
-    const int fd = open(tentative_path.value, O_RDONLY);
-    if (fd == -1)
-      continue;
+    if (string_ends_with_cstring(tentative_class_file_path, ".class")) {
+      const int fd = open(tentative_class_file_path.value, O_RDONLY);
+      if (fd == -1)
+        continue;
 
-    struct stat st = {0};
-    if (stat(tentative_path.value, &st) == -1)
-      continue;
+      struct stat st = {0};
+      if (stat(tentative_class_file_path.value, &st) == -1)
+        continue;
 
-    if (st.st_size == 0)
-      continue;
+      if (st.st_size == 0)
+        continue;
 
-    if (!S_ISREG(st.st_mode))
-      continue;
+      if (!S_ISREG(st.st_mode))
+        continue;
 
-    char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
-    const ssize_t read_bytes = read(fd, buf, st.st_size);
-    pg_assert(read_bytes == st.st_size);
-    close(fd);
+      char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
+      const ssize_t read_bytes = read(fd, buf, st.st_size);
+      pg_assert(read_bytes == st.st_size);
+      close(fd);
 
-    char *current = buf;
-    cf_class_file_t class_file = {
-        .class_file_path = tentative_path,
-    };
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
-    pg_array_append(resolver->class_files, class_file, arena);
-    pg_assert(string_eq(class_name, class_file.class_name));
+      char *current = buf;
+      cf_class_file_t class_file = {
+          .class_file_path = tentative_class_file_path,
+      };
+      cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
+      pg_array_append(resolver->class_files, class_file, arena);
+      pg_assert(string_eq(class_name, class_file.class_name));
 
-    *class_file_i = pg_array_last_index(resolver->class_files);
-    return true;
+      *class_file_i = pg_array_last_index(resolver->class_files);
+      return true;
+    }
+  }
+
+  for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
+    const string_t class_path_entry = resolver->class_path_entries[i];
+
+    // Scan the class path entries for `$CLASS_PATH_ENTRY/*.{jar,jmod}` and try
+    // to find `$CLASS_NAME.class` inside.
+
+    string_t tentative_class_file_path =
+        string_reserve(class_path_entry.len + 1 + class_name.len + 6, arena);
+    string_append_string(&tentative_class_file_path, class_name, arena);
+    string_append_cstring(&tentative_class_file_path, ".class", arena);
+
+    // FIXME: List files: `*.{jar,jmod}` in the directory $CLASS_PATH_ENTRY.
+    if (string_ends_with_cstring(class_path_entry, ".jar")) {
+      return cf_read_jar_file(class_path_entry.value, &resolver->class_files,
+                              tentative_class_file_path, arena);
+    } else if (string_ends_with_cstring(class_path_entry, ".jmod")) {
+      return cf_read_jmod_file(class_path_entry.value, &resolver->class_files,
+                               tentative_class_file_path, arena);
+    }
   }
 
   return false;
