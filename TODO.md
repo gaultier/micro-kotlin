@@ -63,6 +63,7 @@
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
+- [ ] Arena dump to see how/where memory is utilized
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor

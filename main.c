@@ -18,8 +18,10 @@ int main(int argc, char *argv[]) {
   int opt = 0;
   char *classpath = NULL;
 
-  while ((opt = getopt(argc, argv, "c:")) != -1) {
+  while ((opt = getopt(argc, argv, "vc:")) != -1) {
     switch (opt) {
+    case 'v':
+      log_verbose = true;
     case 'c':
       classpath = optarg;
       break;

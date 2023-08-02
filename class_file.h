@@ -523,13 +523,10 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
 
 // ------------------- Logs
 
-#ifdef PG_WITH_LOG
-#define LOG(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
-#else
+static bool log_verbose = false;
 #define LOG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
+  if (log_verbose)                                                             \
+  fprintf(stderr, fmt "\n", __VA_ARGS__)
 
 // ------------------------ Class file code
 
@@ -2840,7 +2837,8 @@ static string_t cf_make_class_file_path_kt(string_t source_file_name,
 
   string_t result = string_reserve(source_file_name.len + 8, arena);
   string_append_string(&result, source_file_name, arena);
-  string_capitalize_first(&result);
+  string_t last_path_component = string_find_last_path_component(result);
+  string_capitalize_first(&last_path_component);
 
   string_drop_after_last_incl(&result, '.');
   string_append_cstring(&result, "Kt.class", arena);
@@ -5585,7 +5583,9 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
             pg_array_len(resolver->parser->lexer->tokens));
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
-#ifdef PG_WITH_LOG
+  if (!log_verbose)
+    return;
+
   const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
   if (node->kind == AST_KIND_NONE)
     return;
@@ -5638,7 +5638,6 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     resolver_ast_fprint_node(resolver, node->rhs, file, indent + 2, arena);
     break;
   }
-#endif
 }
 
 static bool test_java_executable(char *path, arena_t *arena) {

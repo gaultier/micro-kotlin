@@ -5,7 +5,7 @@ OPTS :=  -c /usr/lib/jvm/java-17-openjdk-amd64/jmods
 WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
 main_debug: main.c class_file.h
-	$(CC) $(CFLAGS) -DPG_WITH_LOG=1 -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined main.c -o $@  $(LDFLAGS)
+	$(CC) $(CFLAGS) -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined main.c -o $@  $(LDFLAGS)
 
 clean:
 	rm *.class || true
