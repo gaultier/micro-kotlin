@@ -6279,42 +6279,50 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_type_t type = {.kind = TYPE_KOTLIN_INSTANCE_REFERENCE};
     if (string_eq_c(type_literal_string, "Int") ||
         string_eq_c(type_literal_string, "kotlin.Int")) {
-      type.java_class_name = string_make_from_c("kotlin.Int", arena);
+      type.java_class_name = string_make_from_c("java/lang/Integer", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Int", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Boolean") ||
                string_eq_c(type_literal_string, "kotlin.Boolean")) {
-      type.java_class_name = string_make_from_c("kotlin.Short", arena);
+      type.java_class_name = string_make_from_c("java/lang/Boolean", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Boolean", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Byte") ||
                string_eq_c(type_literal_string, "kotlin.Byte")) {
-      type.java_class_name = string_make_from_c("kotlin.Byte", arena);
+      type.java_class_name = string_make_from_c("java/lang/Byte", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Byte", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Char") ||
                string_eq_c(type_literal_string, "kotlin.Char")) {
-      type.java_class_name = string_make_from_c("kotlin.Char", arena);
+      type.java_class_name = string_make_from_c("java/lang/Char", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Char", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Short") ||
                string_eq_c(type_literal_string, "kotlin.Short")) {
-      type.java_class_name = string_make_from_c("kotlin.Short", arena);
+      type.java_class_name = string_make_from_c("java/lang/Short", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Short", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Float") ||
                string_eq_c(type_literal_string, "kotlin.Float")) {
-      type.java_class_name = string_make_from_c("kotlin.Float", arena);
+      type.java_class_name = string_make_from_c("java/lang/Float", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Float", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Double") ||
                string_eq_c(type_literal_string, "kotlin.Double")) {
-      type.java_class_name = string_make_from_c("kotlin.Double", arena);
+      type.java_class_name = string_make_from_c("java/lang/Double", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Double", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else if (string_eq_c(type_literal_string, "Long") ||
                string_eq_c(type_literal_string, "kotlin.Long")) {
-      type.java_class_name = string_make_from_c("kotlin.Long", arena);
+      type.java_class_name = string_make_from_c("java/lang/Long", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Long", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else {
