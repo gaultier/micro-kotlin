@@ -1,5 +1,3 @@
-#include <asm-generic/errno-base.h>
-#define _POSIX_C_SOURCE 200809L
 #include "class_file.h"
 #include <stdio.h>
 #include <stdlib.h>

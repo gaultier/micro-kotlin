@@ -1,9 +1,11 @@
 #pragma once
 
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 500L
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/limits.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -249,8 +251,18 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   pg_assert(s->value != NULL);
   pg_assert(s->len < s->cap);
 
-  if (s->value[s->len] != 0)
+  if (s->value[s->len] != 0) {
     string_append_char(s, 0, arena);
+    s->len -= 1;
+  }
+}
+
+static void string_reduce_length_to(string_t *s, u64 length) {
+  pg_assert(s != NULL);
+  pg_assert(length < s->cap);
+
+  s->len = length;
+  s->value[length] = 0;
 }
 
 static string_t string_reserve(u32 cap, arena_t *arena) {
@@ -410,8 +422,6 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
 
   pg_assert(s->value != NULL);
   pg_assert(s->len <= s->cap);
-
-  string_ensure_null_terminated(s, arena);
 }
 
 static void string_append_char_if_not_exists(string_t *s, char c,
@@ -424,29 +434,17 @@ static void string_append_char_if_not_exists(string_t *s, char c,
   }
 }
 
-static void string_append_string_n(string_t *a, string_t b, u64 n,
-                                   arena_t *arena) {
-  pg_assert(a != NULL);
-  pg_assert(a->cap != 0);
-  pg_assert(a->len <= a->cap);
-  pg_assert(n <= b.len);
-
-  for (u64 i = 0; i < n; i++)
-    string_append_char(a, b.value[i], arena);
-
-  pg_assert(a->value != NULL);
-  pg_assert(a->len <= a->cap);
-}
-
 static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   pg_assert(a != NULL);
   pg_assert(a->cap != 0);
   pg_assert(a->len <= a->cap);
 
-  string_append_string_n(a, b, b.len, arena);
+  for (u64 i = 0; i < b.len; i++)
+    string_append_char(a, b.value[i], arena);
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
+  string_ensure_null_terminated(a, arena);
 }
 
 static void string_drop_last_n(string_t *a, u64 n) {
@@ -477,9 +475,11 @@ static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
 
   pg_assert(a->value != NULL);
   pg_assert(a->len <= a->cap);
+
+  string_ensure_null_terminated(a, arena);
 }
 
-static void string_drop_file_component(string_t *path, arena_t *arena) {
+static void string_drop_last_component(string_t *path, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path->value != NULL);
   pg_assert(path->len > 0);
@@ -496,6 +496,8 @@ static void string_drop_file_component(string_t *path, arena_t *arena) {
 
   if (path->len > 0)
     pg_assert(path->value[path->len - 1] != '/');
+
+  string_ensure_null_terminated(path, arena);
 }
 
 // ------------------- Utils, continued
@@ -5640,7 +5642,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   }
 }
 
-static bool test_java_executable(char *path, arena_t *arena) {
+static bool test_java_executable(char *path, string_t *result, arena_t *arena) {
 
   arena_t tmp_arena = *arena;
 
@@ -5649,11 +5651,49 @@ static bool test_java_executable(char *path, arena_t *arena) {
   string_append_char(&tentative_java_path, '/', &tmp_arena);
   string_append_cstring(&tentative_java_path, "java", &tmp_arena);
 
+  string_t real_path = string_reserve(PATH_MAX + 1, arena);
+  if (realpath(tentative_java_path.value, real_path.value) == NULL)
+    return false;
+
+  real_path.len = strlen(real_path.value);
+  pg_assert(real_path.len <= PATH_MAX);
+  string_ensure_null_terminated(&real_path, arena);
+
   struct stat st = {0};
   if (stat(tentative_java_path.value, &st) == -1)
     return false;
 
-  return S_ISREG(st.st_mode) && st.st_mode & 0111;
+  // Regular file and executable, found, e.g.:
+  // `/usr/lib/jvm/java-17-openjdk-amd64/bin/java`.
+  if ((S_ISREG(st.st_mode) && st.st_mode & 0111)) {
+
+    // Now climb back the path to find the real java home e.g.:
+    // - /usr/lib/jvm/java-17-openjdk-amd64/
+    //   - bin/
+    //     - java
+    //   - jmods
+    //     - java.base.jmod
+    //
+    while (real_path.len > 0) {
+      string_drop_last_component(&real_path, arena);
+
+      string_t jmod_directory = string_reserve(PATH_MAX + 1, &tmp_arena);
+      string_append_string(&jmod_directory, real_path, &tmp_arena);
+      string_append_char(&jmod_directory, '/', &tmp_arena);
+      string_append_cstring(&jmod_directory, "jmods", &tmp_arena);
+
+      struct stat st = {0};
+      if (stat(jmod_directory.value, &st) == -1)
+        continue;
+
+      if (S_ISDIR(st.st_mode)) {
+        *result = real_path;
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 static string_t find_java_home(arena_t *arena) {
@@ -5666,17 +5706,18 @@ static string_t find_java_home(arena_t *arena) {
   pg_assert(path != NULL);
 
   char *path_sep = NULL;
+  string_t result = {0};
   while ((path_sep = strchr(path, ':')) != NULL) {
     *path_sep = 0;
 
-    if (test_java_executable(path, arena))
-      return string_make_from_c(path, arena);
+    if (test_java_executable(path, &result, arena))
+      return result;
 
     path = path_sep + 1;
   }
 
-  if (test_java_executable(path, arena))
-    return string_make_from_c(path, arena);
+  if (test_java_executable(path, &result, arena))
+    return result;
 
   fprintf(stderr, "Failed to find the java executable in the path\n");
   exit(EINVAL);
