@@ -63,6 +63,7 @@
 - [ ] Default imports
 - [ ] Imports
 - [ ] Arena dump to see how/where memory is utilized
+- [ ] Remove builtin println
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
