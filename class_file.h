@@ -257,13 +257,6 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   }
 }
 
-static void string_reduce_length_to(string_t *s, u64 length) {
-  pg_assert(s != NULL);
-  pg_assert(length < s->cap);
-
-  s->len = length;
-  s->value[length] = 0;
-}
 
 static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(arena != NULL);
