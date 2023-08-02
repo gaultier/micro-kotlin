@@ -5914,7 +5914,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
     } else if (type.flag & NODE_NUMBER_FLAGS_LONG) {
       type.java_class_name = string_make_from_c("kotlin.Long", arena);
-      type.java_class_name = string_make_from_c("java/lang/Integer", arena);
+      type.java_class_name = string_make_from_c("java/lang/Long", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
     } else {
@@ -6099,9 +6099,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
           ty_type_to_human_string(resolver->types, rhs_type_i, arena);
 
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ", arena);
+      string_append_cstring(&error, "incompatible types: declared type is ",
+                            arena);
       string_append_string(&error, lhs_type_human, arena);
-      string_append_cstring(&error, " vs ", arena);
+      string_append_cstring(&error, ", received type is ", arena);
       string_append_string(&error, rhs_type_human, arena);
       par_error(resolver->parser, token, error.value);
 
