@@ -44,7 +44,6 @@
 - [x] Control flow: Return
 - [x] Checks around return
 - [x] Move types to the resolver
-- [ ] **Move flags to the node, not the type (or both?)**
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Packages
@@ -55,7 +54,7 @@
 - [x] Convert jvm types to kotlin types when reading .class, .jar, .jmod
 - [x] Use scratch arena when reading .class, .jar, .jmod files
 - [x] Merge functions to read .jmod, .jar if possible
-- [ ] **Avoid duplicating method resolution in the resolver and the lowerer**
+- [ ] **Avoid duplicating method resolution in the resolver and the lowerer** (descriptor)
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
@@ -85,6 +84,7 @@
 
 **Later:**
 
+- [ ] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] High level APIs for the driver
 - [ ] Generate line tables
 - [ ] Generate full debug information

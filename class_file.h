@@ -662,7 +662,8 @@ typedef struct {
 } par_type_method_t;
 
 struct ty_type_t {
-  // TODO: Perhaps add `class_name` which points to either `kotlin_class_name` or `java_class_name`?
+  // TODO: Perhaps add `class_name` which points to either `kotlin_class_name`
+  // or `java_class_name`?
   string_t java_class_name;
   string_t kotlin_class_name;
   union {
