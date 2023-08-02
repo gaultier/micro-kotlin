@@ -2830,7 +2830,7 @@ static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-static string_t cf_make_class_file_name_kt(string_t source_file_name,
+static string_t cf_make_class_file_path_kt(string_t source_file_name,
                                            arena_t *arena) {
   pg_assert(source_file_name.value != NULL);
   pg_assert(source_file_name.len > 0);
