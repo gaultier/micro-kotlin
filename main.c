@@ -47,6 +47,9 @@ int main(int argc, char *argv[]) {
   arena_t arena = {0};
   arena_init(&arena, 1L << 32);
 
+  const string_t java_home = find_java_home(&arena);
+  LOG("java_home=%.*s", java_home.len, java_home.value);
+
   // Read class files (stdlib, etc).
   cf_class_file_t *class_files = NULL;
   pg_array_init_reserve(class_files, 1 << 18, &arena);
@@ -67,8 +70,8 @@ int main(int argc, char *argv[]) {
     pg_array_append(class_path_entries, class_path_entry, &arena);
 
     // FIXME: It should be the basename of the source file.
-    //cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
-      //                                               &arena);
+    // cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
+    //                                               &arena);
   }
   {
     // TODO: when parsing multiple files, need to allocate that.

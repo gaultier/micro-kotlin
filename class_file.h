@@ -5582,6 +5582,52 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 #endif
 }
 
+static bool test_java_executable(char *path, arena_t *arena) {
+
+  arena_t tmp_arena = *arena;
+
+  string_t tentative_java_path = string_make_from_c(path, &tmp_arena);
+  string_append_cstring(&tentative_java_path, path, &tmp_arena);
+  string_append_char(&tentative_java_path, '/', &tmp_arena);
+  string_append_cstring(&tentative_java_path, "java", &tmp_arena);
+
+  struct stat st = {0};
+  if (stat(tentative_java_path.value, &st) == -1)
+    return false;
+
+  return S_ISREG(st.st_mode) && st.st_mode & 0111;
+}
+
+static string_t find_java_home(arena_t *arena) {
+  char *const java_home_env = getenv("JAVA_HOME");
+  if (java_home_env != NULL) {
+    return string_make_from_c(java_home_env, arena);
+  }
+
+  char *path = getenv("PATH");
+  pg_assert(path != NULL);
+
+  char *path_sep = NULL;
+  while ((path_sep = strchr(path, ':')) != NULL) {
+    *path_sep = 0;
+
+    if (test_java_executable(path, arena))
+      return string_make_from_c(path, arena);
+
+    path = path_sep + 1;
+  }
+
+  if (test_java_executable(path, arena))
+    return string_make_from_c(path, arena);
+
+  fprintf(stderr, "Failed to find the java executable in the path\n");
+  exit(EINVAL);
+}
+
+static void ty_load_standard_types(resolver_t *resolver,
+                                   cf_class_file_t *class_files,
+                                   arena_t *arena) {}
+
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
                                   u32 *class_file_i, arena_t *arena) {
   pg_assert(resolver != NULL);
@@ -5640,27 +5686,6 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
 
       *class_file_i = pg_array_last_index(resolver->class_files);
       return true;
-    }
-  }
-
-  for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    const string_t class_path_entry = resolver->class_path_entries[i];
-
-    // Scan the class path entries for `$CLASS_PATH_ENTRY/*.{jar,jmod}` and try
-    // to find `$CLASS_NAME.class` inside.
-
-    string_t tentative_class_file_path =
-        string_reserve(class_path_entry.len + 1 + class_name.len + 6, arena);
-    string_append_string(&tentative_class_file_path, class_name, arena);
-    string_append_cstring(&tentative_class_file_path, ".class", arena);
-
-    // FIXME: List files: `*.{jar,jmod}` in the directory $CLASS_PATH_ENTRY.
-    if (string_ends_with_cstring(class_path_entry, ".jar")) {
-      return cf_read_jar_file(class_path_entry.value, &resolver->class_files,
-                              tentative_class_file_path, arena);
-    } else if (string_ends_with_cstring(class_path_entry, ".jmod")) {
-      return cf_read_jmod_file(class_path_entry.value, &resolver->class_files,
-                               tentative_class_file_path, arena);
     }
   }
 
