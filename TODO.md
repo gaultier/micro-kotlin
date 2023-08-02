@@ -81,6 +81,7 @@
   * Switch (`when`): All cases are covered
   * Switch (`when`): No redundant cases
   * ...
+- [ ] Full-fledged type inference
 
 **Later:**
 
