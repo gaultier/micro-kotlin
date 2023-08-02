@@ -2836,17 +2836,18 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
 
-  string_t last_path_component =
-      string_make(string_find_last_path_component(source_file_name), arena);
-  pg_assert(last_path_component.len > 0);
-  pg_assert(last_path_component.value[0] != '/');
+  pg_assert(string_ends_with_cstring(source_file_name, ".kt"));
 
-  string_drop_after_last_incl(&last_path_component, '.');
-  string_append_cstring(&last_path_component, "Kt.class", arena);
-  string_capitalize_first(&last_path_component);
+  string_t result = string_reserve(source_file_name.len + 8, arena);
+  string_append_string(&result, source_file_name, arena);
+  string_capitalize_first(&result);
 
-  return last_path_component;
+  string_drop_after_last_incl(&result, '.');
+  string_append_cstring(&result, "Kt.class", arena);
+
+  return result;
 }
+
 static bool cf_buf_read_jar_file(string_t content, char *path,
                                  cf_class_file_t **class_files,
                                  arena_t *scratch_arena, arena_t *arena);
