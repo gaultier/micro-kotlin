@@ -52,8 +52,8 @@
 - [x] Read .jmod files
 - [x] Add class path CLI option
 - [x] Scan known locations for jmod files
-- [ ] **Convert jvm types to kotlin types when reading .class, .jar, .jmod**
-- [ ] **Use scratch arena when reading .class, .jar, .jmod files**
+- [x] Convert jvm types to kotlin types when reading .class, .jar, .jmod
+- [x] Use scratch arena when reading .class, .jar, .jmod files
 - [x] Merge functions to read .jmod, .jar if possible
 - [ ] **Avoid duplicating method resolution in the resolver and the lowerer**
 - [ ] Defend against integer overflows

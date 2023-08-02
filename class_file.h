@@ -3293,7 +3293,6 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
   return false;
 }
 
-
 static bool
 cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
                                    string_t class_name, string_t method_name,
@@ -4197,8 +4196,14 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("jvm.String", arena);
   case TYPE_JVM_ARRAY_REFERENCE:
     return string_make_from_c("jvm.Array<todo>", arena);
-  case TYPE_KOTLIN_INSTANCE_REFERENCE:
-    return type->kotlin_class_name;
+  case TYPE_KOTLIN_INSTANCE_REFERENCE: {
+    string_t result = string_reserve(
+        type->kotlin_class_name.len + type->java_class_name.len + 4, arena);
+    string_append_string(&result, type->kotlin_class_name, arena);
+    string_append_cstring(&result, " | ", arena);
+    string_append_string(&result, type->java_class_name, arena);
+    return result;
+  }
   case TYPE_KOTLIN_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
 
