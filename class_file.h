@@ -5644,7 +5644,7 @@ static bool test_java_executable(char *path, arena_t *arena) {
 
   arena_t tmp_arena = *arena;
 
-  string_t tentative_java_path = string_make_from_c(path, &tmp_arena);
+  string_t tentative_java_path = string_reserve(strlen(path) + 8, &tmp_arena);
   string_append_cstring(&tentative_java_path, path, &tmp_arena);
   string_append_char(&tentative_java_path, '/', &tmp_arena);
   string_append_cstring(&tentative_java_path, "java", &tmp_arena);
