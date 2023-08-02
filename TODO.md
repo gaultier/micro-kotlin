@@ -101,6 +101,7 @@
 **Probably much later (not necessary for a MVP):**
 
 - [ ] Infix functions
+- [ ] Kdoc in comments
 - [ ] Type flow (e.g. `if (x is String) x + "foo"`)
 - [ ] Unicode identifiers
 - [ ] Function names with spaces and backticks
