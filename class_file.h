@@ -4156,6 +4156,44 @@ static void par_find_token_position(const par_parser_t *parser,
   /* pg_assert(*column > 0); */
 }
 
+static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
+  const ty_type_t *const type = &types[type_i];
+  switch (type->kind) {
+  case TYPE_KOTLIN_ANY:
+    return "TYPE_KOTLIN_ANY";
+  case TYPE_KOTLIN_UNIT:
+    return "TYPE_KOTLIN_UNIT";
+  case TYPE_KOTLIN_INSTANCE_REFERENCE:
+    return "TYPE_KOTLIN_INSTANCE_REFERENCE";
+  case TYPE_KOTLIN_METHOD:
+    return "TYPE_KOTLIN_METHOD";
+  case TYPE_JVM_VOID:
+    return "TYPE_JVM_VOID";
+  case TYPE_JVM_BYTE:
+    return "TYPE_JVM_BYTE";
+  case TYPE_JVM_CHAR:
+    return "TYPE_JVM_CHAR";
+  case TYPE_JVM_SHORT:
+    return "TYPE_JVM_SHORT";
+  case TYPE_JVM_INT:
+    return "TYPE_JVM_INT";
+  case TYPE_JVM_STRING:
+    return "TYPE_JVM_STRING";
+  case TYPE_JVM_BOOL:
+    return "TYPE_JVM_BOOL";
+  case TYPE_JVM_FLOAT:
+    return "TYPE_JVM_FLOAT";
+  case TYPE_JVM_LONG:
+    return "TYPE_JVM_LONG";
+  case TYPE_JVM_DOUBLE:
+    return "TYPE_JVM_DOUBLE";
+  case TYPE_JVM_ARRAY_REFERENCE:
+    return "TYPE_JVM_ARRAY_REFERENCE";
+  case TYPE_JVM_CONSTRUCTOR:
+    return "TYPE_JVM_CONSTRUCTOR";
+  }
+}
+
 static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
                                         arena_t *arena) {
   const ty_type_t *const type = &types[type_i];
@@ -5548,23 +5586,25 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
   ut_fwrite_indent(file, indent);
 
+  const char *const type_kind =
+      ty_type_kind_string(resolver->types, node->type_i);
   const string_t human_type =
       ty_type_to_human_string(resolver->types, node->type_i, arena);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
   case AST_KIND_BOOL:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+    LOG("[%ld] %s %.*s : %.*s (%s) (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
-        token_string.value, human_type.len, human_type.value,
+        token_string.value, human_type.len, human_type.value, type_kind,
         resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.value, line, column,
         token.source_offset);
     break;
   case AST_KIND_LIST:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
-        token_string.value, human_type.len, human_type.value,
+        token_string.value, human_type.len, human_type.value, type_kind,
         resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.value, line, column,
         token.source_offset);
@@ -5574,9 +5614,9 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
                                arena);
     break;
   default:
-    LOG("[%ld] %s %.*s : %.*s (at %.*s:%u:%u:%u)",
+    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
-        token_string.value, human_type.len, human_type.value,
+        token_string.value, human_type.len, human_type.value, type_kind,
         resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.value, line, column,
         token.source_offset);
@@ -6454,25 +6494,25 @@ void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
   if (type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE)
     return;
 
-  if (string_eq_c(type->java_class_name, "kotlin.Int")) {
+  if (string_eq_c(type->kotlin_class_name, "kotlin.Int")) {
     type->kind = TYPE_JVM_INT;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Boolean")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Boolean")) {
     type->kind = TYPE_JVM_BOOL;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Char")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Char")) {
     type->kind = TYPE_JVM_CHAR;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Byte")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Byte")) {
     type->kind = TYPE_JVM_BYTE;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Short")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Short")) {
     type->kind = TYPE_JVM_SHORT;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Int")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Int")) {
     type->kind = TYPE_JVM_INT;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Float")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Float")) {
     type->kind = TYPE_JVM_FLOAT;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Long")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Long")) {
     type->kind = TYPE_JVM_LONG;
-  } else if (string_eq_c(type->java_class_name, "kotlin.Double")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.Double")) {
     type->kind = TYPE_JVM_DOUBLE;
-  } else if (string_eq_c(type->java_class_name, "kotlin.String")) {
+  } else if (string_eq_c(type->kotlin_class_name, "kotlin.String")) {
     type->kind = TYPE_JVM_STRING;
   }
 }
