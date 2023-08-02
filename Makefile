@@ -20,5 +20,5 @@ test_release: clean main_release
 	for f in **/*.class; do echo $$f; (cd `dirname $$f`; java `basename -s .class $$f`);  done
 
 main_release: main.c class_file.h
-	$(CC) $(CFLAGS) -O2 -g3 $(WARNINGS) -std=c99 -march=native main.c -o $@ -Wl,--gc-sections -fwhole-program $(LDFLAGS)
+	$(CC) $(CFLAGS) -O2 -g3 $(WARNINGS) -std=c99 -march=native main.c -o $@ -Wl,--gc-sections $(LDFLAGS)
 

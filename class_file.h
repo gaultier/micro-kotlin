@@ -257,7 +257,6 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   }
 }
 
-
 static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(arena != NULL);
   cap = pg_max(8, cap + 1);
@@ -3294,40 +3293,6 @@ cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
   return false;
 }
 
-static bool cf_class_files_find_class_exactly(
-    const cf_class_file_t *class_files, string_t class_name,
-    string_t alernate_class_name, u32 *class_file_i,
-    u16 *constant_pool_class_name_i) {
-  pg_assert(class_files != NULL);
-  pg_assert(class_name.len > 0);
-
-  // TODO: use the file path <-> class name mapping to search less?
-
-  for (u64 i = 0; i < pg_array_len(class_files); i++) {
-    const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->class_file_path.len > 0);
-    pg_assert(class_file->class_file_path.value != NULL);
-    pg_assert(class_file->this_class > 0);
-
-    const cf_constant_t *const this_class = cf_constant_array_get(
-        &class_file->constant_pool, class_file->this_class);
-    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.java_class_name;
-    const string_t this_class_name = cf_constant_array_get_as_string(
-        &class_file->constant_pool, this_class_i);
-
-    if (!string_eq(this_class_name, class_name) &&
-        !string_eq(this_class_name, alernate_class_name))
-      continue;
-
-    if (class_file_i != NULL)
-      *class_file_i = i;
-    if (constant_pool_class_name_i != NULL)
-      *constant_pool_class_name_i = this_class_i;
-    return true;
-  }
-  return false;
-}
 
 static bool
 cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
