@@ -1,3 +1,4 @@
+#include <asm-generic/errno-base.h>
 #define _POSIX_C_SOURCE 200809L
 #include "class_file.h"
 #include <stdio.h>
@@ -79,6 +80,11 @@ int main(int argc, char *argv[]) {
         .value = argv[optind],
         .len = strlen(argv[optind]),
     };
+    if (!string_ends_with_cstring(source_file_name,".kt")) {
+      fprintf(stderr, "Expected an input file ending with .kt\n");
+      exit(EINVAL);
+    }
+
     const int fd = open(source_file_name.value, O_RDONLY);
     if (fd == -1) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
@@ -171,7 +177,8 @@ int main(int argc, char *argv[]) {
     cf_class_file_t class_file = {
         .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
         .minor_version = 0,
-        .major_version = 17, // TODO: Add a CLI option to choose the jdk/jre version
+        .major_version =
+            17, // TODO: Add a CLI option to choose the jdk/jre version
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
