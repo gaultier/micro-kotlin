@@ -1273,7 +1273,7 @@ const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
 struct cf_class_file_t {
-  string_t jar_file_path;
+  string_t archive_file_path;
   string_t class_file_path;
   string_t class_name;
   u16 minor_version;
@@ -2936,6 +2936,8 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
   pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
 
+  const string_t archive_file_path = string_make_from_c(path, arena);
+
   // Assume first no trailing comment.
   char *cdre = content.value + content.len - central_directory_end_size;
   if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
@@ -3098,7 +3100,7 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
 
       cf_class_file_t class_file = {
           .class_file_path = file_name,
-          .jar_file_path = string_make_from_c(path, arena),
+          .archive_file_path = archive_file_path,
       };
       // TODO: Read Manifest file?
       if (uncompressed_size_according_to_directory_entry > 0 &&
@@ -3109,8 +3111,9 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
                                uncompressed_size_according_to_directory_entry,
                                &local_file_header, &class_file, 0, arena);
         pg_array_append(*class_files, class_file, arena);
-        LOG("Loaded %.*s", class_file.class_file_path.len,
-            class_file.class_file_path.value);
+        LOG("Loaded %.*s from %.*s", class_file.class_file_path.len,
+            class_file.class_file_path.value, class_file.archive_file_path.len,
+            class_file.archive_file_path.value);
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
@@ -3140,8 +3143,9 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
-        LOG("Loaded %.*s", class_file.class_file_path.len,
-            class_file.class_file_path.value);
+        LOG("Loaded %.*s from %.*s (compressed)", class_file.class_file_path.len,
+            class_file.class_file_path.value, class_file.archive_file_path.len,
+            class_file.archive_file_path.value);
 
         inflateEnd(&stream);
       }
