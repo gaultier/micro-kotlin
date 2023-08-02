@@ -80,7 +80,7 @@ int main(int argc, char *argv[]) {
         .value = argv[optind],
         .len = strlen(argv[optind]),
     };
-    if (!string_ends_with_cstring(source_file_name,".kt")) {
+    if (!string_ends_with_cstring(source_file_name, ".kt")) {
       fprintf(stderr, "Expected an input file ending with .kt\n");
       exit(EINVAL);
     }
@@ -195,7 +195,6 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("arena=%lu", arena.current_offset);
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
@@ -229,4 +228,5 @@ int main(int argc, char *argv[]) {
                              READ_CLASS_FILE_FLAG_ALL, &tmp_arena);
     }
   }
+  LOG("arena=%lu", arena.current_offset);
 }
