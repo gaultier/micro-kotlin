@@ -4240,7 +4240,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_JVM_ARRAY_REFERENCE:
     return string_make_from_c("jvm.Array<todo>", arena);
   case TYPE_KOTLIN_INSTANCE_REFERENCE:
-    return type->java_class_name;
+    return type->kotlin_class_name;
   case TYPE_KOTLIN_METHOD: {
     const par_type_method_t *const method_type = &type->v.method;
 
@@ -6007,7 +6007,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       return 0;
 
     } else if (type.flag & NODE_NUMBER_FLAGS_LONG) {
-      type.java_class_name = string_make_from_c("kotlin.Long", arena);
+      type.kotlin_class_name = string_make_from_c("kotlin.Long", arena);
       type.java_class_name = string_make_from_c("java/lang/Long", arena);
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
                                       &type.class_file_i, arena));
