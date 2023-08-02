@@ -171,7 +171,7 @@ int main(int argc, char *argv[]) {
     cf_class_file_t class_file = {
         .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
         .minor_version = 0,
-        .major_version = 17,
+        .major_version = 17, // TODO: Add a CLI option to choose the jdk/jre version
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
