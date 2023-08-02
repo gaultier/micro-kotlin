@@ -68,11 +68,8 @@ int main(int argc, char *argv[]) {
     }
     const string_t class_path_entry = string_make_from_c(classpath, &arena);
     pg_array_append(class_path_entries, class_path_entry, &arena);
-
-    // FIXME: It should be the basename of the source file.
-    // cf_read_jmod_and_jar_and_class_files_recursively(".", 1, &class_files,
-    //                                               &arena);
   }
+
   {
     // TODO: when parsing multiple files, need to allocate that.
     const string_t source_file_name = {
@@ -144,6 +141,7 @@ int main(int argc, char *argv[]) {
                           &arena);
     pg_array_append(resolver.types, (ty_type_t){0},
                     &arena); // Default value (Any).
+  ty_load_standard_types(&resolver, java_home, &class_files, &arena);
     ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.

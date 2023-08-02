@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -336,6 +337,16 @@ static bool string_starts_with_cstring(string_t s, char *needle) {
     return false;
 
   return memcmp(s.value, needle, needle_len) == 0;
+}
+
+static void string_drop_prefix_cstring(string_t s, char *needle) {
+  pg_assert(needle != NULL);
+
+  if (string_starts_with_cstring(s, needle)) {
+    const u64 len = strlen(needle);
+    s.value += len;
+    s.len -= len;
+  }
 }
 
 static void string_drop_before_last_incl(string_t *s, char c) {
@@ -2831,11 +2842,10 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   return last_path_component;
 }
 static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 cf_class_file_t **class_files,
-                                 string_t class_file_name, arena_t *arena);
+                                 cf_class_file_t **class_files, arena_t *arena);
 
 static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
-                              string_t class_file_name, arena_t *arena) {
+                              arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2877,12 +2887,11 @@ static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
 
   content.value += 4;
   content.len -= 4;
-  return cf_buf_read_jar_file(content, path, class_files, class_file_name,
-                              arena);
+  return cf_buf_read_jar_file(content, path, class_files, arena);
 }
 
 static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
-                             string_t class_file_path, arena_t *arena) {
+                             arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2913,13 +2922,12 @@ static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
   }
   close(fd);
 
-  return cf_buf_read_jar_file(content, path, class_files, class_file_path,
-                              arena);
+  return cf_buf_read_jar_file(content, path, class_files, arena);
 }
 
 static bool cf_buf_read_jar_file(string_t content, char *path,
                                  cf_class_file_t **class_files,
-                                 string_t class_file_name, arena_t *arena) {
+                                 arena_t *arena) {
   char *current = content.value;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
@@ -3027,7 +3035,6 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         buf_read_le_u32(content.value, content.len, &cdfh);
 
     // file name
-    char *const file_name = cdfh;
     buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
 
     // extra field
@@ -3035,11 +3042,6 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
 
     // file comment
     buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
-
-    const string_t file_name_string = {.value = file_name,
-                                       .len = file_name_length};
-    if (!string_eq(file_name_string, class_file_name))
-      continue;
 
     // Read file header.
     {
@@ -3107,6 +3109,8 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
                                uncompressed_size_according_to_directory_entry,
                                &local_file_header, &class_file, 0, arena);
         pg_array_append(*class_files, class_file, arena);
+        LOG("Loaded %.*s", class_file.class_file_path.len,
+            class_file.class_file_path.value);
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
@@ -3136,11 +3140,12 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
+        LOG("Loaded %.*s", class_file.class_file_path.len,
+            class_file.class_file_path.value);
 
         inflateEnd(&stream);
       }
     }
-    return true;
   }
   return false;
 }
@@ -5624,9 +5629,27 @@ static string_t find_java_home(arena_t *arena) {
   exit(EINVAL);
 }
 
-static void ty_load_standard_types(resolver_t *resolver,
-                                   cf_class_file_t *class_files,
-                                   arena_t *arena) {}
+static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
+                                   cf_class_file_t **class_files,
+                                   arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(java_home.value != NULL);
+  pg_assert(class_files != NULL);
+  pg_assert(arena != NULL);
+
+  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, arena);
+  string_append_string(&java_base_jmod_file_path, java_home, arena);
+  string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
+                        arena);
+
+  const u64 previous_len = pg_array_len(*class_files);
+  cf_read_jmod_file(java_base_jmod_file_path.value, class_files, arena);
+
+  for (u64 i = previous_len + 1; i < pg_array_len(*class_files); i++) {
+    cf_class_file_t *const class_file = &(*class_files)[i];
+    string_drop_prefix_cstring(class_file->class_file_path, "classes/");
+  }
+}
 
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
                                   u32 *class_file_i, arena_t *arena) {
