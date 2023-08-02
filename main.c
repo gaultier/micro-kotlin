@@ -45,7 +45,10 @@ int main(int argc, char *argv[]) {
   }
 
   arena_t arena = {0};
-  arena_init(&arena, 1L << 32);
+  arena_init(&arena, 1L << 29);
+
+  arena_t scratch_arena = {0};
+  arena_init(&scratch_arena, 1L << 26); // 64 MiB
 
   const string_t java_home = find_java_home(&arena);
   LOG("java_home=%.*s", java_home.len, java_home.value);
@@ -141,7 +144,9 @@ int main(int argc, char *argv[]) {
                           &arena);
     pg_array_append(resolver.types, (ty_type_t){0},
                     &arena); // Default value (Any).
-  ty_load_standard_types(&resolver, java_home, &class_files, &arena);
+    ty_load_standard_types(&resolver, java_home, &class_files, &scratch_arena,
+                           &arena);
+    arena_clear(&scratch_arena);
     ty_resolve_node(&resolver, root_i, &arena);
 
     // Debug types.

@@ -87,6 +87,11 @@ static u64 ut_align_forward_16(u64 n) {
   return n;
 }
 
+static void arena_clear(arena_t *arena) {
+  pg_assert(arena);
+  arena->current_offset = 0;
+}
+
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   // clang-format off
   // 
@@ -1944,8 +1949,9 @@ static u8 cf_buf_read_constant(char *buf, u64 buf_len, char **current,
     char *const s = *current;
     buf_read_n_u8(buf, buf_len, NULL, len, current);
 
-    cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
-                              .v = {.s = {.len = len, .value = s}}};
+    cf_constant_t constant = {
+        .kind = CONSTANT_POOL_KIND_UTF8,
+        .v = {.s = string_make((string_t){.len = len, .value = s}, arena)}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     break;
@@ -2842,10 +2848,11 @@ static string_t cf_make_class_file_name_kt(string_t source_file_name,
   return last_path_component;
 }
 static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 cf_class_file_t **class_files, arena_t *arena);
+                                 cf_class_file_t **class_files,
+                                 arena_t *scratch_arena, arena_t *arena);
 
 static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
-                              arena_t *arena) {
+                              arena_t *scratch_arena, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2868,7 +2875,7 @@ static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
   }
 
   string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, arena);
+  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
   if (res != -1) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
             strerror(res));
@@ -2887,11 +2894,11 @@ static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
 
   content.value += 4;
   content.len -= 4;
-  return cf_buf_read_jar_file(content, path, class_files, arena);
+  return cf_buf_read_jar_file(content, path, class_files, scratch_arena, arena);
 }
 
 static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
-                             arena_t *arena) {
+                             arena_t *scratch_arena, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(class_files != NULL);
   pg_assert(*class_files != NULL);
@@ -2914,7 +2921,7 @@ static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
   }
 
   string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, arena);
+  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
   if (res != -1) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
             strerror(res));
@@ -2922,12 +2929,12 @@ static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
   }
   close(fd);
 
-  return cf_buf_read_jar_file(content, path, class_files, arena);
+  return cf_buf_read_jar_file(content, path, class_files, scratch_arena, arena);
 }
 
 static bool cf_buf_read_jar_file(string_t content, char *path,
                                  cf_class_file_t **class_files,
-                                 arena_t *arena) {
+                                 arena_t *scratch_arena, arena_t *arena) {
   char *current = content.value;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
@@ -3118,9 +3125,10 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
                  string_ends_with_cstring(file_name, ".class")) {
-        // TODO: Use a scratch arena
-        u8 *dst = arena_alloc(
-            arena, uncompressed_size_according_to_directory_entry, sizeof(u8));
+        arena_t tmp_arena = *scratch_arena;
+        u8 *dst = arena_alloc(&tmp_arena,
+                              uncompressed_size_according_to_directory_entry,
+                              sizeof(u8));
         u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
 
         z_stream stream = {
@@ -3143,8 +3151,9 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
         pg_array_append(*class_files, class_file, arena);
-        LOG("Loaded %.*s from %.*s (compressed)", class_file.class_file_path.len,
-            class_file.class_file_path.value, class_file.archive_file_path.len,
+        LOG("Loaded %.*s from %.*s (compressed)",
+            class_file.class_file_path.len, class_file.class_file_path.value,
+            class_file.archive_file_path.len,
             class_file.archive_file_path.value);
 
         inflateEnd(&stream);
@@ -5675,19 +5684,20 @@ static string_t find_java_home(arena_t *arena) {
 
 static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
                                    cf_class_file_t **class_files,
-                                   arena_t *arena) {
+                                   arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(java_home.value != NULL);
   pg_assert(class_files != NULL);
   pg_assert(arena != NULL);
 
-  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, arena);
+  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
   string_append_string(&java_base_jmod_file_path, java_home, arena);
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
   const u64 previous_len = pg_array_len(*class_files);
-  cf_read_jmod_file(java_base_jmod_file_path.value, class_files, arena);
+  cf_read_jmod_file(java_base_jmod_file_path.value, class_files, scratch_arena,
+                    arena);
 
   for (u64 i = previous_len + 1; i < pg_array_len(*class_files); i++) {
     cf_class_file_t *const class_file = &(*class_files)[i];
@@ -5737,7 +5747,6 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
 
       if (!S_ISREG(st.st_mode))
         continue;
-
       char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
       const ssize_t read_bytes = read(fd, buf, st.st_size);
       pg_assert(read_bytes == st.st_size);
