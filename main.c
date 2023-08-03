@@ -140,7 +140,7 @@ int main(int argc, char *argv[]) {
         .class_path_entries = class_path_entries,
     };
     pg_array_init_reserve(resolver.class_files, 1 << 15, &arena);
-    pg_array_init_reserve(resolver.classes, 1 << 15, &arena);
+    pg_array_init_reserve(resolver.class_names, 1 << 15, &arena);
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);
@@ -178,7 +178,6 @@ int main(int argc, char *argv[]) {
     };
     cf_init(&class_file, &arena);
     cg_emit(&resolver, &class_file, root_i, &arena);
-    LOG("class_files_len=%lu", pg_array_len(resolver.class_files));
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
@@ -191,6 +190,8 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
+    LOG("class_files_len=%lu", pg_array_len(resolver.class_files));
+    LOG("class_names=%lu", pg_array_len(resolver.class_names));
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");

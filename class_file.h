@@ -172,8 +172,8 @@ typedef struct pg_array_header_t {
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
       pg_assert(pg_array_cap(x) >= 8);                                         \
       const u64 new_cap = pg_array_cap(x) * 2;                                 \
-      LOG("%s:%d: grow: old_cap=%lu new_cap=%lu len=%lu",__FILE__,__LINE__, pg_array_cap(x), new_cap,   \
-          pg_array_len(x));                                                    \
+      LOG("%s:%d: grow: old_cap=%lu new_cap=%lu len=%lu", __FILE__, __LINE__,  \
+          pg_array_cap(x), new_cap, pg_array_len(x));                          \
       const u64 old_physical_len =                                             \
           sizeof(pg_array_header_t) + sizeof(*(x)) * pg_array_cap(x);          \
       const u64 new_physical_len =                                             \
@@ -5443,7 +5443,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 typedef struct {
   par_parser_t *parser;
   cf_class_file_t *class_files;
-  string_t *classes;
+  string_t *class_names;
   string_t *class_path_entries;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -5764,7 +5764,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
       };
       cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
       pg_array_append(resolver->class_files, class_file, arena);
-      pg_array_append(resolver->classes, class_name, arena);
+      pg_array_append(resolver->class_names, class_name, arena);
       pg_assert(string_eq(class_name, class_file.class_name));
 
       *class_file_i = pg_array_last_index(resolver->class_files);
