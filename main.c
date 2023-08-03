@@ -139,8 +139,10 @@ int main(int argc, char *argv[]) {
         .parser = &parser,
         .class_path_entries = class_path_entries,
     };
-    pg_array_init_reserve(resolver.class_files, 1 << 15, &arena);
     pg_array_init_reserve(resolver.class_names, 1 << 15, &arena);
+    pg_array_init_reserve(resolver.class_methods, 1 << 15, &arena);
+    pg_array_init_reserve(resolver.class_fields, 1 << 15, &arena);
+
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);
@@ -190,7 +192,6 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("class_files_len=%lu", pg_array_len(resolver.class_files));
     LOG("class_names=%lu", pg_array_len(resolver.class_names));
     {
       arena_t tmp_arena = arena;

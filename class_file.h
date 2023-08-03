@@ -3259,50 +3259,6 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
 }
 #endif
 
-static bool
-cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
-                                   string_t class_name, string_t method_name,
-                                   string_t descriptor) {
-  pg_assert(class_files != NULL);
-  pg_assert(descriptor.len > 0);
-  pg_assert(descriptor.value != NULL);
-  pg_assert(class_name.len > 0);
-
-  // TODO: use the file path <-> class name mapping to search less?
-
-  for (u64 i = 0; i < pg_array_len(class_files); i++) {
-    const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->class_file_path.len > 0);
-    pg_assert(class_file->class_file_path.value != NULL);
-
-    const string_t this_class_name = cf_get_this_class_name(class_file);
-
-    if (!string_eq(this_class_name, class_name))
-      continue;
-
-    for (u64 j = 0; j < pg_array_len(class_file->methods); j++) {
-      const cf_method_t *const this_method = &class_file->methods[j];
-      // TODO: check attributes?
-
-      const string_t this_method_name = cf_constant_array_get_as_string(
-          &class_file->constant_pool, this_method->name);
-
-      if (!string_eq(this_method_name, method_name))
-        continue;
-
-      const string_t this_method_descriptor = cf_constant_array_get_as_string(
-          &class_file->constant_pool, this_method->descriptor);
-
-      if (!string_eq(this_method_descriptor, descriptor)) {
-        continue;
-      }
-
-      return true; // TODO: return `method`?
-    }
-  }
-  return false;
-}
-
 // ---------------------------------- Lexer
 
 typedef enum __attribute__((packed)) {
@@ -5400,9 +5356,17 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 // --------------------------------- Typing
 
 typedef struct {
+  string_t class_name;
+  string_t field_name;
+  u32 type_i;
+  pg_pad(4);
+} resolver_class_field_t;
+
+typedef struct {
   par_parser_t *parser;
-  cf_class_file_t *class_files;
   string_t *class_names;
+  resolver_class_field_t *class_fields;
+  resolver_class_field_t *class_methods;
   string_t *class_path_entries;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -5433,6 +5397,34 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   }
 
   pg_assert(0 && "todo");
+}
+
+static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
+                                    string_t method_name, u32 type_i) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->class_names != NULL);
+  pg_assert(resolver->class_methods != NULL);
+  pg_assert(class_name.len > 0);
+  pg_assert(method_name.len > 0);
+
+  for (u64 i = 0; i < pg_array_len(resolver->class_methods); i++) {
+    const resolver_class_field_t *const method = &resolver->class_methods[i];
+    pg_assert(method->class_name.len > 0);
+    pg_assert(method->field_name.len > 0);
+
+    if (!string_eq(method->class_name, class_name))
+      continue;
+
+    if (!string_eq(method->field_name, method_name))
+      continue;
+
+    if (!ty_types_equal(resolver->types, type_i, method->type_i))
+      continue;
+
+    return true;
+  }
+
+  return false;
 }
 
 // TODO: Something smarter.
@@ -5652,7 +5644,8 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
                                    arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(java_home.value != NULL);
-  pg_assert(resolver->class_files != NULL);
+  pg_assert(resolver->class_names != NULL);
+  pg_assert(resolver->class_fields != NULL);
   pg_assert(arena != NULL);
 
   string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
@@ -5660,14 +5653,8 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
-  const u64 previous_len = pg_array_len(resolver->class_files);
   cf_read_jmod_file(java_base_jmod_file_path.value, &resolver->class_names,
                     scratch_arena, arena);
-
-  for (u64 i = previous_len + 1; i < pg_array_len(resolver->class_files); i++) {
-    cf_class_file_t *const class_file = &resolver->class_files[i];
-    string_drop_prefix_cstring(class_file->class_file_path, "classes/");
-  }
 }
 
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
@@ -5842,7 +5829,8 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
 static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
-  pg_assert(resolver->class_files != NULL);
+  pg_assert(resolver->class_names != NULL);
+  pg_assert(resolver->class_fields != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
   par_ast_node_t *const node = &resolver->parser->nodes[node_i];
@@ -5868,7 +5856,6 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     ty_resolve_node(resolver, node->lhs, arena);
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    const ty_type_t *const lhs_type = &resolver->types[lhs->type_i];
     const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
     const u32 unit_type_i = ty_add_type(&resolver->types, &unit_type, arena);
 
@@ -5882,26 +5869,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_append(resolver->types, println_type, arena);
     node->type_i = pg_array_last_index(resolver->types);
 
-    // TODO: Migrate from looking up method descriptors to using our own
-    // custom format.
-    string_t method_descriptor = {0};
-    if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-      method_descriptor = string_make_from_c_no_alloc("(Ljava/lang/Object;)V");
-    } else {
-      method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(resolver->types,
-                                pg_array_last_index(resolver->types),
-                                &method_descriptor, arena);
-    }
-
-    pg_array_last(resolver->types)->v.method.descriptor = method_descriptor;
-
-    if (!cf_class_files_find_method_exactly(
-            resolver->class_files,
-            string_make_from_c_no_alloc("java/io/PrintStream"),
-            string_make_from_c_no_alloc("println"), method_descriptor)) {
+    if (!resolver_resolve_method(
+            resolver, string_make_from_c_no_alloc("java/io/PrintStream"),
+            string_make_from_c_no_alloc("println"), lhs->type_i)) {
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ", arena);
+      string_append_cstring(&error,
+                            "failed to find matching function: ", arena);
       string_append_string(
           &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
           arena);
