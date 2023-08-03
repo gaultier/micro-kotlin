@@ -6570,7 +6570,6 @@ typedef struct {
   cg_frame_t *frame;
   cg_scope_variable_t *locals;
 
-  const cf_class_file_t *class_files;
   cf_stack_map_frame_t *stack_map_frames;
   u16 out_field_ref_i;
   u16 out_field_ref_class_i;
@@ -8671,15 +8670,13 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 }
 
 static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
-                    const cf_class_file_t *class_files, u32 root_i,
-                    arena_t *arena) {
+                    u32 root_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
-  pg_assert(class_files != NULL);
   pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  cg_generator_t gen = {.class_files = class_files, .resolver = resolver};
+  cg_generator_t gen = {.resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
   pg_array_init_reserve(gen.locals, UINT16_MAX, arena);
 
