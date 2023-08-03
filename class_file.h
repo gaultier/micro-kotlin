@@ -172,7 +172,7 @@ typedef struct pg_array_header_t {
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
       pg_assert(pg_array_cap(x) >= 8);                                         \
       const u64 new_cap = pg_array_cap(x) * 2;                                 \
-      LOG("grow: old_cap=%lu new_cap=%lu len=%lu", pg_array_cap(x), new_cap,   \
+      LOG("%s:%d: grow: old_cap=%lu new_cap=%lu len=%lu",__FILE__,__LINE__, pg_array_cap(x), new_cap,   \
           pg_array_len(x));                                                    \
       const u64 old_physical_len =                                             \
           sizeof(pg_array_header_t) + sizeof(*(x)) * pg_array_cap(x);          \

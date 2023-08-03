@@ -115,12 +115,11 @@ int main(int argc, char *argv[]) {
     close(fd);
 
     // Lex.
-    const u64 estimated_capacity = pg_clamp(64, source.len / 8, UINT16_MAX);
     lex_lexer_t lexer = {
         .file_path = source_file_name,
     };
-    pg_array_init_reserve(lexer.tokens, estimated_capacity, &arena);
-    pg_array_init_reserve(lexer.line_table, estimated_capacity, &arena);
+    pg_array_init_reserve(lexer.tokens, source.len, &arena);
+    pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
     const char *current = source.value;
     lex_lex(&lexer, source.value, source.len, &current, &arena);
