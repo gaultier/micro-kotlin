@@ -5443,6 +5443,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 typedef struct {
   par_parser_t *parser;
   cf_class_file_t *class_files;
+  string_t *classes;
   string_t *class_path_entries;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -5689,11 +5690,10 @@ static string_t find_java_home(arena_t *arena) {
 }
 
 static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
-                                   cf_class_file_t **class_files,
                                    arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(java_home.value != NULL);
-  pg_assert(class_files != NULL);
+  pg_assert(resolver->class_files != NULL);
   pg_assert(arena != NULL);
 
   string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
@@ -5701,12 +5701,12 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
-  const u64 previous_len = pg_array_len(*class_files);
-  cf_read_jmod_file(java_base_jmod_file_path.value, class_files, scratch_arena,
-                    arena);
+  const u64 previous_len = pg_array_len(resolver->class_files);
+  cf_read_jmod_file(java_base_jmod_file_path.value, &resolver->class_files,
+                    scratch_arena, arena);
 
-  for (u64 i = previous_len + 1; i < pg_array_len(*class_files); i++) {
-    cf_class_file_t *const class_file = &(*class_files)[i];
+  for (u64 i = previous_len + 1; i < pg_array_len(resolver->class_files); i++) {
+    cf_class_file_t *const class_file = &resolver->class_files[i];
     string_drop_prefix_cstring(class_file->class_file_path, "classes/");
   }
 }
@@ -5764,6 +5764,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
       };
       cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
       pg_array_append(resolver->class_files, class_file, arena);
+      pg_array_append(resolver->classes, class_name, arena);
       pg_assert(string_eq(class_name, class_file.class_name));
 
       *class_file_i = pg_array_last_index(resolver->class_files);

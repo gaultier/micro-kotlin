@@ -54,10 +54,6 @@ int main(int argc, char *argv[]) {
   const string_t java_home = find_java_home(&arena);
   LOG("java_home=%.*s", java_home.len, java_home.value);
 
-  // Read class files (stdlib, etc).
-  cf_class_file_t *class_files = NULL;
-  pg_array_init_reserve(class_files, 1 << 18, &arena);
-
   string_t *class_path_entries = NULL;
   pg_array_init_reserve(class_path_entries, 16, &arena);
   pg_array_append(class_path_entries, string_make_from_c_no_alloc("."), &arena);
@@ -142,16 +138,16 @@ int main(int argc, char *argv[]) {
 
     resolver_t resolver = {
         .parser = &parser,
-        .class_files = class_files,
         .class_path_entries = class_path_entries,
     };
+    pg_array_init_reserve(resolver.class_files, 1 << 15, &arena);
+    pg_array_init_reserve(resolver.classes, 1 << 15, &arena);
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);
     pg_array_append(resolver.types, (ty_type_t){0},
                     &arena); // Default value (Any).
-    ty_load_standard_types(&resolver, java_home, &class_files, &scratch_arena,
-                           &arena);
+    ty_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
     ty_resolve_node(&resolver, root_i, &arena);
 
@@ -183,6 +179,7 @@ int main(int argc, char *argv[]) {
     };
     cf_init(&class_file, &arena);
     cg_emit(&resolver, &class_file, root_i, &arena);
+    LOG("class_files_len=%lu", pg_array_len(resolver.class_files));
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
