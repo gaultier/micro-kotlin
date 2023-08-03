@@ -2842,15 +2842,26 @@ static string_t cf_make_class_file_path_kt(string_t source_file_name,
   return result;
 }
 
-static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 cf_class_file_t **class_files,
-                                 arena_t *scratch_arena, arena_t *arena);
+static string_t cf_get_this_class_name(const cf_class_file_t *class_file) {
+  pg_assert(class_file != NULL);
 
-static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
+  const cf_constant_t *const this_class =
+      cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
+  pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+  const u16 this_class_i = this_class->v.java_class_name;
+  return cf_constant_array_get_as_string(&class_file->constant_pool,
+                                         this_class_i);
+}
+
+static bool cf_buf_read_jar_file(string_t content, char *path,
+                                 string_t **class_names, arena_t *scratch_arena,
+                                 arena_t *arena);
+
+static bool cf_read_jmod_file(char *path, string_t **class_names,
                               arena_t *scratch_arena, arena_t *arena) {
   pg_assert(path != NULL);
-  pg_assert(class_files != NULL);
-  pg_assert(*class_files != NULL);
+  pg_assert(class_names != NULL);
+  pg_assert(*class_names != NULL);
   pg_assert(arena != NULL);
 
   const int fd = open(path, O_RDONLY);
@@ -2889,14 +2900,14 @@ static bool cf_read_jmod_file(char *path, cf_class_file_t **class_files,
 
   content.value += 4;
   content.len -= 4;
-  return cf_buf_read_jar_file(content, path, class_files, scratch_arena, arena);
+  return cf_buf_read_jar_file(content, path, class_names, scratch_arena, arena);
 }
 
-static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
+static bool cf_read_jar_file(char *path, string_t **class_names,
                              arena_t *scratch_arena, arena_t *arena) {
   pg_assert(path != NULL);
-  pg_assert(class_files != NULL);
-  pg_assert(*class_files != NULL);
+  pg_assert(class_names != NULL);
+  pg_assert(*class_names != NULL);
   pg_assert(arena != NULL);
 
   const int fd = open(path, O_RDONLY);
@@ -2924,12 +2935,12 @@ static bool cf_read_jar_file(char *path, cf_class_file_t **class_files,
   }
   close(fd);
 
-  return cf_buf_read_jar_file(content, path, class_files, scratch_arena, arena);
+  return cf_buf_read_jar_file(content, path, class_names, scratch_arena, arena);
 }
 
 static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 cf_class_file_t **class_files,
-                                 arena_t *scratch_arena, arena_t *arena) {
+                                 string_t **class_names, arena_t *scratch_arena,
+                                 arena_t *arena) {
   char *current = content.value;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
@@ -3112,7 +3123,10 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         cf_buf_read_class_file(local_file_header,
                                uncompressed_size_according_to_directory_entry,
                                &local_file_header, &class_file, 0, arena);
-        pg_array_append(*class_files, class_file, arena);
+
+        pg_array_append(*class_names, string_make(class_file.class_name, arena),
+                        arena);
+
         LOG("Loaded %.*s from %.*s", class_file.class_file_path.len,
             class_file.class_file_path.value, class_file.archive_file_path.len,
             class_file.archive_file_path.value);
@@ -3145,7 +3159,8 @@ static bool cf_buf_read_jar_file(string_t content, char *path,
         char *dst_current = (char *)dst;
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                0, arena);
-        pg_array_append(*class_files, class_file, arena);
+        pg_array_append(*class_names, class_file.class_name, arena);
+
         LOG("Loaded %.*s from %.*s (compressed)",
             class_file.class_file_path.len, class_file.class_file_path.value,
             class_file.archive_file_path.len,
@@ -3241,59 +3256,8 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
         pathbuf, pathbuf_len + d_name_len, class_files, arena);
   }
   closedir(dirp);
-#undef PATH_MAX
 }
 #endif
-
-static bool
-cf_class_files_find_field_exactly(const cf_class_file_t *class_files,
-                                  string_t class_name, string_t field_name,
-                                  u16 access_flags, u32 *class_file_i,
-                                  u16 *field_i, u16 *class_name_i) {
-  pg_assert(class_files != NULL);
-  pg_assert(field_name.len > 0);
-  pg_assert(class_file_i != NULL);
-  pg_assert(field_i != NULL);
-  pg_assert(class_name_i != NULL);
-
-  // TODO: use the file path <-> class name mapping to search less?
-
-  for (u64 i = 0; i < pg_array_len(class_files); i++) {
-    const cf_class_file_t *const class_file = &class_files[i];
-    pg_assert(class_file->class_file_path.cap >=
-              class_file->class_file_path.len);
-    pg_assert(class_file->class_file_path.len > 0);
-    pg_assert(class_file->class_file_path.value != NULL);
-
-    const cf_constant_t *const this_class = cf_constant_array_get(
-        &class_file->constant_pool, class_file->this_class);
-    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.java_class_name;
-    const string_t this_class_name = cf_constant_array_get_as_string(
-        &class_file->constant_pool, this_class_i);
-
-    if (!string_eq(this_class_name, class_name))
-      continue;
-
-    for (u64 j = 0; j < pg_array_len(class_file->fields); j++) {
-      const cf_field_t *const this_field = &class_file->fields[j];
-      if ((this_field->access_flags & access_flags) == 0)
-        continue;
-
-      const string_t this_field_name = cf_constant_array_get_as_string(
-          &class_file->constant_pool, this_field->name);
-
-      if (!string_eq(this_field_name, field_name))
-        continue;
-
-      *class_file_i = i;
-      *field_i = j;
-      *class_name_i = this_class_i;
-      return true;
-    }
-  }
-  return false;
-}
 
 static bool
 cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
@@ -3311,12 +3275,7 @@ cf_class_files_find_method_exactly(const cf_class_file_t *class_files,
     pg_assert(class_file->class_file_path.len > 0);
     pg_assert(class_file->class_file_path.value != NULL);
 
-    const cf_constant_t *const this_class = cf_constant_array_get(
-        &class_file->constant_pool, class_file->this_class);
-    pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-    const u16 this_class_i = this_class->v.java_class_name;
-    const string_t this_class_name = cf_constant_array_get_as_string(
-        &class_file->constant_pool, this_class_i);
+    const string_t this_class_name = cf_get_this_class_name(class_file);
 
     if (!string_eq(this_class_name, class_name))
       continue;
@@ -5702,7 +5661,7 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
                         arena);
 
   const u64 previous_len = pg_array_len(resolver->class_files);
-  cf_read_jmod_file(java_base_jmod_file_path.value, &resolver->class_files,
+  cf_read_jmod_file(java_base_jmod_file_path.value, &resolver->class_names,
                     scratch_arena, arena);
 
   for (u64 i = previous_len + 1; i < pg_array_len(resolver->class_files); i++) {
@@ -5712,18 +5671,15 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
 }
 
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
-                                  u32 *class_file_i, arena_t *arena) {
+                                  arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_name.value != NULL);
-  pg_assert(resolver->class_files != NULL);
-  pg_assert(class_file_i != NULL);
+  pg_assert(resolver->class_names != NULL);
   pg_assert(arena != NULL);
 
   // Check if cached first.
-  for (u64 i = 0; i < pg_array_len(resolver->class_files); i++) {
-    const cf_class_file_t *const class_file = &resolver->class_files[i];
-    if (string_eq(class_name, class_file->class_name)) {
-      *class_file_i = i;
+  for (u64 i = 0; i < pg_array_len(resolver->class_names); i++) {
+    if (string_eq(class_name, resolver->class_names[i])) {
       return true;
     }
   }
@@ -5763,11 +5719,9 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
           .class_file_path = tentative_class_file_path,
       };
       cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
-      pg_array_append(resolver->class_files, class_file, arena);
       pg_array_append(resolver->class_names, class_name, arena);
       pg_assert(string_eq(class_name, class_file.class_name));
 
-      *class_file_i = pg_array_last_index(resolver->class_files);
       return true;
     }
   }
@@ -5906,8 +5860,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         .kotlin_class_name = string_make_from_c("kotlin.Boolean", arena),
         .java_class_name = string_make_from_c("java/lang/Boolean", arena),
     };
-    pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                    &type.class_file_i, arena));
+    pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
 
     return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
@@ -5975,8 +5928,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     } else if (type.flag & NODE_NUMBER_FLAGS_LONG) {
       type.kotlin_class_name = string_make_from_c("kotlin.Long", arena);
       type.java_class_name = string_make_from_c("java/lang/Long", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else {
       if (number > INT32_MAX) {
         par_error(resolver->parser, token,
@@ -5986,8 +5938,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
 
       type.kotlin_class_name = string_make_from_c("kotlin.Int", arena);
       type.java_class_name = string_make_from_c("java/lang/Integer", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     }
     node->extra_data_i = (u32)arena->current_offset;
     u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
@@ -6054,8 +6005,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
           .kotlin_class_name = string_make_from_c("kotlin.Boolean", arena),
           .java_class_name = string_make_from_c("java/lang/Boolean", arena),
       };
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
       return node->type_i = ty_add_type(&resolver->types, &type, arena);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
@@ -6243,8 +6193,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         .kotlin_class_name = string_make_from_c("kotlin.String", arena),
         .java_class_name = string_make_from_c("java/lang/String", arena),
     };
-    pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                    &type.class_file_i, arena));
+    pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     return node->type_i = ty_add_type(&resolver->types, &type, arena);
   }
 
@@ -6253,74 +6202,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
   }
 
   case AST_KIND_FIELD_ACCESS: {
-    if (node->lhs == 0 && node->rhs == 0) { // Field name (for now).
-      pg_assert(token.kind == TOKEN_KIND_IDENTIFIER);
-      // Resolve the type of the field.
-      // FIXME: also search within the current class.
-
-      const ty_type_t *const current_type =
-          &resolver->types[resolver->current_type_i];
-
-      const string_t class_name = cf_constant_array_get_as_string(
-          &resolver->class_files[current_type->class_file_i].constant_pool,
-          current_type->constant_pool_item_i);
-
-      pg_assert(node->main_token_i + 1 <
-                pg_array_len(resolver->parser->lexer->tokens));
-
-      const string_t field_name = {
-          .value = &resolver->parser->buf[token.source_offset],
-          .len = lex_identifier_length(resolver->parser->buf,
-                                       resolver->parser->buf_len,
-                                       token.source_offset),
-      };
-
-      ty_type_t type = {0};
-      if (!cf_class_files_find_field_exactly(
-              resolver->class_files, class_name, field_name,
-              ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC, &type.class_file_i,
-              &type.field_i, &type.constant_pool_item_i)) {
-        string_t error = string_reserve(256, arena);
-        string_append_cstring(&error, "unknown field", arena);
-        string_append_string(&error, field_name, arena);
-        string_append_cstring(&error, "of class ", arena);
-        string_append_string(&error, class_name, arena);
-
-        par_error(resolver->parser, token, error.value);
-        return 0;
-      }
-
-      const cf_class_file_t *class_file =
-          &resolver->class_files[type.class_file_i];
-      const u16 descriptor_i = class_file->fields[type.field_i].descriptor;
-      const string_t descriptor = cf_constant_array_get_as_string(
-          &class_file->constant_pool, descriptor_i);
-      cf_parse_field_descriptor(descriptor, &type, &resolver->types, arena);
-      pg_array_append(resolver->types, type, arena);
-      return node->type_i = pg_array_last_index(resolver->types);
-    }
-
-    const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, arena);
-    const ty_type_t *const lhs_type = &resolver->types[lhs_type_i];
-
-    if (lhs_type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE) {
-      string_t error = string_reserve(256, arena);
-      string_append_cstring(
-          &error,
-          "trying to access property of something that is not a object: ",
-          arena);
-
-      const string_t type_inferred_string =
-          ty_type_to_human_string(resolver->types, lhs_type_i, arena);
-      string_append_string(&error, type_inferred_string, arena);
-
-      par_error(resolver->parser, token, error.value);
-      return 0;
-    }
-
-    resolver->current_type_i = lhs_type_i;
-    const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs, arena);
-    return node->type_i = resolver->current_type_i = rhs_type_i;
+    pg_assert(0 && "unreachable");
   }
 
   case AST_KIND_FUNCTION_PARAMETER: {
@@ -6342,50 +6224,42 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
         string_eq_c(type_literal_string, "kotlin.Int")) {
       type.java_class_name = string_make_from_c("java/lang/Integer", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Int", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Boolean") ||
                string_eq_c(type_literal_string, "kotlin.Boolean")) {
       type.java_class_name = string_make_from_c("java/lang/Boolean", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Boolean", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Byte") ||
                string_eq_c(type_literal_string, "kotlin.Byte")) {
       type.java_class_name = string_make_from_c("java/lang/Byte", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Byte", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Char") ||
                string_eq_c(type_literal_string, "kotlin.Char")) {
       type.java_class_name = string_make_from_c("java/lang/Char", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Char", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Short") ||
                string_eq_c(type_literal_string, "kotlin.Short")) {
       type.java_class_name = string_make_from_c("java/lang/Short", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Short", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Float") ||
                string_eq_c(type_literal_string, "kotlin.Float")) {
       type.java_class_name = string_make_from_c("java/lang/Float", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Float", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Double") ||
                string_eq_c(type_literal_string, "kotlin.Double")) {
       type.java_class_name = string_make_from_c("java/lang/Double", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Double", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else if (string_eq_c(type_literal_string, "Long") ||
                string_eq_c(type_literal_string, "kotlin.Long")) {
       type.java_class_name = string_make_from_c("java/lang/Long", arena);
       type.kotlin_class_name = string_make_from_c("kotlin.Long", arena);
-      pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
-                                      &type.class_file_i, arena));
+      pg_assert(ty_resolve_class_name(resolver, type.java_class_name, arena));
     } else {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "unknown type: ", arena);
