@@ -5534,7 +5534,8 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   const ty_type_t *const lhs = &types[lhs_i];
   const ty_type_t *const rhs = &types[rhs_i];
 
-  if (lhs->kind!=rhs->kind) return false;
+  if (lhs->kind != rhs->kind)
+    return false;
 
   if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
       rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
@@ -5610,28 +5611,10 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
 
   const ty_type_t *const lhs_type = &resolver->types[lhs_i];
   const ty_type_t *const rhs_type = &resolver->types[rhs_i];
-  if (lhs_type->kind == rhs_type->kind) {
-    if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-        rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-      if (string_eq(string_make_from_c_no_alloc("kotlin.Byte"),
-                    lhs_type->kotlin_class_name) &&
-          string_eq(string_make_from_c_no_alloc("kotlin.Int"),
-                    rhs_type->kotlin_class_name)) {
-        *result_i = lhs_i;
-        return true;
-      } else if (string_eq(string_make_from_c_no_alloc("kotlin.Short"),
-                           lhs_type->kotlin_class_name) &&
-                 string_eq(string_make_from_c_no_alloc("kotlin.Int"),
-                           rhs_type->kotlin_class_name)) {
-        *result_i = lhs_i;
-        return true;
-      } else {
-        return false;
-      }
-    } else {
-      *result_i = lhs_i;
-      return true;
-    }
+
+  if (ty_types_equal(resolver->types, lhs_i, rhs_i)) {
+    *result_i = lhs_i;
+    return true;
   }
 
   // Any is compatible with everything.
@@ -5642,6 +5625,22 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
 
   // Any is compatible with everything.
   if (rhs_type->kind == TYPE_KOTLIN_ANY) {
+    *result_i = lhs_i;
+    return true;
+  }
+
+  if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      string_eq_c(lhs_type->kotlin_class_name, "kotlin.Int") &&
+      string_eq_c(rhs_type->kotlin_class_name, "kotlin.Byte")) {
+    *result_i = rhs_i;
+    return true;
+  }
+
+  if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      string_eq_c(rhs_type->kotlin_class_name, "kotlin.Int") &&
+      string_eq_c(lhs_type->kotlin_class_name, "kotlin.Byte")) {
     *result_i = lhs_i;
     return true;
   }
