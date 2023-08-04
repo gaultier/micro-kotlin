@@ -350,6 +350,14 @@ static bool string_starts_with_cstring(string_t s, char *needle) {
 
 static char string_first(string_t s) { return s.len == 0 ? 0 : s.value[0]; }
 
+static void string_drop_first_n(string_t *s, u64 n) {
+  pg_assert(s != NULL);
+  pg_assert(s->len >= n);
+
+  s->len -= n;
+  s->value += n;
+}
+
 static void string_drop_prefix_cstring(string_t *s, char *needle) {
   pg_assert(s != NULL);
   pg_assert(needle != NULL);
@@ -359,6 +367,16 @@ static void string_drop_prefix_cstring(string_t *s, char *needle) {
     s->value += len;
     s->len -= len;
   }
+}
+
+static void string_drop_until_incl(string_t *s, char needle) {
+  pg_assert(s != NULL);
+
+  char *found = memchr(s->value, needle, s->len);
+  pg_assert(found != NULL);
+
+  s->len -= found - s->value;
+  s->value = found + 1;
 }
 
 static void string_drop_before_last_incl(string_t *s, char c) {
@@ -1090,85 +1108,115 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   }
 }
 
-static void cf_parse_descriptor(string_t descriptor, ty_type_t *type,
-                                ty_type_t **types, arena_t *arena) {
+static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
+                                    ty_type_t **types, arena_t *arena) {
   pg_assert(type != NULL);
-  pg_assert(types != NULL);
+  pg_assert(*types != NULL);
   pg_assert(arena != NULL);
 
   if (descriptor.len == 0)
-    return;
+    return (string_t){0};
+  LOG("[D001] %.*s", descriptor.len, descriptor.value);
+  string_t remaining = descriptor;
 
-  switch (descriptor.value[0]) {
+  switch (remaining.value[0]) {
+  case 'V':
+    type->kind = TYPE_KOTLIN_UNIT;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
+  case 'S':
+    type->kind = TYPE_JVM_SHORT;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'B':
     type->kind = TYPE_JVM_BYTE;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'C':
     type->kind = TYPE_JVM_CHAR;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'D':
     type->kind = TYPE_JVM_DOUBLE;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'F':
     type->kind = TYPE_JVM_FLOAT;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'I':
     type->kind = TYPE_JVM_INT;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'J':
     type->kind = TYPE_JVM_LONG;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'Z':
     type->kind = TYPE_JVM_BOOL;
-    return;
+    string_drop_first_n(&remaining, 1);
+    return remaining;
+
   case 'L':
     type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
-    string_t java_class_name = {
-        .value = descriptor.value + 1, // Skip starting `L`.
-        .len = descriptor.len - 1,
-    };
-    pg_assert(java_class_name.len >= 2);
-    pg_assert(java_class_name.value[java_class_name.len - 1] = ';');
-    // `Drop ending `;`.
-    java_class_name.len -= 1;
-    type->java_class_name = java_class_name;
-    return;
+    string_drop_first_n(&remaining, 1);
+    string_t java_class_name = remaining;
+
+    string_drop_until_incl(&remaining, ';');
+    java_class_name.len -= remaining.len;
+
+    return remaining;
+
   case '[':
     type->kind = TYPE_JVM_ARRAY_REFERENCE;
     ty_type_t item_type = {0};
 
     string_t descriptor_remaining = {
-        .value = descriptor.value + 1,
-        .len = descriptor.len - 1,
+        .value = remaining.value + 1,
+        .len = remaining.len - 1,
     };
-    cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
+    remaining = cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
-    return;
+    return remaining;
+
   case '(': {
     type->kind = TYPE_KOTLIN_METHOD;
-    string_t remaining = descriptor;
-    string_drop_prefix_cstring(&remaining, "(");
+    string_drop_first_n(&remaining, 1);
 
     u32 *argument_types_i = NULL;
     pg_array_init_reserve(argument_types_i, remaining.len, arena);
 
-    while (remaining.len > 1 && string_first(remaining) != ')') {
+    for (u64 i = 0; i < 255; i++) {
+      if (string_first(remaining) == ')')
+        break;
+
       ty_type_t argument_type = {0};
-      cf_parse_descriptor(descriptor, &argument_type, types, arena);
+      remaining = cf_parse_descriptor(remaining, &argument_type, types, arena);
       pg_array_append(*types, argument_type, arena);
 
       pg_array_append(argument_types_i, pg_array_last_index(*types), arena);
     }
+    pg_assert(remaining.len >= 1);
+    pg_assert(remaining.value[0] = ')');
+    string_drop_first_n(&remaining, 1);
 
     ty_type_t return_type = {0};
-    cf_parse_descriptor(descriptor, &return_type, types, arena);
+    remaining = cf_parse_descriptor(remaining, &return_type, types, arena);
     pg_array_append(*types, return_type, arena);
 
     type->v.method.argument_types_i = argument_types_i;
     type->v.method.return_type_i = pg_array_last_index(*types);
 
-    string_drop_prefix_cstring(&remaining, ")");
+    return remaining;
   }
   default:
     pg_assert(0 && "unreachable");

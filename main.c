@@ -142,12 +142,12 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.class_names, 1 << 15, &arena);
     pg_array_init_reserve(resolver.class_methods, 1 << 15, &arena);
     pg_array_init_reserve(resolver.class_fields, 1 << 15, &arena);
-
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
                           &arena);
     pg_array_append(resolver.types, (ty_type_t){0},
                     &arena); // Default value (Any).
+                             //
     ty_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
     ty_resolve_node(&resolver, root_i, &arena);
