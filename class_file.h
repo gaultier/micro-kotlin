@@ -677,7 +677,6 @@ struct ty_type_t;
 
 typedef struct {
   u32 *argument_types_i;
-  string_t descriptor;
   u32 return_type_i;
   pg_pad(4);
 } ty_type_method_t;
@@ -6050,10 +6049,6 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
       string_append_string(
           &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
           arena);
-      string_append_cstring(&error, " vs ", arena);
-      string_append_string(
-          &error, ty_type_to_human_string(resolver->types, lhs->type_i, arena),
-          arena);
       par_error(resolver->parser, token, error.value);
     }
 
@@ -6571,8 +6566,6 @@ void lo_lower_types(resolver_t *resolver, arena_t *arena) {
     if (type->kind == TYPE_KOTLIN_METHOD) {
       string_t method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
-
-      type->v.method.descriptor = method_descriptor;
     }
   }
 }
@@ -7748,10 +7741,11 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     const ty_type_method_t *const method = &type->v.method;
 
-    pg_assert(method->descriptor.value != NULL);
-    pg_assert(method->descriptor.len > 0);
-    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
-                                                    method->descriptor, arena);
+    string_t descriptor = string_reserve(256, arena);
+    cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
+                              arena);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
     const u16 name_i =
         cf_add_constant_cstring(&class_file->constant_pool, "println", arena);
 
@@ -8604,7 +8598,6 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     const ty_type_method_t target_method_type = {
         .return_type_i = void_type_i,
-        .descriptor = target_descriptor_string,
     };
 
     cf_attribute_code_t code = {0};
