@@ -348,13 +348,16 @@ static bool string_starts_with_cstring(string_t s, char *needle) {
   return memcmp(s.value, needle, needle_len) == 0;
 }
 
-static void string_drop_prefix_cstring(string_t s, char *needle) {
+static char string_first(string_t s) { return s.len == 0 ? 0 : s.value[0]; }
+
+static void string_drop_prefix_cstring(string_t *s, char *needle) {
+  pg_assert(s != NULL);
   pg_assert(needle != NULL);
 
-  if (string_starts_with_cstring(s, needle)) {
+  if (string_starts_with_cstring(*s, needle)) {
     const u64 len = strlen(needle);
-    s.value += len;
-    s.len -= len;
+    s->value += len;
+    s->len -= len;
   }
 }
 
@@ -1087,8 +1090,8 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   }
 }
 
-static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
-                                      ty_type_t **types, arena_t *arena) {
+static void cf_parse_descriptor(string_t descriptor, ty_type_t *type,
+                                ty_type_t **types, arena_t *arena) {
   pg_assert(type != NULL);
   pg_assert(types != NULL);
   pg_assert(arena != NULL);
@@ -1138,10 +1141,35 @@ static void cf_parse_field_descriptor(string_t descriptor, ty_type_t *type,
         .value = descriptor.value + 1,
         .len = descriptor.len - 1,
     };
-    cf_parse_field_descriptor(descriptor_remaining, &item_type, types, arena);
+    cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
     return;
+  case '(': {
+    type->kind = TYPE_KOTLIN_METHOD;
+    string_t remaining = descriptor;
+    string_drop_prefix_cstring(&remaining, "(");
+
+    u32 *argument_types_i = NULL;
+    pg_array_init_reserve(argument_types_i, remaining.len, arena);
+
+    while (remaining.len > 1 && string_first(remaining) != ')') {
+      ty_type_t argument_type = {0};
+      cf_parse_descriptor(descriptor, &argument_type, types, arena);
+      pg_array_append(*types, argument_type, arena);
+
+      pg_array_append(argument_types_i, pg_array_last_index(*types), arena);
+    }
+
+    ty_type_t return_type = {0};
+    cf_parse_descriptor(descriptor, &return_type, types, arena);
+    pg_array_append(*types, return_type, arena);
+
+    type->v.method.argument_types_i = argument_types_i;
+    type->v.method.return_type_i = pg_array_last_index(*types);
+
+    string_drop_prefix_cstring(&remaining, ")");
+  }
   default:
     pg_assert(0 && "unreachable");
   }
@@ -2851,326 +2879,6 @@ static string_t cf_get_this_class_name(const cf_class_file_t *class_file) {
   const u16 this_class_i = this_class->v.java_class_name;
   return cf_constant_array_get_as_string(&class_file->constant_pool,
                                          this_class_i);
-}
-
-static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 string_t **class_names, arena_t *scratch_arena,
-                                 arena_t *arena);
-
-static bool cf_read_jmod_file(char *path, string_t **class_names,
-                              arena_t *scratch_arena, arena_t *arena) {
-  pg_assert(path != NULL);
-  pg_assert(class_names != NULL);
-  pg_assert(*class_names != NULL);
-  pg_assert(arena != NULL);
-
-  const int fd = open(path, O_RDONLY);
-  if (fd == -1) {
-    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
-    return false;
-  }
-
-  struct stat st = {0};
-  if (stat(path, &st) == -1) {
-    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
-            strerror(errno));
-    return false;
-  }
-  if (st.st_size == 0) {
-    return false;
-  }
-
-  string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
-  if (res != -1) {
-    fprintf(stderr, "Failed to read the full file %s: %s\n", path,
-            strerror(res));
-    return false;
-  }
-  close(fd);
-
-  // Check magic number.
-  {
-    char *current = content.value;
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 'J');
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 'M');
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 1);
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 0);
-  }
-
-  content.value += 4;
-  content.len -= 4;
-  return cf_buf_read_jar_file(content, path, class_names, scratch_arena, arena);
-}
-
-static bool cf_read_jar_file(char *path, string_t **class_names,
-                             arena_t *scratch_arena, arena_t *arena) {
-  pg_assert(path != NULL);
-  pg_assert(class_names != NULL);
-  pg_assert(*class_names != NULL);
-  pg_assert(arena != NULL);
-
-  const int fd = open(path, O_RDONLY);
-  if (fd == -1) {
-    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
-    return false;
-  }
-
-  struct stat st = {0};
-  if (stat(path, &st) == -1) {
-    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
-            strerror(errno));
-    return false;
-  }
-  if (st.st_size == 0) {
-    return false;
-  }
-
-  string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
-  if (res != -1) {
-    fprintf(stderr, "Failed to read the full file %s: %s\n", path,
-            strerror(res));
-    return false;
-  }
-  close(fd);
-
-  return cf_buf_read_jar_file(content, path, class_names, scratch_arena, arena);
-}
-
-static bool cf_buf_read_jar_file(string_t content, char *path,
-                                 string_t **class_names, arena_t *scratch_arena,
-                                 arena_t *arena) {
-  char *current = content.value;
-  const u64 central_directory_end_size = 22;
-  pg_assert(content.len >= 4 + central_directory_end_size);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x50);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x4b);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
-
-  const string_t archive_file_path = string_make_from_c(path, arena);
-
-  // Assume first no trailing comment.
-  char *cdre = content.value + content.len - central_directory_end_size;
-  if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
-    // Need to scan backwards in the presence of a trailing comment to find
-    // the magic number.
-    cdre -= sizeof(u32);
-    while (--cdre > content.value &&
-           buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
-      cdre -= sizeof(u32);
-    }
-    pg_assert(cdre > content.value);
-  }
-
-  // disk number
-  const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
-  pg_unused(disk_number);
-
-  // disk start
-  const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
-
-  // records count on this disk
-  const u16 disk_records_count =
-      buf_read_le_u16(content.value, content.len, &cdre);
-  pg_unused(disk_records_count);
-
-  const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
-
-  const u32 central_directory_size =
-      buf_read_le_u32(content.value, content.len, &cdre);
-  pg_unused(central_directory_size);
-
-  const u32 central_directory_offset =
-      buf_read_le_u32(content.value, content.len, &cdre);
-
-  pg_assert(central_directory_offset < content.len);
-
-  // Sign of zip64.
-  pg_assert(central_directory_offset != (u32)-1);
-
-  char *cdfh = content.value + central_directory_offset;
-  for (u64 i = 0; i < records_count; i++) {
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x01);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x02);
-
-    // version made by
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // version needed to extract
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // general purpose bit flag
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    const u16 compression_method =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-    pg_assert(compression_method == 0 ||
-              compression_method == 8); // No compression or DEFLATE.
-
-    // file last modification time
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // file last modification date
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // crc-32 of uncompressed data
-    buf_read_le_u32(content.value, content.len, &cdfh);
-
-    // compressed size
-    const u32 compressed_size_according_to_directory_entry =
-        buf_read_le_u32(content.value, content.len, &cdfh);
-
-    // uncompressed size
-    const u32 uncompressed_size_according_to_directory_entry =
-        buf_read_le_u32(content.value, content.len, &cdfh);
-
-    const u16 file_name_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-
-    const u16 extra_field_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-
-    const u16 file_comment_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // disk number where file starts
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // internal file attributes
-    buf_read_le_u16(content.value, content.len, &cdfh);
-
-    // external file attributes
-    buf_read_le_u32(content.value, content.len, &cdfh);
-
-    const u32 local_file_header_offset =
-        buf_read_le_u32(content.value, content.len, &cdfh);
-
-    // file name
-    buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
-
-    // extra field
-    buf_read_n_u8(content.value, content.len, NULL, extra_field_length, &cdfh);
-
-    // file comment
-    buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
-
-    // Read file header.
-    {
-      char *local_file_header =
-          content.value + disk_start + local_file_header_offset;
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x50);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x4b);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x03);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x04);
-
-      // version to extract
-      buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      // general purpose bit flag
-      buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      const u16 compression_method =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
-      pg_assert(compression_method == 0 ||
-                compression_method == 8); // No compression or DEFLATE.
-
-      // file last modification time
-      buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      // file last modification date
-      buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      // crc-32 of uncompressed data
-      buf_read_le_u32(content.value, content.len, &local_file_header);
-
-      // compressed size
-      buf_read_le_u32(content.value, content.len, &local_file_header);
-
-      // uncompressed size
-      buf_read_le_u32(content.value, content.len, &local_file_header);
-
-      const u16 file_name_length =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      const u16 extra_field_length =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
-
-      const string_t file_name = {.value = local_file_header,
-                                  .len = file_name_length};
-      buf_read_n_u8(content.value, content.len, NULL, file_name_length,
-                    &local_file_header);
-
-      buf_read_n_u8(content.value, content.len, NULL, extra_field_length,
-                    &local_file_header);
-
-      cf_class_file_t class_file = {
-          .class_file_path = file_name,
-          .archive_file_path = archive_file_path,
-      };
-      // TODO: Read Manifest file?
-      if (uncompressed_size_according_to_directory_entry > 0 &&
-          compression_method == 0 &&
-          string_ends_with_cstring(file_name, ".class")) {
-        pg_assert(path != NULL);
-        cf_buf_read_class_file(local_file_header,
-                               uncompressed_size_according_to_directory_entry,
-                               &local_file_header, &class_file, 0, arena);
-
-        pg_array_append(*class_names, string_make(class_file.class_name, arena),
-                        arena);
-
-        LOG("Loaded %.*s from %.*s", class_file.class_file_path.len,
-            class_file.class_file_path.value, class_file.archive_file_path.len,
-            class_file.archive_file_path.value);
-
-      } else if (compressed_size_according_to_directory_entry > 0 &&
-                 compression_method == 8 &&
-                 string_ends_with_cstring(file_name, ".class")) {
-        arena_t tmp_arena = *scratch_arena;
-        u8 *dst = arena_alloc(&tmp_arena,
-                              uncompressed_size_according_to_directory_entry,
-                              sizeof(u8));
-        u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
-
-        z_stream stream = {
-            .next_in = (u8 *)local_file_header,
-            .avail_in = compressed_size_according_to_directory_entry,
-            .next_out = dst,
-            .avail_out = dst_len,
-        };
-
-        // `inflateInit2` is required instead of `inflateInit` because this is a
-        // raw compressed stream and not a zlib compressed stream which contains
-        // a header.
-        int res = inflateInit2(&stream, -8);
-        pg_assert(res == Z_OK);
-
-        res = inflate(&stream, Z_SYNC_FLUSH);
-        pg_assert(res == Z_STREAM_END);
-
-        char *dst_current = (char *)dst;
-        cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
-                               0, arena);
-        pg_array_append(*class_names, class_file.class_name, arena);
-
-        LOG("Loaded %.*s from %.*s (compressed)",
-            class_file.class_file_path.len, class_file.class_file_path.value,
-            class_file.archive_file_path.len,
-            class_file.archive_file_path.value);
-
-        inflateEnd(&stream);
-      }
-    }
-  }
-  return false;
 }
 
 // TODO: one thread that walks the directory recursively and one/many worker
@@ -5376,6 +5084,343 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
+static void resolver_load_methods_from_class_file(
+    resolver_t *resolver, const cf_class_file_t *class_file, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(class_file != NULL);
+  pg_assert(arena != NULL);
+
+  for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
+    const cf_method_t *const method = &class_file->methods[i];
+    const string_t descriptor = cf_constant_array_get_as_string(
+        &class_file->constant_pool, method->descriptor);
+
+    ty_type_t type = {0};
+    cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
+  }
+}
+
+static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
+                                 char *path, arena_t *scratch_arena,
+                                 arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(path != NULL);
+  pg_assert(scratch_arena != NULL);
+  pg_assert(arena != NULL);
+
+  char *current = content.value;
+  const u64 central_directory_end_size = 22;
+  pg_assert(content.len >= 4 + central_directory_end_size);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x50);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x4b);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
+  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
+
+  const string_t archive_file_path = string_make_from_c(path, arena);
+
+  // Assume first no trailing comment.
+  char *cdre = content.value + content.len - central_directory_end_size;
+  if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+    // Need to scan backwards in the presence of a trailing comment to find
+    // the magic number.
+    cdre -= sizeof(u32);
+    while (--cdre > content.value &&
+           buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+      cdre -= sizeof(u32);
+    }
+    pg_assert(cdre > content.value);
+  }
+
+  // disk number
+  const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
+  pg_unused(disk_number);
+
+  // disk start
+  const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
+
+  // records count on this disk
+  const u16 disk_records_count =
+      buf_read_le_u16(content.value, content.len, &cdre);
+  pg_unused(disk_records_count);
+
+  const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
+
+  const u32 central_directory_size =
+      buf_read_le_u32(content.value, content.len, &cdre);
+  pg_unused(central_directory_size);
+
+  const u32 central_directory_offset =
+      buf_read_le_u32(content.value, content.len, &cdre);
+
+  pg_assert(central_directory_offset < content.len);
+
+  // Sign of zip64.
+  pg_assert(central_directory_offset != (u32)-1);
+
+  char *cdfh = content.value + central_directory_offset;
+  for (u64 i = 0; i < records_count; i++) {
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x01);
+    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x02);
+
+    // version made by
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // version needed to extract
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // general purpose bit flag
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 compression_method =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+    pg_assert(compression_method == 0 ||
+              compression_method == 8); // No compression or DEFLATE.
+
+    // file last modification time
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // file last modification date
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // crc-32 of uncompressed data
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // compressed size
+    const u32 compressed_size_according_to_directory_entry =
+        buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // uncompressed size
+    const u32 uncompressed_size_according_to_directory_entry =
+        buf_read_le_u32(content.value, content.len, &cdfh);
+
+    const u16 file_name_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 extra_field_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    const u16 file_comment_length =
+        buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // disk number where file starts
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // internal file attributes
+    buf_read_le_u16(content.value, content.len, &cdfh);
+
+    // external file attributes
+    buf_read_le_u32(content.value, content.len, &cdfh);
+
+    const u32 local_file_header_offset =
+        buf_read_le_u32(content.value, content.len, &cdfh);
+
+    // file name
+    buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
+
+    // extra field
+    buf_read_n_u8(content.value, content.len, NULL, extra_field_length, &cdfh);
+
+    // file comment
+    buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
+
+    // Read file header.
+    {
+      char *local_file_header =
+          content.value + disk_start + local_file_header_offset;
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x50);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x4b);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x03);
+      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
+                0x04);
+
+      // version to extract
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // general purpose bit flag
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const u16 compression_method =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+      pg_assert(compression_method == 0 ||
+                compression_method == 8); // No compression or DEFLATE.
+
+      // file last modification time
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // file last modification date
+      buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      // crc-32 of uncompressed data
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      // compressed size
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      // uncompressed size
+      buf_read_le_u32(content.value, content.len, &local_file_header);
+
+      const u16 file_name_length =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const u16 extra_field_length =
+          buf_read_le_u16(content.value, content.len, &local_file_header);
+
+      const string_t file_name = {.value = local_file_header,
+                                  .len = file_name_length};
+      buf_read_n_u8(content.value, content.len, NULL, file_name_length,
+                    &local_file_header);
+
+      buf_read_n_u8(content.value, content.len, NULL, extra_field_length,
+                    &local_file_header);
+
+      cf_class_file_t class_file = {
+          .class_file_path = file_name,
+          .archive_file_path = archive_file_path,
+      };
+      // TODO: Read Manifest file?
+      if (uncompressed_size_according_to_directory_entry > 0 &&
+          compression_method == 0 &&
+          string_ends_with_cstring(file_name, ".class")) {
+        pg_assert(path != NULL);
+        cf_buf_read_class_file(local_file_header,
+                               uncompressed_size_according_to_directory_entry,
+                               &local_file_header, &class_file, 0, arena);
+
+        pg_array_append(resolver->class_names,
+                        string_make(class_file.class_name, arena), arena);
+
+        LOG("Loaded %.*s from %.*s", class_file.class_file_path.len,
+            class_file.class_file_path.value, class_file.archive_file_path.len,
+            class_file.archive_file_path.value);
+
+      } else if (compressed_size_according_to_directory_entry > 0 &&
+                 compression_method == 8 &&
+                 string_ends_with_cstring(file_name, ".class")) {
+        arena_t tmp_arena = *scratch_arena;
+        u8 *dst = arena_alloc(&tmp_arena,
+                              uncompressed_size_according_to_directory_entry,
+                              sizeof(u8));
+        u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
+
+        z_stream stream = {
+            .next_in = (u8 *)local_file_header,
+            .avail_in = compressed_size_according_to_directory_entry,
+            .next_out = dst,
+            .avail_out = dst_len,
+        };
+
+        // `inflateInit2` is required instead of `inflateInit` because this is a
+        // raw compressed stream and not a zlib compressed stream which contains
+        // a header.
+        int res = inflateInit2(&stream, -8);
+        pg_assert(res == Z_OK);
+
+        res = inflate(&stream, Z_SYNC_FLUSH);
+        pg_assert(res == Z_STREAM_END);
+
+        char *dst_current = (char *)dst;
+        cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
+                               0, arena);
+        pg_array_append(resolver->class_names, class_file.class_name, arena);
+
+        resolver_load_methods_from_class_file(resolver, &class_file, arena);
+
+        LOG("Loaded %.*s from %.*s (compressed)",
+            class_file.class_file_path.len, class_file.class_file_path.value,
+            class_file.archive_file_path.len,
+            class_file.archive_file_path.value);
+
+        inflateEnd(&stream);
+      }
+    }
+  }
+  return false;
+}
+static bool cf_read_jmod_file(resolver_t *resolver, char *path,
+                              arena_t *scratch_arena, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(path != NULL);
+  pg_assert(arena != NULL);
+
+  const int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
+    return false;
+  }
+
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
+            strerror(errno));
+    return false;
+  }
+  if (st.st_size == 0) {
+    return false;
+  }
+
+  string_t content = {0};
+  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
+  if (res != -1) {
+    fprintf(stderr, "Failed to read the full file %s: %s\n", path,
+            strerror(res));
+    return false;
+  }
+  close(fd);
+
+  // Check magic number.
+  {
+    char *current = content.value;
+    pg_assert(buf_read_u8(content.value, content.len, &current) == 'J');
+    pg_assert(buf_read_u8(content.value, content.len, &current) == 'M');
+    pg_assert(buf_read_u8(content.value, content.len, &current) == 1);
+    pg_assert(buf_read_u8(content.value, content.len, &current) == 0);
+  }
+
+  content.value += 4;
+  content.len -= 4;
+  return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
+}
+
+static bool cf_read_jar_file(resolver_t *resolver, char *path,
+                             arena_t *scratch_arena, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(path != NULL);
+  pg_assert(scratch_arena != NULL);
+  pg_assert(arena != NULL);
+
+  const int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
+    return false;
+  }
+
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
+            strerror(errno));
+    return false;
+  }
+  if (st.st_size == 0) {
+    return false;
+  }
+
+  string_t content = {0};
+  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
+  if (res != -1) {
+    fprintf(stderr, "Failed to read the full file %s: %s\n", path,
+            strerror(res));
+    return false;
+  }
+  close(fd);
+
+  return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
+}
+
 static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
   pg_assert(types != NULL);
@@ -5653,8 +5698,8 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
-  cf_read_jmod_file(java_base_jmod_file_path.value, &resolver->class_names,
-                    scratch_arena, arena);
+  cf_read_jmod_file(resolver, java_base_jmod_file_path.value, scratch_arena,
+                    arena);
 }
 
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
