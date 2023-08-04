@@ -3896,11 +3896,12 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_JVM_ARRAY_REFERENCE:
     return string_make_from_c("jvm.Array<todo>", arena);
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
+    const string_t *class_name = type->kotlin_class_name.len > 0
+                                     ? &type->kotlin_class_name
+                                     : &type->java_class_name;
     string_t result = string_reserve(
-        type->kotlin_class_name.len + type->java_class_name.len + 4, arena);
-    string_append_string(&result, type->kotlin_class_name, arena);
-    string_append_cstring(&result, " | ", arena);
-    string_append_string(&result, type->java_class_name, arena);
+        pg_max(type->kotlin_class_name.len, type->java_class_name.len), arena);
+    string_append_string(&result, *class_name, arena);
     return result;
   }
   case TYPE_KOTLIN_METHOD: {
@@ -5174,11 +5175,13 @@ static void resolver_load_methods_from_class_file(
 
     pg_array_append(resolver->types, type, arena);
 
-
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
-    LOG("[D001] descriptor=%.*s name=%.*s", descriptor.len, descriptor.value,
-        name.len,name.value);
+    const string_t human = ty_type_to_human_string(
+        resolver->types, pg_array_last_index(resolver->types), arena);
+
+    LOG("[D001] descriptor=%.*s name=%.*s human=%.*s", descriptor.len,
+        descriptor.value, name.len, name.value, human.len, human.value);
   }
 }
 
