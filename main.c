@@ -150,7 +150,7 @@ int main(int argc, char *argv[]) {
                              //
     ty_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
-    ty_resolve_node(&resolver, root_i, &arena);
+    ty_resolve_node(&resolver, root_i, &scratch_arena, &arena);
 
     // Debug types.
     {

@@ -54,8 +54,11 @@
 
 #define pg_assert(condition)                                                   \
   do {                                                                         \
-    if (!(condition))                                                          \
+    if (!(condition)) {                                                        \
+      fflush(stdout);                                                          \
+      fflush(stderr);                                                          \
       __builtin_trap();                                                        \
+    }                                                                          \
   } while (0)
 
 #define pg_max(a, b) (((a) > (b)) ? (a) : (b))
@@ -5396,9 +5399,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
 
         pg_array_append(resolver->class_names,
                         string_make(class_file.class_name, arena), arena);
+        resolver_load_methods_from_class_file(resolver, &class_file, arena);
 
-        LOG("Loaded %.*s from %.*s", class_file.class_file_path.len,
-            class_file.class_file_path.value, class_file.archive_file_path.len,
+        LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
+            file_name.value, class_file.class_name.len,
+            class_file.class_name.value, class_file.archive_file_path.len,
             class_file.archive_file_path.value);
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
@@ -5894,7 +5899,15 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
     if (!string_ends_with_cstring(class_path_entry, ".jar"))
       continue;
 
+    LOG("[D002] path=%.*s", class_path_entry.len, class_path_entry.value);
+    const u64 previous_len = pg_array_len(resolver->class_names);
     cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
+
+    for (u64 i = previous_len; i < pg_array_len(resolver->class_names); i++) {
+      if (string_eq(class_name, resolver->class_names[i])) {
+        return true;
+      }
+    }
   }
 
   return false;
@@ -6056,6 +6069,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     pg_assert(ty_resolve_class_name(
         resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"),
+        scratch_arena, arena));
+    pg_assert(ty_resolve_class_name(
+        resolver, string_make_from_c_no_alloc("java/io/PrintStream"),
         scratch_arena, arena));
 
     if (!resolver_resolve_method(
@@ -6302,7 +6318,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i = ty_resolve_node(resolver, node->lhs,scratch_arena, arena);
+    const u32 type_condition_i =
+        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
@@ -6318,7 +6335,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
       par_error(resolver->parser, token, error.value);
     }
 
-    return node->type_i = ty_resolve_node(resolver, node->rhs,scratch_arena, arena);
+    return node->type_i =
+               ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
   }
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
@@ -6326,7 +6344,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
-    const u32 type_condition_i = ty_resolve_node(resolver, node->lhs,scratch_arena, arena);
+    const u32 type_condition_i =
+        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (!(type_condition->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
@@ -6343,7 +6362,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     ty_begin_scope(resolver);
-    ty_resolve_node(resolver, node->rhs,scratch_arena, arena);
+    ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
     ty_type_t unit_type = {
@@ -6377,7 +6396,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     const u32 variable_i = ty_declare_variable(
         resolver, par_token_to_string(resolver->parser, node->main_token_i),
         node_i, arena);
-    node->type_i = ty_resolve_node(resolver, node->lhs,scratch_arena, arena);
+    node->type_i = ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     ty_mark_variable_as_initialized(resolver, variable_i);
 
     return node->type_i;
@@ -6463,18 +6482,20 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     node->kind = AST_KIND_VAR_REFERENCE;
     node->lhs = resolver->variables[variable_i].var_definition_node_i;
 
-    return ty_resolve_node(resolver, node_i,scratch_arena, arena);
+    return ty_resolve_node(resolver, node_i, scratch_arena, arena);
 
     break;
   }
 
   case AST_KIND_THEN_ELSE:
     ty_begin_scope(resolver);
-    const u32 lhs_type_i = ty_resolve_node(resolver, node->lhs, scratch_arena,arena);
+    const u32 lhs_type_i =
+        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
     ty_begin_scope(resolver);
-    const u32 rhs_type_i = ty_resolve_node(resolver, node->rhs,scratch_arena, arena);
+    const u32 rhs_type_i =
+        ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
@@ -6494,7 +6515,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     break;
 
   case AST_KIND_ASSIGNMENT:
-    ty_resolve_node(resolver, node->lhs,scratch_arena, arena);
+    ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
     if (!par_is_lvalue(resolver->parser, node->lhs)) {
       par_error(
@@ -6502,11 +6523,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
           "The assignment target is not a lvalue (such as a local variable)");
     }
 
-    return node->type_i = ty_resolve_node(resolver, node->rhs,scratch_arena, arena);
+    return node->type_i =
+               ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
   case AST_KIND_RETURN: {
     pg_assert(resolver->current_function_i);
-    node->type_i = ty_resolve_node(resolver, node->lhs,scratch_arena, arena);
+    node->type_i = ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const par_ast_node_t *const current_function =
         &resolver->parser->nodes[resolver->current_function_i];
     const ty_type_t *const function_type =
