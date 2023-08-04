@@ -1195,8 +1195,13 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
     string_drop_first_n(&remaining, 1);
     type->java_class_name = remaining;
 
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+
     string_drop_until_incl(&remaining, ';');
     type->java_class_name.len -= remaining.len;
+    if (string_eq_c(type->java_class_name, "java/lang/String")) {
+      type->kotlin_class_name = string_make_from_c("kotlin.String", arena);
+    }
 
     return remaining;
 
