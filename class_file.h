@@ -694,9 +694,7 @@ struct ty_type_t {
   ty_type_kind_t kind;
   u8 flag;
   u16 constant_pool_item_i;
-  u32 class_file_i;
-  u16 field_i;
-  pg_pad(6);
+  pg_pad(4);
 };
 
 typedef struct ty_type_t ty_type_t;
@@ -5536,15 +5534,12 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   const ty_type_t *const lhs = &types[lhs_i];
   const ty_type_t *const rhs = &types[rhs_i];
 
+  if (lhs->kind!=rhs->kind) return false;
+
   if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
       rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-    if (lhs->class_file_i == rhs->class_file_i)
-      return true;
 
-    if (string_eq(lhs->java_class_name, rhs->java_class_name))
-      return true;
-
-    return false;
+    return string_eq(lhs->java_class_name, rhs->java_class_name);
   }
 
   if (lhs->kind == TYPE_KOTLIN_UNIT && rhs->kind == TYPE_KOTLIN_UNIT)
@@ -5561,12 +5556,12 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
         pg_array_len(rhs_method->argument_types_i))
       return false;
 
-
-    for (u64 i=0;i<pg_array_len(lhs_method->argument_types_i);i++){
+    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types_i); i++) {
       const u32 lhs_arg_i = lhs_method->argument_types_i[i];
       const u32 rhs_arg_i = rhs_method->argument_types_i[i];
 
-      if (!ty_types_equal(types, lhs_arg_i,rhs_arg_i)) return false;
+      if (!ty_types_equal(types, lhs_arg_i, rhs_arg_i))
+        return false;
     }
 
     return true;
@@ -5618,13 +5613,10 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   if (lhs_type->kind == rhs_type->kind) {
     if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
         rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-      if (lhs_type->class_file_i == rhs_type->class_file_i) {
-        *result_i = lhs_i;
-        return true;
-      } else if (string_eq(string_make_from_c_no_alloc("kotlin.Byte"),
-                           lhs_type->kotlin_class_name) &&
-                 string_eq(string_make_from_c_no_alloc("kotlin.Int"),
-                           rhs_type->kotlin_class_name)) {
+      if (string_eq(string_make_from_c_no_alloc("kotlin.Byte"),
+                    lhs_type->kotlin_class_name) &&
+          string_eq(string_make_from_c_no_alloc("kotlin.Int"),
+                    rhs_type->kotlin_class_name)) {
         *result_i = lhs_i;
         return true;
       } else if (string_eq(string_make_from_c_no_alloc("kotlin.Short"),
