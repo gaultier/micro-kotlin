@@ -5,6 +5,7 @@ class Test {
     DemoKt.fibonacci(10);
     DemoKt.fibonacci_10();
     DemoKt.fibonacci_10_long();
+    DemoKt.byte_short();
   }
 
   public static int square_primitive(int x) {
