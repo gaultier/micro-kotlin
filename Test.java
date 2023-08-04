@@ -1,9 +1,8 @@
-import java.net.http.HttpClient;
 
 class Test {
   public static void main(String[] args) {
-    byte b = 3;
-    System.out.println(b);
+    byte b =3;
+    kotlin.io.ConsoleKt.println(b);
 
     DemoKt.fibonacci(10);
     DemoKt.fibonacci_10();
@@ -18,4 +17,9 @@ class Test {
   public static Integer square_boxed(Integer x) {
     return x % 2 == 0 ? x*x : null;
   }
+
+  public static void foo(int x) {
+    
+  }
+
 }
