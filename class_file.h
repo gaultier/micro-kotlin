@@ -5576,19 +5576,20 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 }
 
 static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
-                                    string_t method_name, u32 type_i) {
+                                    string_t method_name,
+                                    string_t *picked_class_name, u32 type_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_names != NULL);
   pg_assert(resolver->class_methods != NULL);
-  pg_assert(class_name.len > 0);
   pg_assert(method_name.len > 0);
+  pg_assert(picked_class_name != NULL);
 
   for (u64 i = 0; i < pg_array_len(resolver->class_methods); i++) {
     const resolver_class_field_t *const method = &resolver->class_methods[i];
     pg_assert(method->class_name.len > 0);
     pg_assert(method->field_name.len > 0);
 
-    if (!string_eq(method->class_name, class_name))
+    if (class_name.len > 0 && !string_eq(method->class_name, class_name))
       continue;
 
     if (!string_eq(method->field_name, method_name))
@@ -5597,6 +5598,7 @@ static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
     if (!ty_types_equal(resolver->types, type_i, method->type_i))
       continue;
 
+    *picked_class_name = method->class_name;
     return true;
   }
 
@@ -6074,9 +6076,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
         resolver, string_make_from_c_no_alloc("java/io/PrintStream"),
         scratch_arena, arena));
 
-    if (!resolver_resolve_method(
-            resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"),
-            string_make_from_c_no_alloc("println"), node->type_i)) {
+    string_t picked_class_name = {0};
+    if (!resolver_resolve_method(resolver, (string_t){0},
+                                 string_make_from_c_no_alloc("println"),
+                                 &picked_class_name, node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "failed to find matching function: ", arena);
@@ -6085,6 +6088,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
           arena);
       par_error(resolver->parser, token, error.value);
     }
+
+    resolver->types[node->type_i].java_class_name = picked_class_name;
 
     return unit_type_i;
   }
@@ -7789,7 +7794,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(gen->out_field_ref_i > 0);
     pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
+    pg_assert(type->java_class_name.value != NULL);
+    pg_assert(type->java_class_name.len > 0);
 
+    // FIXME
     cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
                        arena);
 
@@ -7813,17 +7821,16 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &name_and_type, arena);
 
-    const u16 printstream_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/io/PrintStream", arena);
+    const u16 class_name_i = cf_add_constant_string(
+        &class_file->constant_pool, type->java_class_name, arena);
 
-    const cf_constant_t printstream_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.java_class_name = printstream_name_i}};
-    const u16 printstream_class_i = cf_constant_array_push(
-        &class_file->constant_pool, &printstream_class, arena);
+    const cf_constant_t class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+                                 .v = {.java_class_name = class_name_i}};
+    const u16 class_i =
+        cf_constant_array_push(&class_file->constant_pool, &class, arena);
     const cf_constant_t method_ref = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.class = printstream_class_i,
+        .v = {.method_ref = {.class = class_i,
                              .name_and_type = name_and_type_i}}};
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
