@@ -1116,7 +1116,7 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
 
   if (descriptor.len == 0)
     return (string_t){0};
-  LOG("[D001] %.*s", descriptor.len, descriptor.value);
+
   string_t remaining = descriptor;
 
   switch (remaining.value[0]) {
@@ -1126,52 +1126,77 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
     return remaining;
 
   case 'S':
-    type->kind = TYPE_JVM_SHORT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Short", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Short", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'B':
-    type->kind = TYPE_JVM_BYTE;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Byte", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Byte", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'C':
-    type->kind = TYPE_JVM_CHAR;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Char", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Char", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'D':
-    type->kind = TYPE_JVM_DOUBLE;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Double", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Double", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'F':
-    type->kind = TYPE_JVM_FLOAT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Float", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Float", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'I':
-    type->kind = TYPE_JVM_INT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Integer", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Integer", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'J':
-    type->kind = TYPE_JVM_LONG;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Long", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Long", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'Z':
-    type->kind = TYPE_JVM_BOOL;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->java_class_name = string_make_from_c("java/lang/Boolean", arena);
+    type->kotlin_class_name = string_make_from_c("kotlin.Boolean", arena);
+
     string_drop_first_n(&remaining, 1);
     return remaining;
 
   case 'L':
-    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    // TODO: Try to convert java_class_name to kotlin_class_name?
+
     string_drop_first_n(&remaining, 1);
-    string_t java_class_name = remaining;
+    type->java_class_name = remaining;
 
     string_drop_until_incl(&remaining, ';');
-    java_class_name.len -= remaining.len;
+    type->java_class_name.len -= remaining.len;
 
     return remaining;
 
@@ -1183,7 +1208,8 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
         .value = remaining.value + 1,
         .len = remaining.len - 1,
     };
-    remaining = cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
+    remaining =
+        cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
     return remaining;
@@ -5145,6 +5171,14 @@ static void resolver_load_methods_from_class_file(
 
     ty_type_t type = {0};
     cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
+
+    pg_array_append(resolver->types, type, arena);
+
+
+    const string_t name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, method->name);
+    LOG("[D001] descriptor=%.*s name=%.*s", descriptor.len, descriptor.value,
+        name.len,name.value);
   }
 }
 
