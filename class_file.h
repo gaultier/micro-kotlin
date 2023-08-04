@@ -5147,11 +5147,13 @@ typedef struct {
   string_t class_name;
   string_t field_name;
   u32 type_i;
-  pg_pad(4);
+  u16 access_flags;
+  pg_pad(2);
 } resolver_class_field_t;
 
 typedef struct {
   par_parser_t *parser;
+  // TODO: Should we store the access flags for each class?
   string_t *class_names;
   resolver_class_field_t *class_fields;
   resolver_class_field_t *class_methods;
@@ -5196,6 +5198,7 @@ static void resolver_load_methods_from_class_file(
         .class_name = class_name,
         .field_name = string_make(name, arena),
         .type_i = ty_add_type(&resolver->types, &type, arena),
+        .access_flags = method->access_flags,
     };
     pg_array_append(resolver->class_methods, class_method, arena);
 
@@ -5575,8 +5578,9 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   pg_assert(0 && "todo");
 }
 
+// TODO: Keep track of imported packages (including those imported by default).
 static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
-                                    string_t method_name,
+                                    u16 flags, string_t method_name,
                                     string_t *picked_class_name, u32 type_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_names != NULL);
@@ -5588,6 +5592,9 @@ static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
     const resolver_class_field_t *const method = &resolver->class_methods[i];
     pg_assert(method->class_name.len > 0);
     pg_assert(method->field_name.len > 0);
+
+    if ((method->access_flags & flags) == 0)
+      continue;
 
     if (class_name.len > 0 && !string_eq(method->class_name, class_name))
       continue;
@@ -6069,15 +6076,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     node->type_i = ty_add_type(&resolver->types, &println_type, arena);
 
-    pg_assert(ty_resolve_class_name(
-        resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"),
-        scratch_arena, arena));
-    pg_assert(ty_resolve_class_name(
-        resolver, string_make_from_c_no_alloc("java/io/PrintStream"),
-        scratch_arena, arena));
-
     string_t picked_class_name = {0};
-    if (!resolver_resolve_method(resolver, (string_t){0},
+    if (!resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
                                  string_make_from_c_no_alloc("println"),
                                  &picked_class_name, node->type_i)) {
       string_t error = string_reserve(256, arena);
