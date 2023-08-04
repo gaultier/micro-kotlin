@@ -5581,12 +5581,12 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 // TODO: Keep track of imported packages (including those imported by default).
 static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
                                     u16 flags, string_t method_name,
-                                    string_t *picked_class_name, u32 type_i) {
+                                    u32 *picked_method_i, u32 type_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_names != NULL);
   pg_assert(resolver->class_methods != NULL);
   pg_assert(method_name.len > 0);
-  pg_assert(picked_class_name != NULL);
+  pg_assert(picked_method_i != NULL);
 
   for (u64 i = 0; i < pg_array_len(resolver->class_methods); i++) {
     const resolver_class_field_t *const method = &resolver->class_methods[i];
@@ -5605,7 +5605,7 @@ static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
     if (!ty_types_equal(resolver->types, type_i, method->type_i))
       continue;
 
-    *picked_class_name = method->class_name;
+    *picked_method_i = i;
     return true;
   }
 
@@ -6067,29 +6067,59 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
     const u32 unit_type_i = ty_add_type(&resolver->types, &unit_type, arena);
 
-    ty_type_t println_type = {.kind = TYPE_KOTLIN_METHOD,
-                              .v = {.method = {
-                                        .return_type_i = unit_type_i,
-                                    }}};
-    pg_array_init_reserve(println_type.v.method.argument_types_i, 1, arena);
-    pg_array_append(println_type.v.method.argument_types_i, lhs->type_i, arena);
+    ty_type_t println_type_exact = {.kind = TYPE_KOTLIN_METHOD,
+                                    .v = {.method = {
+                                              .return_type_i = unit_type_i,
+                                          }}};
+    pg_array_init_reserve(println_type_exact.v.method.argument_types_i, 1,
+                          arena);
+    pg_array_append(println_type_exact.v.method.argument_types_i, lhs->type_i,
+                    arena);
 
-    node->type_i = ty_add_type(&resolver->types, &println_type, arena);
+    ty_type_t println_type_object = {.kind = TYPE_KOTLIN_METHOD,
+                                     .v = {.method = {
+                                               .return_type_i = unit_type_i,
+                                           }}};
+    pg_array_init_reserve(println_type_object.v.method.argument_types_i, 1,
+                          arena);
+    const ty_type_t object_type = {
+        .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+        .java_class_name = string_make_from_c("java/lang/Object", arena),
+        .kotlin_class_name = string_make_from_c("java/lang/Object", arena),
+    };
+    pg_array_append(println_type_object.v.method.argument_types_i,
+                    ty_add_type(&resolver->types, &object_type, arena), arena);
 
-    string_t picked_class_name = {0};
-    if (!resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
-                                 string_make_from_c_no_alloc("println"),
-                                 &picked_class_name, node->type_i)) {
+    const u32 println_type_exact_i =
+        ty_add_type(&resolver->types, &println_type_exact, arena);
+    const u32 println_type_object_i =
+        ty_add_type(&resolver->types, &println_type_object, arena);
+
+    u32 picked_method_i = 0;
+    if (!(resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
+                                  string_make_from_c_no_alloc("println"),
+                                  &picked_method_i, println_type_exact_i)) ||
+        resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
+                                string_make_from_c_no_alloc("println"),
+                                &picked_method_i, println_type_object_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "failed to find matching function: ", arena);
       string_append_string(
-          &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
+          &error,
+          ty_type_to_human_string(resolver->types, println_type_exact_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
+      return 0;
     }
 
-    resolver->types[node->type_i].java_class_name = picked_class_name;
+    pg_assert(picked_method_i > 0);
+
+    const resolver_class_field_t *const picked_method =
+        &resolver->class_methods[picked_method_i];
+    resolver->types[node->type_i].java_class_name = picked_method->class_name;
+
+    node->type_i = picked_method->type_i;
 
     return unit_type_i;
   }
