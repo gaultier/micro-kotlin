@@ -680,7 +680,7 @@ typedef struct {
   string_t descriptor;
   u32 return_type_i;
   pg_pad(4);
-} par_type_method_t;
+} ty_type_method_t;
 
 struct ty_type_t {
   // TODO: Perhaps add `class_name` which points to either `kotlin_class_name`
@@ -688,8 +688,8 @@ struct ty_type_t {
   string_t java_class_name;
   string_t kotlin_class_name;
   union {
-    par_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;         // TYPE_ARRAY_REFERENCE
+    ty_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
+    u32 array_type_i;        // TYPE_ARRAY_REFERENCE
   } v;
   ty_type_kind_t kind;
   u8 flag;
@@ -1088,7 +1088,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   }
   case TYPE_JVM_CONSTRUCTOR:
   case TYPE_KOTLIN_METHOD: {
-    const par_type_method_t *const method_type = &type->v.method;
+    const ty_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
 
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
@@ -3910,7 +3910,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return result;
   }
   case TYPE_KOTLIN_METHOD: {
-    const par_type_method_t *const method_type = &type->v.method;
+    const ty_type_method_t *const method_type = &type->v.method;
 
     string_t res = string_reserve(128, arena);
     string_append_cstring(&res, "(", arena);
@@ -5164,27 +5164,43 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
+static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
+                       arena_t *arena) {
+  pg_assert(types != NULL);
+  pg_assert(type != NULL);
+
+  // TODO: Deduplicate.
+  pg_array_append(*types, *type, arena);
+  return pg_array_last_index(*types);
+}
+
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, const cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
+  const string_t class_name = string_make(class_file->class_name, arena);
+
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
     const string_t descriptor = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->descriptor);
+    const string_t name = cf_constant_array_get_as_string(
+        &class_file->constant_pool, method->name);
 
     ty_type_t type = {0};
     cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
 
-    pg_array_append(resolver->types, type, arena);
+    resolver_class_field_t class_method = {
+        .class_name = class_name,
+        .field_name = string_make(name, arena),
+        .type_i = ty_add_type(&resolver->types, &type, arena),
+    };
+    pg_array_append(resolver->class_methods, class_method, arena);
 
-    const string_t name = cf_constant_array_get_as_string(
-        &class_file->constant_pool, method->name);
     const string_t human = ty_type_to_human_string(
         resolver->types, pg_array_last_index(resolver->types), arena);
-
     LOG("[D001] descriptor=%.*s name=%.*s human=%.*s", descriptor.len,
         descriptor.value, name.len, name.value, human.len, human.value);
   }
@@ -5531,6 +5547,31 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
     return false;
   }
 
+  if (lhs->kind == TYPE_KOTLIN_UNIT && rhs->kind == TYPE_KOTLIN_UNIT)
+    return true;
+  if (lhs->kind == TYPE_KOTLIN_METHOD && rhs->kind == TYPE_KOTLIN_METHOD) {
+    const ty_type_method_t *const lhs_method = &lhs->v.method;
+    const ty_type_method_t *const rhs_method = &rhs->v.method;
+
+    if (!ty_types_equal(types, lhs_method->return_type_i,
+                        rhs_method->return_type_i))
+      return false;
+
+    if (pg_array_len(lhs_method->argument_types_i) !=
+        pg_array_len(rhs_method->argument_types_i))
+      return false;
+
+
+    for (u64 i=0;i<pg_array_len(lhs_method->argument_types_i);i++){
+      const u32 lhs_arg_i = lhs_method->argument_types_i[i];
+      const u32 rhs_arg_i = rhs_method->argument_types_i[i];
+
+      if (!ty_types_equal(types, lhs_arg_i,rhs_arg_i)) return false;
+    }
+
+    return true;
+  }
+
   pg_assert(0 && "todo");
 }
 
@@ -5614,16 +5655,6 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   }
 
   return false;
-}
-
-static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
-                       arena_t *arena) {
-  pg_assert(types != NULL);
-  pg_assert(type != NULL);
-
-  // TODO: Deduplicate.
-  pg_array_append(*types, *type, arena);
-  return pg_array_last_index(*types);
 }
 
 static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
@@ -6001,12 +6032,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i, arena_t *arena) {
     pg_array_init_reserve(println_type.v.method.argument_types_i, 1, arena);
     pg_array_append(println_type.v.method.argument_types_i, lhs->type_i, arena);
 
-    pg_array_append(resolver->types, println_type, arena);
-    node->type_i = pg_array_last_index(resolver->types);
+    node->type_i = ty_add_type(&resolver->types, &println_type, arena);
 
     if (!resolver_resolve_method(
             resolver, string_make_from_c_no_alloc("java/io/PrintStream"),
-            string_make_from_c_no_alloc("println"), lhs->type_i)) {
+            string_make_from_c_no_alloc("println"), node->type_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "failed to find matching function: ", arena);
@@ -7055,7 +7085,7 @@ cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
 }
 
 static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
-                                   const par_type_method_t *method_type,
+                                   const ty_type_method_t *method_type,
                                    arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7073,7 +7103,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
 }
 
 static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
-                                  const par_type_method_t *method_type,
+                                  const ty_type_method_t *method_type,
                                   arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7709,7 +7739,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     pg_assert(type->kind == TYPE_KOTLIN_METHOD);
 
-    const par_type_method_t *const method = &type->v.method;
+    const ty_type_method_t *const method = &type->v.method;
 
     pg_assert(method->descriptor.value != NULL);
     pg_assert(method->descriptor.len > 0);
@@ -8565,7 +8595,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
                     arena);
     const u32 void_type_i = pg_array_last_index(gen->resolver->types);
 
-    const par_type_method_t target_method_type = {
+    const ty_type_method_t target_method_type = {
         .return_type_i = void_type_i,
         .descriptor = target_descriptor_string,
     };
