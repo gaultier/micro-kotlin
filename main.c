@@ -193,6 +193,8 @@ int main(int argc, char *argv[]) {
     fclose(file);
 
     LOG("class_names=%lu", pg_array_len(resolver.class_names));
+    LOG("class_fields=%lu", pg_array_len(resolver.class_fields));
+    LOG("class_methods=%lu", pg_array_len(resolver.class_methods));
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
