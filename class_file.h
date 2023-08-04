@@ -5645,6 +5645,22 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
     return true;
   }
 
+  if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      string_eq_c(lhs_type->kotlin_class_name, "kotlin.Int") &&
+      string_eq_c(rhs_type->kotlin_class_name, "kotlin.Short")) {
+    *result_i = rhs_i;
+    return true;
+  }
+
+  if (lhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs_type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      string_eq_c(rhs_type->kotlin_class_name, "kotlin.Int") &&
+      string_eq_c(lhs_type->kotlin_class_name, "kotlin.Short")) {
+    *result_i = lhs_i;
+    return true;
+  }
+
   return false;
 }
 
