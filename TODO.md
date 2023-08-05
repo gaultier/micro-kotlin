@@ -27,7 +27,7 @@
 - [x] Long
 - [ ] Refactor/rename stuff
 - [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
-- [ ] Byte
+- [x] Byte
 - [ ] Char
 - [x] Short
 - [ ] Double, Float
@@ -54,7 +54,7 @@
 - [x] Convert jvm types to kotlin types when reading .class, .jar, .jmod
 - [x] Use scratch arena when reading .class, .jar, .jmod files
 - [x] Merge functions to read .jmod, .jar if possible
-- [ ] **Avoid duplicating method resolution in the resolver and the lowerer** (descriptor)
+- [x] Avoid duplicating method resolution in the resolver and the lowerer (descriptor)
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
@@ -63,6 +63,7 @@
 - [ ] Default imports
 - [ ] Imports
 - [ ] Arena dump to see how/where memory is utilized
+- [ ] Resolve free functions by building candidate sets
 - [ ] Remove builtin println
 - [ ] Class definition (BIG!)
   * Fields
