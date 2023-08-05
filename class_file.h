@@ -5625,6 +5625,7 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 }
 
 // TODO: Keep track of imported packages (including those imported by default).
+// TODO: Build sets of candidates and pick the most specific one (including widening numeric types).
 static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
                                     u16 flags, string_t method_name,
                                     u32 *picked_method_i, u32 type_i) {
@@ -6118,8 +6119,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     u32 picked_method_i = 0;
     if (!resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
-          string_make_from_c_no_alloc("println"),
-          &picked_method_i, println_type_exact_i)) {
+                                 string_make_from_c_no_alloc("println"),
+                                 &picked_method_i, println_type_exact_i)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "failed to find matching function: ", arena);
