@@ -20,6 +20,7 @@ int main(int argc, char *argv[]) {
     switch (opt) {
     case 'v':
       log_verbose = true;
+      break;
     case 'c':
       classpath = optarg;
       break;

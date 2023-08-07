@@ -203,8 +203,10 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
-static bool ut_cstring_ends_with(const char *s, u64 s_len, const char *suffix,
-                                 u64 suffix_len) {
+__attribute__((unused)) static bool ut_cstring_ends_with(const char *s,
+                                                         u64 s_len,
+                                                         const char *suffix,
+                                                         u64 suffix_len) {
   pg_assert(s != NULL);
   pg_assert(s_len > 0);
   pg_assert(suffix != NULL);
@@ -361,7 +363,8 @@ static void string_drop_first_n(string_t *s, u64 n) {
   s->value += n;
 }
 
-static void string_drop_prefix_cstring(string_t *s, char *needle) {
+__attribute__((unused)) static void string_drop_prefix_cstring(string_t *s,
+                                                               char *needle) {
   pg_assert(s != NULL);
   pg_assert(needle != NULL);
 
@@ -440,8 +443,8 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
   pg_assert(s->len <= s->cap);
 }
 
-static void string_append_char_if_not_exists(string_t *s, char c,
-                                             arena_t *arena) {
+__attribute__((unused)) static void
+string_append_char_if_not_exists(string_t *s, char c, arena_t *arena) {
   pg_assert(s != NULL);
 
   if (s->len > 0 && s->value[s->len - 1] != c) {
@@ -1126,68 +1129,77 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
   string_t remaining = descriptor;
 
   switch (remaining.value[0]) {
-  case 'V':
+  case 'V': {
     type->kind = TYPE_KOTLIN_UNIT;
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'S':
+  case 'S': {
     type->kind = TYPE_KOTLIN_SHORT;
     type->java_class_name = string_make_from_c("java/lang/Short", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'B':
+  case 'B': {
     type->kind = TYPE_KOTLIN_BYTE;
     type->java_class_name = string_make_from_c("java/lang/Byte", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'C':
+  case 'C': {
     type->kind = TYPE_KOTLIN_CHAR;
     type->java_class_name = string_make_from_c("java/lang/Char", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'D':
+  case 'D': {
     type->kind = TYPE_KOTLIN_DOUBLE;
     type->java_class_name = string_make_from_c("java/lang/Double", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'F':
+  case 'F': {
     type->kind = TYPE_KOTLIN_FLOAT;
     type->java_class_name = string_make_from_c("java/lang/Float", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'I':
+  case 'I': {
     type->kind = TYPE_KOTLIN_INT;
     type->java_class_name = string_make_from_c("java/lang/Integer", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'J':
+  case 'J': {
     type->kind = TYPE_KOTLIN_LONG;
     type->java_class_name = string_make_from_c("java/lang/Long", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'Z':
+  case 'Z': {
     type->kind = TYPE_KOTLIN_BOOLEAN;
     type->java_class_name = string_make_from_c("java/lang/Boolean", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
+  }
 
-  case 'L':
+  case 'L': {
     string_drop_first_n(&remaining, 1);
     type->java_class_name = remaining;
 
@@ -1200,8 +1212,9 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
     }
 
     return remaining;
+  }
 
-  case '[':
+  case '[': {
     type->kind = TYPE_JVM_ARRAY_REFERENCE;
     ty_type_t item_type = {0};
 
@@ -1214,6 +1227,7 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
     return remaining;
+  }
 
   case '(': {
     type->kind = TYPE_KOTLIN_METHOD;
@@ -1248,6 +1262,8 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
   default:
     pg_assert(0 && "unreachable");
   }
+
+  __builtin_unreachable();
 }
 
 #if 0
@@ -2945,7 +2961,8 @@ static string_t cf_make_class_file_path_kt(string_t source_file_name,
   return result;
 }
 
-static string_t cf_get_this_class_name(const cf_class_file_t *class_file) {
+__attribute__((unused)) static string_t
+cf_get_this_class_name(const cf_class_file_t *class_file) {
   pg_assert(class_file != NULL);
 
   const cf_constant_t *const this_class =
@@ -3691,7 +3708,11 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 
   case TOKEN_KIND_STRING_LITERAL:
     return lex_string_length(buf, buf_len, token.source_offset);
+
+  default:
+    pg_assert(0 && "unreachable");
   }
+  __builtin_unreachable();
 }
 
 // ------------------------------ Parser
@@ -3880,7 +3901,10 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_JVM_ARRAY_REFERENCE";
   case TYPE_JVM_CONSTRUCTOR:
     return "TYPE_JVM_CONSTRUCTOR";
+  default:
+    pg_assert(0 && "unreachable");
   }
+  __builtin_unreachable();
 }
 
 static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
@@ -3930,8 +3954,12 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("jvm.Double", arena);
   case TYPE_JVM_STRING:
     return string_make_from_c("jvm.String", arena);
-  case TYPE_JVM_ARRAY_REFERENCE:
-    return string_make_from_c("jvm.Array<todo>", arena);
+  case TYPE_JVM_ARRAY_REFERENCE: {
+    string_t result = string_make_from_c("jvm.Array<", arena);
+    string_append_string(&result, type->java_class_name, arena);
+    string_append_char(&result, '>', arena);
+    return result;
+  }
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
     return string_make(type->java_class_name, arena);
   }
@@ -3957,7 +3985,10 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
   case TYPE_JVM_CONSTRUCTOR:
     return string_make_from_c("Constructor<todo>", arena);
+  default:
+    pg_assert(0 && "unreachable");
   }
+  __builtin_unreachable();
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -6589,8 +6620,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
   }
 
   case AST_KIND_MAX:
+  default:
     pg_assert(0 && "unreachable");
   }
+  __builtin_unreachable();
 }
 
 // --------------------------------- Lowering
@@ -7724,9 +7757,9 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
   }
 }
 
-static u16 cg_add_class_name_in_constant_pool(cf_class_file_t *class_file,
-                                              string_t class_name,
-                                              arena_t *arena) {
+__attribute__((unused)) static u16
+cg_add_class_name_in_constant_pool(cf_class_file_t *class_file,
+                                   string_t class_name, arena_t *arena) {
   const u16 class_name_i =
       cf_add_constant_string(&class_file->constant_pool, class_name, arena);
   const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
