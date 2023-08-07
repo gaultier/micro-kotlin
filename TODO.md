@@ -63,7 +63,7 @@
 - [ ] Default imports
 - [ ] Imports
 - [ ] Arena dump to see how/where memory is utilized
-- [ ] Resolve free functions by building candidate sets
+- [ ] **Resolve free functions by building candidate sets**
 - [ ] Remove builtin println
 - [ ] Class definition (BIG!)
   * Fields
@@ -83,10 +83,10 @@
   * Switch (`when`): All cases are covered
   * Switch (`when`): No redundant cases
   * ...
-- [ ] Full-fledged type inference
 
 **Later:**
 
+- [ ] Full-fledged type inference
 - [ ] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] High level APIs for the driver
 - [ ] Generate line tables
