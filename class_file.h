@@ -5635,37 +5635,95 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   return lhs->kind == rhs->kind;
 }
 
-// TODO: Keep track of imported packages (including those imported by default).
-// TODO: Build sets of candidates and pick the most specific one (including
-// widening numeric types).
-static bool resolver_resolve_method(resolver_t *resolver, string_t class_name,
-                                    u16 flags, string_t method_name,
-                                    u32 *picked_method_i, u32 type_i) {
+static u32 *resolver_collect_free_functions_of_name(resolver_t *resolver,
+                                                    string_t function_name,
+                                                    arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(resolver->class_names != NULL);
   pg_assert(resolver->class_methods != NULL);
-  pg_assert(method_name.len > 0);
-  pg_assert(picked_method_i != NULL);
+
+  u32 *result = NULL;
+  pg_array_init_reserve(result, 128, arena);
 
   for (u64 i = 0; i < pg_array_len(resolver->class_methods); i++) {
     const resolver_class_field_t *const method = &resolver->class_methods[i];
     pg_assert(method->class_name.len > 0);
     pg_assert(method->field_name.len > 0);
 
-    if ((method->access_flags & flags) == 0)
+    // TODO: Check flags, etc.
+
+    if (!string_eq(method->field_name, function_name))
       continue;
 
-    if (class_name.len > 0 && !string_eq(method->class_name, class_name))
-      continue;
+    pg_array_append(result, i, arena);
+  }
 
-    if (!string_eq(method->field_name, method_name))
-      continue;
+  // TODO: Collect callable fields as well.
 
-    if (!ty_types_equal(resolver->types, type_i, method->type_i))
-      continue;
+  return result;
+}
 
-    *picked_method_i = i;
+typedef enum {
+  APPLICABILITY_LESS = -1,
+  APPLICABILITY_NONE = 0,
+  APPLICABILITY_MORE = 1,
+} applicability_t;
+
+static applicability_t
+resolver_compare_applicability(const resolver_t *resolver, u32 a, u32 b,
+                               u8 call_argument_count) {
+  const resolver_class_field_t *const f1 = &resolver->class_methods[a];
+  const resolver_class_field_t *const f2 = &resolver->class_methods[b];
+
+  for (u8 i = 0; i < call_argument_count; i++) {
+  }
+
+  return APPLICABILITY_NONE;
+}
+
+// TODO: Keep track of imported packages (including those imported by default).
+static bool resolver_resolve_free_function(
+    resolver_t *resolver, string_t class_name, string_t method_name,
+    u8 call_argument_count, u32 *picked_method_i, u32 type_i, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->class_names != NULL);
+  pg_assert(resolver->class_methods != NULL);
+  pg_assert(method_name.len > 0);
+  pg_assert(picked_method_i != NULL);
+
+  arena_t tmp_arena = *arena;
+
+  u32 *const candidates = resolver_collect_free_functions_of_name(
+      resolver, method_name, &tmp_arena);
+
+  if (pg_array_len(candidates) == 0) {return false;}
+
+  if (pg_array_len(candidates) == 1) {
+    *picked_method_i = candidates[0];
     return true;
+  } 
+
+  for (u64 i = 0; i < pg_array_len(candidates); i++) {
+    for (u64 j = 0; j < i; j++) {
+      const applicability_t f1_f2 = resolver_compare_applicability(
+          resolver, candidates[i], candidates[j], call_argument_count);
+      const applicability_t f2_f1 = resolver_compare_applicability(
+          resolver, candidates[j], candidates[i], call_argument_count);
+
+      // Case 2: Neither of the two candidates is more applicable than the
+      // other.
+      if (f1_f2 == APPLICABILITY_NONE && f2_f1 == APPLICABILITY_NONE) {
+        pg_assert(0 && "todo");
+      }
+      // Case 3: Both F1 and F2 are more applicable than the other.
+      else if (f1_f2 == APPLICABILITY_MORE && f2_f1 == APPLICABILITY_MORE) {
+        pg_assert(0 && "todo");
+      }
+      // Case 1: Only one of the two candidates is more applicable than the
+      // other.
+      else {
+        pg_assert(0 && "todo");
+      }
+    }
   }
 
   return false;
@@ -6129,9 +6187,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
         ty_add_type(&resolver->types, &println_type_exact, arena);
 
     u32 picked_method_i = 0;
-    if (!resolver_resolve_method(resolver, (string_t){0}, ACCESS_FLAGS_STATIC,
-                                 string_make_from_c_no_alloc("println"),
-                                 &picked_method_i, println_type_exact_i)) {
+    if (!resolver_resolve_free_function(
+            resolver, (string_t){0}, string_make_from_c_no_alloc("println"), 1,
+            &picked_method_i, println_type_exact_i, arena)) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "failed to find matching function: ", arena);
