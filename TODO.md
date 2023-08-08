@@ -19,6 +19,7 @@
 - [x] Local variables
 - [ ] Comments
 - [x] Local variable mutation
+- [ ] Decode UCS-2 Strings in class files (in constant pool)
 - [x] Function definition
 - [ ] Field access
 - [x] String literals
@@ -65,6 +66,7 @@
 - [ ] Arena dump to see how/where memory is utilized
 - [ ] **Resolve free functions by building candidate sets**
 - [ ] Remove builtin println
+- [ ] Read kotlin metadata in class files
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
@@ -171,6 +173,14 @@ Remaining questions:
       + `Package` contains a list of functions. Each function has a `name` field which is an index into the `d2` array of strings (?) and a return type whose field `class_name` is an index in the string table types (?).
 - `d2`: Array of strings e.g. function names.
 
+
+### `println`
+
+- Defined in `libraries/stdlib/jvm/src/kotlin/io/Console.kt` are public inline functions with the annotation `@kotlin.internal.InlineOnly`.
+- Compiled to private static final functions (thanks to the annotation?) on the class `ConsoleKt` with the runtime invisible annotation: `kotlin.interal.InlineOnly`.
+- Thus cannot be used from Java as-is e.g. `kotlin.io.ConsoleKt.println(3);`.
+- Can be used from Kotlin with the compiler copying ('inlining') the code when calling `kotlin.io.println(3)`. Thus there is no `ConsoleKt` class for the kotlinc compiler and `kotlin.io.ConsoleKt.println(3)` does not work.
+- The compiler has a special case for `@InlineOnly` annotated functions, which are private in the bytecode but are considered public in kotlin code.
 
 
 
