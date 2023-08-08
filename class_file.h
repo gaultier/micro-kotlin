@@ -5695,12 +5695,14 @@ static bool resolver_resolve_free_function(
   u32 *const candidates = resolver_collect_free_functions_of_name(
       resolver, method_name, &tmp_arena);
 
-  if (pg_array_len(candidates) == 0) {return false;}
+  if (pg_array_len(candidates) == 0) {
+    return false;
+  }
 
   if (pg_array_len(candidates) == 1) {
     *picked_method_i = candidates[0];
     return true;
-  } 
+  }
 
   for (u64 i = 0; i < pg_array_len(candidates); i++) {
     for (u64 j = 0; j < i; j++) {
