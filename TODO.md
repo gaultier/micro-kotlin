@@ -156,9 +156,21 @@ Same for methods/fields.
 Remaining questions:
 
 - How to deal with conflicts? E.g. both `/tmp/foo/bar/Baz.class` and `/usr/share/foo/bar/Baz.class` were found => First found (in order of appearance in the class path) wins.
-- How to involve jar and jmod files in this schema? Use the file path given by the zip file entries I guess.
 - Caching/cache eviction? => Naive first version when searching for methods/fields where parsing the class file is needed: keep every parsed class file in memory. More advanced: real cache.
-- How to prevent combinatorial explosion
+
+### kotlin.Metadata annotation in class file
+
+- `mv` and `bv` are versions which are not interesting.
+- `k` or `kind` is an enum value. 1: Class, 2: File.
+- `d1` contains protobuf encoded data: 
+  - Length-prefixed `StringTableTypes`: list of records and list of local names.
+    * `predefined_index` in a Record is an index in the list `PREDEDEFINED_STRINGS` inside the kotlin compiler, e.g. `8` is `kotlin.Int`.
+  - Depending on `k`:
+    * If `k` is 1: `Class`.
+    * If `k` is 2: `Package`.
+      + `Package` contains a list of functions. Each function has a `name` field which is an index into the `d2` array of strings (?) and a return type whose field `class_name` is an index in the string table types (?).
+- `d2`: Array of strings e.g. function names.
+
 
 
 
@@ -192,3 +204,5 @@ Secondary target audience: developers using Kotlin but not Intellij who need goo
 - No dependencies. Possible exception: libzip to read jar files, but linked statically.
 - Major platforms supported (including Windows :| )
 - 'Dumb' codebase
+
+
