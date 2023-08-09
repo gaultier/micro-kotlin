@@ -885,8 +885,24 @@ static void cf_code_array_push_u16(u8 **array, u16 x, arena_t *arena) {
 
 typedef enum __attribute__((packed)) {
   ACCESS_FLAGS_PUBLIC = 0x0001,
+  ACCESS_FLAGS_PRIVATE = 0x0002,
+  ACCESS_FLAGS_PROTECTED = 0x0004,
   ACCESS_FLAGS_STATIC = 0x0008,
+  ACCESS_FLAGS_FINAL = 0x0010,
+  ACCESS_FLAGS_SYNCHRONIZED = 0x0020,
   ACCESS_FLAGS_SUPER = 0x0020,
+  ACCESS_FLAGS_VOLATILE = 0x0040,
+  ACCESS_FLAGS_BRIDGE = 0x0040,
+  ACCESS_FLAGS_TRANSIENT = 0x0080,
+  ACCESS_FLAGS_VARARGS = 0x0080,
+  ACCESS_FLAGS_NATIVE = 0x0100,
+  ACCESS_FLAGS_INTERFACE = 0x0200,
+  ACCESS_FLAGS_ABSTRACT = 0x0400,
+  ACCESS_FLAGS_STRICT = 0x0800,
+  ACCESS_FLAGS_SYNTHETIC = 0x1000,
+  ACCESS_FLAGS_ANNOTATION = 0x2000,
+  ACCESS_FLAGS_ENUM = 0x4000,
+  ACCESS_FLAGS_MODULE = 0x8000,
 } cf_access_flags_t;
 
 typedef struct {
@@ -5635,7 +5651,7 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   return lhs->kind == rhs->kind;
 }
 
-static void resolver_collect_free_functions_of_name(resolver_t *resolver,
+static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
                                                     string_t function_name,
                                                     u32 **candidate_functions_i,
                                                     arena_t *arena) {
@@ -5649,7 +5665,8 @@ static void resolver_collect_free_functions_of_name(resolver_t *resolver,
     pg_assert(method->class_name.len > 0);
     pg_assert(method->field_name.len > 0);
 
-    // TODO: Check flags, etc.
+    //    if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
+    //      continue;
 
     if (!string_eq(method->field_name, function_name))
       continue;
@@ -5658,6 +5675,57 @@ static void resolver_collect_free_functions_of_name(resolver_t *resolver,
   }
 
   // TODO: Collect callable fields as well.
+}
+
+static string_t resolver_function_to_human_string(const resolver_t *resolver,
+                                                  u32 function_i,
+                                                  arena_t *arena) {
+
+  const resolver_class_field_t *const function =
+      &resolver->class_methods[function_i];
+  pg_assert(function->type_i != 0);
+  pg_assert(function->type_i < pg_array_len(resolver->types));
+
+  const ty_type_t *const declared_function_type =
+      &resolver->types[function->type_i];
+  pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
+  pg_assert(declared_function_type->v.method.argument_types_i != NULL);
+
+  string_t result = string_reserve(128, arena);
+
+  LOG("access_flags=%u", function->access_flags);
+
+  if (function->access_flags & ACCESS_FLAGS_PRIVATE)
+    string_append_cstring(&result, "private ", arena);
+
+  string_append_cstring(&result, "fun ", arena);
+  string_append_string(&result, function->field_name, arena);
+  string_append_cstring(&result, "(", arena);
+
+  //  pg_assert(function->access_flags & ACCESS_FLAGS_STATIC);
+
+  const u8 argument_count =
+      pg_array_len(declared_function_type->v.method.argument_types_i);
+  for (u8 i = 0; i < argument_count; i++) {
+    const string_t argument_type_string = ty_type_to_human_string(
+        resolver->types, declared_function_type->v.method.argument_types_i[i],
+        arena);
+
+    string_append_string(&result, argument_type_string, arena);
+
+    if (i < argument_count - 1)
+      string_append_cstring(&result, ", ", arena);
+  }
+
+  string_append_cstring(&result, ") : ", arena);
+  const string_t return_type_string = ty_type_to_human_string(
+      resolver->types, declared_function_type->v.method.return_type_i, arena);
+  string_append_string(&result, return_type_string, arena);
+
+  string_append_cstring(&result, " from  ", arena);
+  string_append_string(&result, function->class_name, arena);
+
+  return result;
 }
 
 // TODO: Keep track of imported packages (including those imported by default).
@@ -5942,23 +6010,6 @@ static string_t find_java_home(arena_t *arena) {
   exit(EINVAL);
 }
 
-static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
-                                   arena_t *scratch_arena, arena_t *arena) {
-  pg_assert(resolver != NULL);
-  pg_assert(java_home.value != NULL);
-  pg_assert(resolver->class_names != NULL);
-  pg_assert(resolver->class_fields != NULL);
-  pg_assert(arena != NULL);
-
-  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
-  string_append_string(&java_base_jmod_file_path, java_home, arena);
-  string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
-                        arena);
-
-  cf_read_jmod_file(resolver, java_base_jmod_file_path.value, scratch_arena,
-                    arena);
-}
-
 static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
                                   arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
@@ -6036,6 +6087,27 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
   }
 
   return false;
+}
+
+static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
+                                   arena_t *scratch_arena, arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(java_home.value != NULL);
+  pg_assert(resolver->class_names != NULL);
+  pg_assert(resolver->class_fields != NULL);
+  pg_assert(arena != NULL);
+
+  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
+  string_append_string(&java_base_jmod_file_path, java_home, arena);
+  string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
+                        arena);
+
+  cf_read_jmod_file(resolver, java_base_jmod_file_path.value, scratch_arena,
+                    arena);
+
+  pg_assert(ty_resolve_class_name(
+      resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"),
+                                            scratch_arena, arena));
 }
 
 static void ty_begin_scope(resolver_t *resolver) {
@@ -6225,24 +6297,11 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
           for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
             const u32 candidate_i = candidate_functions_i[i];
-            pg_assert(candidate_i < pg_array_len(resolver->class_methods));
 
-            const resolver_class_field_t *const candidate =
-                &resolver->class_methods[candidate_i];
-            pg_assert(candidate->type_i != 0);
-            pg_assert(candidate->type_i < pg_array_len(resolver->types));
-
-            const ty_type_t *const declared_function_type =
-                &resolver->types[candidate->type_i];
-            pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
-            pg_assert(declared_function_type->v.method.argument_types_i !=
-                      NULL);
-
-            string_append_cstring(&error, "\n", &tmp_arena);
+            string_append_cstring(&error, "\n  ", &tmp_arena);
             string_append_string(&error,
-                                 ty_type_to_human_string(resolver->types,
-                                                         candidate->type_i,
-                                                         &tmp_arena),
+                                 resolver_function_to_human_string(
+                                     resolver, candidate_i, &tmp_arena),
                                  &tmp_arena);
           }
         }
