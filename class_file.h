@@ -6107,7 +6107,7 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
 
   pg_assert(ty_resolve_class_name(
       resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"),
-                                            scratch_arena, arena));
+      scratch_arena, arena));
 }
 
 static void ty_begin_scope(resolver_t *resolver) {
@@ -6804,9 +6804,6 @@ void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
     return;
   }
 
-  if (type->kind != TYPE_KOTLIN_INSTANCE_REFERENCE)
-    return;
-
   if (type->kind == TYPE_KOTLIN_INT) {
     type->kind = TYPE_JVM_INT;
   } else if (type->kind == TYPE_KOTLIN_BOOLEAN) {
@@ -6841,7 +6838,10 @@ void lo_lower_types(resolver_t *resolver, arena_t *arena) {
     ty_type_t *const type = &resolver->types[i];
 
     lo_unbox_type_maybe(resolver, type);
+  }
 
+  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
+    ty_type_t *const type = &resolver->types[i];
     if (type->kind == TYPE_KOTLIN_METHOD) {
       string_t method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
@@ -8010,8 +8010,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(gen->out_field_ref_i > 0);
     pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
-    pg_assert(type->java_class_name.value != NULL);
-    pg_assert(type->java_class_name.len > 0);
 
     // FIXME
     cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
