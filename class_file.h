@@ -5264,7 +5264,7 @@ static void resolver_load_methods_from_class_file(
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
 
-    ty_type_t type = {.java_class_name=class_name};
+    ty_type_t type = {.java_class_name = class_name};
     cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
 
     resolver_class_field_t class_method = {
@@ -5665,8 +5665,8 @@ static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
     pg_assert(method->class_name.len > 0);
     pg_assert(method->field_name.len > 0);
 
-    //    if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
-    //      continue;
+    if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
+      continue;
 
     if (!string_eq(method->field_name, function_name))
       continue;
@@ -5702,7 +5702,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   string_append_string(&result, function->field_name, arena);
   string_append_cstring(&result, "(", arena);
 
-  //  pg_assert(function->access_flags & ACCESS_FLAGS_STATIC);
+    pg_assert(function->access_flags & ACCESS_FLAGS_STATIC);
 
   const u8 argument_count =
       pg_array_len(declared_function_type->v.method.argument_types_i);
@@ -8013,8 +8013,9 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(type->java_class_name.len > 0);
 
     // FIXME
-    cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
-                       arena);
+    //    cg_emit_get_static(gen, gen->out_field_ref_i,
+    //    gen->out_field_ref_class_i,
+    //                       arena);
 
     cg_emit_node(gen, class_file, node->lhs, arena);
 
@@ -8050,7 +8051,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 method_ref_i =
         cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
 
-    cg_emit_invoke_virtual(gen, method_ref_i, method, arena);
+    cg_emit_invoke_static(gen, method_ref_i, method, arena);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
