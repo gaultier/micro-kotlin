@@ -6079,14 +6079,27 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
 
       pg_assert(string_eq(class_name, class_file.class_name));
 
-      /* ty_type_t super_type = { */
-      /*     .kind = TYPE_KOTLIN_INSTANCE_REFERENCE, */
-      /*     .java_class_name = */
-      /* }; */
+      // TODO: super type.
       ty_type_t this_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
           .java_class_name = string_make(class_name, arena),
       };
+      if (string_eq_c(class_name, "java/lang/Boolean"))
+        this_type.kind = TYPE_KOTLIN_BOOLEAN;
+      else if (string_eq_c(class_name, "java/lang/Char"))
+        this_type.kind = TYPE_KOTLIN_CHAR;
+      else if (string_eq_c(class_name, "java/lang/Byte"))
+        this_type.kind = TYPE_KOTLIN_BYTE;
+      else if (string_eq_c(class_name, "java/lang/Short"))
+        this_type.kind = TYPE_KOTLIN_SHORT;
+      else if (string_eq_c(class_name, "java/lang/Integer"))
+        this_type.kind = TYPE_KOTLIN_INT;
+      else if (string_eq_c(class_name, "java/lang/Float"))
+        this_type.kind = TYPE_KOTLIN_FLOAT;
+      else if (string_eq_c(class_name, "java/lang/Long"))
+        this_type.kind = TYPE_KOTLIN_LONG;
+      else if (string_eq_c(class_name, "java/lang/Double"))
+        this_type.kind = TYPE_KOTLIN_DOUBLE;
 
       *type_i = ty_add_type(&resolver->types, &this_type, arena);
 
@@ -6273,8 +6286,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    const ty_type_t unit_type = {.kind = TYPE_KOTLIN_UNIT};
-    const u32 unit_type_i = ty_add_type(&resolver->types, &unit_type, arena);
+    u32 unit_type_i = 0;
+    pg_assert(ty_resolve_class_name(resolver,
+                                    string_make_from_c("kotlin.Unit", arena),
+                                    &unit_type_i, scratch_arena, arena));
 
     ty_type_t println_type_exact = {.kind = TYPE_KOTLIN_METHOD,
                                     .v = {.method = {
@@ -6462,12 +6477,15 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     // Arguments (lhs).
     ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
-    const u32 return_type_i =
-        node->extra_data_i > 0
-            ? ty_resolve_node(resolver, node->extra_data_i, scratch_arena,
-                              arena)
-            : ty_add_type(&resolver->types,
-                          &(ty_type_t){.kind = TYPE_KOTLIN_UNIT}, arena);
+    u32 return_type_i = 0;
+    if (node->extra_data_i > 0) {
+      return_type_i =
+          ty_resolve_node(resolver, node->extra_data_i, scratch_arena, arena);
+    } else {
+      pg_assert(ty_resolve_class_name(resolver,
+                                      string_make_from_c("kotlin.Unit", arena),
+                                      &return_type_i, scratch_arena, arena));
+    }
 
     resolver->current_function_i = node_i;
 
@@ -6597,12 +6615,10 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
-    ty_type_t unit_type = {
-        .kind = TYPE_KOTLIN_UNIT,
-    };
-    pg_array_append(resolver->types, unit_type, arena);
-    const u32 void_type_i = pg_array_last_index(resolver->types);
-    return node->type_i = void_type_i;
+    pg_assert(ty_resolve_class_name(resolver,
+                                    string_make_from_c("kotlin.Unit", arena),
+                                    &node->type_i, scratch_arena, arena));
+    return node->type_i;
   }
   case AST_KIND_STRING: {
     pg_assert(ty_resolve_class_name(
@@ -8876,13 +8892,10 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    pg_array_append(gen->resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_UNIT},
-                    arena);
-    const u32 void_type_i = pg_array_last_index(gen->resolver->types);
-
-    const ty_type_method_t target_method_type = {
-        .return_type_i = void_type_i,
-    };
+    const ty_type_method_t target_method_type = {};
+    pg_assert(ty_resolve_class_name(
+        gen->resolver, string_make_from_c("kotlin.Unit", arena),
+        &target_method_type.return_type_i, scratch_arena, arena));
 
     cf_attribute_code_t code = {0};
     pg_array_init_reserve(code.code, 4, arena);
