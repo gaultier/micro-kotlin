@@ -706,6 +706,7 @@ struct ty_type_t {
   u8 flag;
   pg_pad(1);
   u16 constant_pool_item_i;
+  u32 super_i;
 };
 
 typedef struct ty_type_t ty_type_t;
@@ -5256,6 +5257,14 @@ static void resolver_load_methods_from_class_file(
   pg_assert(arena != NULL);
 
   const string_t class_name = string_make(class_file->class_name, arena);
+  if (class_file->super_class != 0) {
+    const cf_constant_t *const constant_super  = cf_constant_array_get(
+        &class_file->constant_pool, class_file->super_class);
+
+    pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+    const string_t super_class = cf_constant_array_get_as_string(
+        &class_file->constant_pool, constant_super->v.string_utf8_i);
+  }
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5677,6 +5686,7 @@ static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
   // TODO: Collect callable fields as well.
 }
 
+// TODO: Add to string: file:line
 static string_t resolver_function_to_human_string(const resolver_t *resolver,
                                                   u32 function_i,
                                                   arena_t *arena) {
@@ -5702,7 +5712,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   string_append_string(&result, function->field_name, arena);
   string_append_cstring(&result, "(", arena);
 
-    pg_assert(function->access_flags & ACCESS_FLAGS_STATIC);
+  pg_assert(function->access_flags & ACCESS_FLAGS_STATIC);
 
   const u8 argument_count =
       pg_array_len(declared_function_type->v.method.argument_types_i);
@@ -5784,12 +5794,14 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
       const ty_type_t *const used_argument_type =
           &resolver->types[call_site_argument_type_i];
 
-      if (!ty_types_equal(resolver->types, declared_argument_type_i,
-                          call_site_argument_type_i)) {
-        // TODO: Try the chain of super classes for the call_site_argument_type.
-        matching = false;
-        break;
-      }
+      if (ty_types_equal(resolver->types, declared_argument_type_i,
+                         call_site_argument_type_i))
+        continue;
+
+      // TODO: Try the chain of super classes for the call_site_argument_type.
+
+      matching = false;
+      break;
     }
     if (!matching)
       continue;
