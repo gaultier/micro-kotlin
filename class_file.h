@@ -5635,14 +5635,14 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   return lhs->kind == rhs->kind;
 }
 
-static u32 *resolver_collect_free_functions_of_name(resolver_t *resolver,
+static void resolver_collect_free_functions_of_name(resolver_t *resolver,
                                                     string_t function_name,
+                                                    u32 **candidate_functions_i,
                                                     arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_methods != NULL);
-
-  u32 *result = NULL;
-  pg_array_init_reserve(result, 128, arena);
+  pg_assert(candidate_functions_i != NULL);
+  pg_assert(*candidate_functions_i != NULL);
 
   for (u64 i = 0; i < pg_array_len(resolver->class_methods); i++) {
     const resolver_class_field_t *const method = &resolver->class_methods[i];
@@ -5654,19 +5654,17 @@ static u32 *resolver_collect_free_functions_of_name(resolver_t *resolver,
     if (!string_eq(method->field_name, function_name))
       continue;
 
-    pg_array_append(result, i, arena);
+    pg_array_append(*candidate_functions_i, i, arena);
   }
 
   // TODO: Collect callable fields as well.
-
-  return result;
 }
 
 // TODO: Keep track of imported packages (including those imported by default).
 static bool
-resolver_resolve_free_function(resolver_t *resolver, string_t class_name,
-                               string_t method_name, u8 call_argument_count,
-                               u32 *picked_method_i, u32 call_site_type_i,
+resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
+                               u32 call_site_type_i, u32 *picked_method_i,
+                               u32 *picked_type_i, u32 **candidate_functions_i,
                                arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_names != NULL);
@@ -5674,41 +5672,39 @@ resolver_resolve_free_function(resolver_t *resolver, string_t class_name,
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_i != NULL);
 
-  arena_t tmp_arena = *arena;
+  resolver_collect_free_functions_of_name(resolver, method_name,
+                                          candidate_functions_i, arena);
 
-  u32 *const candidates = resolver_collect_free_functions_of_name(
-      resolver, method_name, &tmp_arena);
-
-  if (pg_array_len(candidates) == 0) {
+  if (pg_array_len(*candidate_functions_i) == 0) {
     return false;
-  }
-
-  if (pg_array_len(candidates) == 1) {
-    *picked_method_i = candidates[0];
-    return true;
   }
 
   const ty_type_t *const call_site_type = &resolver->types[call_site_type_i];
   pg_assert(call_site_type->kind == TYPE_KOTLIN_METHOD);
   pg_assert(call_site_type->v.method.argument_types_i != NULL);
 
-  for (u64 i = 0; i < pg_array_len(candidates); i++) {
-    const u32 candidate_i = candidates[i];
+  const u8 call_argument_count =
+      pg_array_len(call_site_type->v.method.argument_types_i);
+
+  for (u64 i = 0; i < pg_array_len(*candidate_functions_i); i++) {
+    const u32 candidate_i = (*candidate_functions_i)[i];
     const resolver_class_field_t *const candidate =
         &resolver->class_methods[candidate_i];
-    const ty_type_t *const type = &resolver->types[candidate->type_i];
-    pg_assert(type->kind == TYPE_KOTLIN_METHOD);
-    pg_assert(type->v.method.argument_types_i != NULL);
+    const ty_type_t *const declared_function_type =
+        &resolver->types[candidate->type_i];
+    pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
+    pg_assert(declared_function_type->v.method.argument_types_i != NULL);
 
     const u8 function_argument_count =
-        pg_array_len(type->v.method.argument_types_i);
+        pg_array_len(declared_function_type->v.method.argument_types_i);
 
     if (call_argument_count != function_argument_count)
       continue;
 
     bool matching = true;
     for (u8 j = 0; j < function_argument_count; j++) {
-      const u32 declared_argument_type_i = type->v.method.argument_types_i[j];
+      const u32 declared_argument_type_i =
+          declared_function_type->v.method.argument_types_i[j];
       const ty_type_t *const declared_argument_type =
           &resolver->types[declared_argument_type_i];
 
@@ -5719,6 +5715,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t class_name,
 
       if (!ty_types_equal(resolver->types, declared_argument_type_i,
                           call_site_argument_type_i)) {
+        // TODO: Try the chain of super classes for the call_site_argument_type.
         matching = false;
         break;
       }
@@ -5726,10 +5723,14 @@ resolver_resolve_free_function(resolver_t *resolver, string_t class_name,
     if (!matching)
       continue;
 
-    // TODO: Check return type.
-
+    // Check return type
+    if (!ty_types_equal(resolver->types,
+                        declared_function_type->v.method.return_type_i,
+                        call_site_type->v.method.return_type_i))
+      continue;
 
     *picked_method_i = candidate_i;
+    *picked_type_i = candidate->type_i;
     return true;
   }
 
@@ -6194,18 +6195,60 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
         ty_add_type(&resolver->types, &println_type_exact, arena);
 
     u32 picked_method_i = 0;
-    if (!resolver_resolve_free_function(
-            resolver, (string_t){0}, string_make_from_c_no_alloc("println"), 1,
-            &picked_method_i, println_type_exact_i, arena)) {
-      string_t error = string_reserve(256, arena);
-      string_append_cstring(&error,
-                            "failed to find matching function: ", arena);
-      string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->types, println_type_exact_i, arena),
-          arena);
-      par_error(resolver->parser, token, error.value);
-      return 0;
+    u32 picked_type_i = 0;
+    {
+      arena_t tmp_arena = *arena;
+
+      u32 *candidate_functions_i = NULL;
+      pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
+
+      if (!resolver_resolve_free_function(
+              resolver, string_make_from_c_no_alloc("println"),
+              println_type_exact_i, &picked_method_i, &picked_type_i,
+              &candidate_functions_i, &tmp_arena)) {
+
+        string_t error = string_reserve(256, &tmp_arena);
+        string_append_cstring(&error,
+                              "failed to find matching function: ", &tmp_arena);
+        string_append_string(&error,
+                             ty_type_to_human_string(resolver->types,
+                                                     println_type_exact_i,
+                                                     &tmp_arena),
+                             &tmp_arena);
+
+        if (pg_array_len(candidate_functions_i) == 0) {
+          string_append_cstring(&error,
+                                ", could not find any function with this name",
+                                &tmp_arena);
+        } else {
+          string_append_cstring(&error, ", possible candidates: ", &tmp_arena);
+
+          for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
+            const u32 candidate_i = candidate_functions_i[i];
+            pg_assert(candidate_i < pg_array_len(resolver->class_methods));
+
+            const resolver_class_field_t *const candidate =
+                &resolver->class_methods[candidate_i];
+            pg_assert(candidate->type_i != 0);
+            pg_assert(candidate->type_i < pg_array_len(resolver->types));
+
+            const ty_type_t *const declared_function_type =
+                &resolver->types[candidate->type_i];
+            pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
+            pg_assert(declared_function_type->v.method.argument_types_i !=
+                      NULL);
+
+            string_append_cstring(&error, "\n", &tmp_arena);
+            string_append_string(&error,
+                                 ty_type_to_human_string(resolver->types,
+                                                         candidate->type_i,
+                                                         &tmp_arena),
+                                 &tmp_arena);
+          }
+        }
+        par_error(resolver->parser, token, error.value);
+        return 0;
+      }
     }
 
     pg_assert(picked_method_i > 0);
@@ -6306,7 +6349,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
       ty_type_t type = {
-          .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+          .kind = TYPE_KOTLIN_BOOLEAN,
           .java_class_name = string_make_from_c("java/lang/Boolean", arena),
       };
       pg_assert(ty_resolve_class_name(resolver, type.java_class_name,
@@ -6447,8 +6490,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (type_condition->kind != TYPE_KOTLIN_BOOLEAN) {
       string_t error = string_reserve(256, arena);
-      string_append_cstring(&error,
-                            "incompatible types, expect Boolean, got: ", arena);
+      string_append_cstring(
+          &error, "incompatible types, expected Boolean, got: ", arena);
 
       const string_t type_inferred_string =
           ty_type_to_human_string(resolver->types, type_condition_i, arena);
