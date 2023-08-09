@@ -5662,28 +5662,12 @@ static u32 *resolver_collect_free_functions_of_name(resolver_t *resolver,
   return result;
 }
 
-typedef enum {
-  APPLICABILITY_LESS = -1,
-  APPLICABILITY_NONE = 0,
-  APPLICABILITY_MORE = 1,
-} applicability_t;
-
-static applicability_t
-resolver_compare_applicability(const resolver_t *resolver, u32 a, u32 b,
-                               u8 call_argument_count) {
-  const resolver_class_field_t *const f1 = &resolver->class_methods[a];
-  const resolver_class_field_t *const f2 = &resolver->class_methods[b];
-
-  for (u8 i = 0; i < call_argument_count; i++) {
-  }
-
-  return APPLICABILITY_NONE;
-}
-
 // TODO: Keep track of imported packages (including those imported by default).
-static bool resolver_resolve_free_function(
-    resolver_t *resolver, string_t class_name, string_t method_name,
-    u8 call_argument_count, u32 *picked_method_i, u32 type_i, arena_t *arena) {
+static bool
+resolver_resolve_free_function(resolver_t *resolver, string_t class_name,
+                               string_t method_name, u8 call_argument_count,
+                               u32 *picked_method_i, u32 call_site_type_i,
+                               arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->class_names != NULL);
   pg_assert(resolver->class_methods != NULL);
@@ -5704,28 +5688,49 @@ static bool resolver_resolve_free_function(
     return true;
   }
 
-  for (u64 i = 0; i < pg_array_len(candidates); i++) {
-    for (u64 j = 0; j < i; j++) {
-      const applicability_t f1_f2 = resolver_compare_applicability(
-          resolver, candidates[i], candidates[j], call_argument_count);
-      const applicability_t f2_f1 = resolver_compare_applicability(
-          resolver, candidates[j], candidates[i], call_argument_count);
+  const ty_type_t *const call_site_type = &resolver->types[call_site_type_i];
+  pg_assert(call_site_type->kind == TYPE_KOTLIN_METHOD);
+  pg_assert(call_site_type->v.method.argument_types_i != NULL);
 
-      // Case 2: Neither of the two candidates is more applicable than the
-      // other.
-      if (f1_f2 == APPLICABILITY_NONE && f2_f1 == APPLICABILITY_NONE) {
-        pg_assert(0 && "todo");
-      }
-      // Case 3: Both F1 and F2 are more applicable than the other.
-      else if (f1_f2 == APPLICABILITY_MORE && f2_f1 == APPLICABILITY_MORE) {
-        pg_assert(0 && "todo");
-      }
-      // Case 1: Only one of the two candidates is more applicable than the
-      // other.
-      else {
-        pg_assert(0 && "todo");
+  for (u64 i = 0; i < pg_array_len(candidates); i++) {
+    const u32 candidate_i = candidates[i];
+    const resolver_class_field_t *const candidate =
+        &resolver->class_methods[candidate_i];
+    const ty_type_t *const type = &resolver->types[candidate->type_i];
+    pg_assert(type->kind == TYPE_KOTLIN_METHOD);
+    pg_assert(type->v.method.argument_types_i != NULL);
+
+    const u8 function_argument_count =
+        pg_array_len(type->v.method.argument_types_i);
+
+    if (call_argument_count != function_argument_count)
+      continue;
+
+    bool matching = true;
+    for (u8 j = 0; j < function_argument_count; j++) {
+      const u32 declared_argument_type_i = type->v.method.argument_types_i[j];
+      const ty_type_t *const declared_argument_type =
+          &resolver->types[declared_argument_type_i];
+
+      const u32 call_site_argument_type_i =
+          call_site_type->v.method.argument_types_i[j];
+      const ty_type_t *const used_argument_type =
+          &resolver->types[call_site_argument_type_i];
+
+      if (!ty_types_equal(resolver->types, declared_argument_type_i,
+                          call_site_argument_type_i)) {
+        matching = false;
+        break;
       }
     }
+    if (!matching)
+      continue;
+
+    // TODO: Check return type.
+
+
+    *picked_method_i = candidate_i;
+    return true;
   }
 
   return false;
