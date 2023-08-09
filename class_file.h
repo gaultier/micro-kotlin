@@ -5264,7 +5264,7 @@ static void resolver_load_methods_from_class_file(
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
 
-    ty_type_t type = {0};
+    ty_type_t type = {.java_class_name=class_name};
     cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
 
     resolver_class_field_t class_method = {
@@ -5760,8 +5760,11 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
         &resolver->class_methods[candidate_i];
     const ty_type_t *const declared_function_type =
         &resolver->types[candidate->type_i];
+
     pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
     pg_assert(declared_function_type->v.method.argument_types_i != NULL);
+    pg_assert(declared_function_type->java_class_name.value != NULL);
+    pg_assert(declared_function_type->java_class_name.len > 0);
 
     const u8 function_argument_count =
         pg_array_len(declared_function_type->v.method.argument_types_i);
@@ -6312,11 +6315,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     pg_assert(picked_method_i > 0);
 
-    const resolver_class_field_t *const picked_method =
-        &resolver->class_methods[picked_method_i];
-    resolver->types[node->type_i].java_class_name = picked_method->class_name;
-
-    node->type_i = picked_method->type_i;
+    node->type_i = picked_type_i;
 
     return unit_type_i;
   }
@@ -8010,6 +8009,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(gen->out_field_ref_i > 0);
     pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
+    pg_assert(type->java_class_name.value != NULL);
+    pg_assert(type->java_class_name.len > 0);
 
     // FIXME
     cg_emit_get_static(gen, gen->out_field_ref_i, gen->out_field_ref_class_i,
