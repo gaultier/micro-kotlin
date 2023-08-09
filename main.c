@@ -140,15 +140,18 @@ int main(int argc, char *argv[]) {
         .parser = &parser,
         .class_path_entries = class_path_entries,
     };
-    pg_array_init_reserve(resolver.class_names, 1 << 15, &arena);
-    pg_array_init_reserve(resolver.class_methods, 1 << 15, &arena);
-    pg_array_init_reserve(resolver.class_fields, 1 << 15, &arena);
     pg_array_init_reserve(resolver.variables, 512, &arena);
-    pg_array_init_reserve(resolver.types, pg_array_len(parser.nodes) + 32,
-                          &arena);
-    pg_array_append(resolver.types, (ty_type_t){0},
-                    &arena); // Default value (Any).
-                             //
+    pg_array_init_reserve(resolver.types, 1 << 15, &arena);
+    const ty_type_t any_type = {
+        .java_class_name = string_make_from_c("kotlin.Any", &arena),
+    };
+    pg_array_append(resolver.types, any_type, &arena);
+
+    const ty_type_t unit_type = {
+        .java_class_name = string_make_from_c("kotlin.Unit", &arena),
+    };
+    pg_array_append(resolver.types, unit_type, &arena);
+
     ty_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
     ty_resolve_node(&resolver, root_i, &scratch_arena, &arena);
@@ -193,9 +196,7 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("class_names=%lu", pg_array_len(resolver.class_names));
-    LOG("class_fields=%lu", pg_array_len(resolver.class_fields));
-    LOG("class_methods=%lu", pg_array_len(resolver.class_methods));
+    LOG("types=%lu", pg_array_len(resolver.types));
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
