@@ -649,7 +649,7 @@ typedef struct {
 enum __attribute__((packed)) ty_type_kind_t {
   TYPE_KOTLIN_ANY = 0,
   TYPE_KOTLIN_UNIT = 1 << 0, // i.e.: void.
-  TYPE_KOTLIN_METHOD = 1 << 1,
+  TYPE_METHOD = 1 << 1,
   TYPE_KOTLIN_BOOLEAN = 1 << 2,
   TYPE_KOTLIN_BYTE = 1 << 3,
   TYPE_KOTLIN_CHAR = 1 << 4,
@@ -1271,7 +1271,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     break;
   }
   case TYPE_JVM_CONSTRUCTOR:
-  case TYPE_KOTLIN_METHOD: {
+  case TYPE_METHOD: {
     const ty_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
 
@@ -1407,7 +1407,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case '(': {
-    type->kind = TYPE_KOTLIN_METHOD;
+    type->kind = TYPE_METHOD;
     string_drop_first_n(&remaining, 1);
 
     u32 *argument_types_i = NULL;
@@ -3902,8 +3902,8 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_KOTLIN_UNIT";
   case TYPE_KOTLIN_INSTANCE_REFERENCE:
     return "TYPE_KOTLIN_INSTANCE_REFERENCE";
-  case TYPE_KOTLIN_METHOD:
-    return "TYPE_KOTLIN_METHOD";
+  case TYPE_METHOD:
+    return "TYPE_METHOD";
   case TYPE_KOTLIN_BOOLEAN:
     return "TYPE_KOTLIN_BOOLEAN";
   case TYPE_KOTLIN_BYTE:
@@ -4008,7 +4008,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
     return string_make(type->this_class_name, arena);
   }
-  case TYPE_KOTLIN_METHOD: {
+  case TYPE_METHOD: {
     const ty_type_method_t *const method_type = &type->v.method;
 
     string_t res = string_reserve(128, arena);
@@ -5274,11 +5274,11 @@ static void resolver_load_methods_from_class_file(
 
     ty_type_t type = {.this_class_name = this_class_name};
     cf_parse_descriptor(resolver, descriptor, &type, arena);
-    pg_assert(type.kind == TYPE_KOTLIN_METHOD);
+    pg_assert(type.kind == TYPE_METHOD);
 
     type.v.method.name = string_make(name, arena);
     type.v.method.access_flags = method->access_flags;
-    type.v.method.this_class_type_i=this_class_type_i;
+    type.v.method.this_class_type_i = this_class_type_i;
 
     resolver_add_type(resolver, &type, arena);
   }
@@ -5666,7 +5666,7 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   if (lhs->kind == TYPE_KOTLIN_UNIT && rhs->kind == TYPE_KOTLIN_UNIT)
     return true;
 
-  if (lhs->kind == TYPE_KOTLIN_METHOD && rhs->kind == TYPE_KOTLIN_METHOD) {
+  if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
     const ty_type_method_t *const lhs_method = &lhs->v.method;
     const ty_type_method_t *const rhs_method = &rhs->v.method;
 
@@ -5703,7 +5703,7 @@ static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
-    if (type->kind != TYPE_KOTLIN_METHOD)
+    if (type->kind != TYPE_METHOD)
       continue;
 
     const ty_type_method_t *const method = &type->v.method;
@@ -5727,7 +5727,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   const ty_type_t *const declared_function_type = &resolver->types[function_i];
 
-  pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
+  pg_assert(declared_function_type->kind == TYPE_METHOD);
   pg_assert(declared_function_type->v.method.argument_types_i != NULL);
   const ty_type_method_t *const method = &declared_function_type->v.method;
 
@@ -5791,7 +5791,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   }
 
   const ty_type_t *const call_site_type = &resolver->types[call_site_type_i];
-  pg_assert(call_site_type->kind == TYPE_KOTLIN_METHOD);
+  pg_assert(call_site_type->kind == TYPE_METHOD);
   pg_assert(call_site_type->v.method.argument_types_i != NULL);
 
   const u8 call_argument_count =
@@ -5802,7 +5802,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     const ty_type_t *const declared_function_type =
         &resolver->types[candidate_i];
 
-    pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
+    pg_assert(declared_function_type->kind == TYPE_METHOD);
     pg_assert(declared_function_type->v.method.argument_types_i != NULL);
     pg_assert(declared_function_type->this_class_name.value != NULL);
     pg_assert(declared_function_type->this_class_name.len > 0);
@@ -6087,7 +6087,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
   // Check if cached first.
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
-    if (type->kind == TYPE_KOTLIN_METHOD)
+    if (type->kind == TYPE_METHOD)
       continue;
 
     if (string_eq(class_name, type->this_class_name)) {
@@ -6366,7 +6366,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver, string_make_from_c("kotlin.Unit", arena), &unit_type_i,
         scratch_arena, arena));
 
-    ty_type_t println_type_exact = {.kind = TYPE_KOTLIN_METHOD,
+    ty_type_t println_type_exact = {.kind = TYPE_METHOD,
                                     .v = {.method = {
                                               .return_type_i = unit_type_i,
                                           }}};
@@ -6562,7 +6562,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     resolver->current_function_i = node_i;
 
     ty_type_t type = {
-        .kind = TYPE_KOTLIN_METHOD,
+        .kind = TYPE_METHOD,
         .v = {.method =
                   {
                       .return_type_i = return_type_i,
@@ -6845,7 +6845,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const function_type =
         &resolver->types[current_function->type_i];
 
-    pg_assert(function_type->kind == TYPE_KOTLIN_METHOD);
+    pg_assert(function_type->kind == TYPE_METHOD);
     const u32 return_type_i = function_type->v.method.return_type_i;
 
     if (!ty_types_equal(resolver->types, node->type_i, return_type_i)) {
@@ -6934,7 +6934,7 @@ void lo_lower_types(resolver_t *resolver, arena_t *arena) {
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     ty_type_t *const type = &resolver->types[i];
-    if (type->kind == TYPE_KOTLIN_METHOD) {
+    if (type->kind == TYPE_METHOD) {
       string_t method_descriptor = string_reserve(64, arena);
       cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
     }
@@ -8112,7 +8112,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     cg_emit_node(gen, class_file, node->lhs, arena);
 
-    pg_assert(type->kind == TYPE_KOTLIN_METHOD);
+    pg_assert(type->kind == TYPE_METHOD);
 
     const ty_type_method_t *const method = &type->v.method;
 
