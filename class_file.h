@@ -5257,7 +5257,8 @@ static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
 }
 
 static void resolver_load_methods_from_class_file(
-    resolver_t *resolver, const cf_class_file_t *class_file, arena_t *arena) {
+    resolver_t *resolver, u32 this_class_type_i,
+    const cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
@@ -5277,6 +5278,7 @@ static void resolver_load_methods_from_class_file(
 
     type.v.method.name = string_make(name, arena);
     type.v.method.access_flags = method->access_flags;
+    type.v.method.this_class_type_i=this_class_type_i;
 
     resolver_add_type(resolver, &type, arena);
   }
@@ -5477,7 +5479,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
             .this_class_name = string_make(class_file.class_name, arena),
         };
-        resolver_add_type(resolver, &type, arena);
+        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const cf_constant_t *const constant_super = cf_constant_array_get(
@@ -5493,7 +5495,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
           }
         }
 
-        resolver_load_methods_from_class_file(resolver, &class_file, arena);
+        resolver_load_methods_from_class_file(resolver, this_class_type_i,
+                                              &class_file, arena);
 
         LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
             file_name.value, class_file.class_name.len,
@@ -5533,7 +5536,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
             .this_class_name = string_make(class_file.class_name, arena),
         };
-        resolver_add_type(resolver, &type, arena);
+        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const cf_constant_t *const constant_super = cf_constant_array_get(
@@ -5549,7 +5552,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
           }
         }
 
-        resolver_load_methods_from_class_file(resolver, &class_file, arena);
+        resolver_load_methods_from_class_file(resolver, this_class_type_i,
+                                              &class_file, arena);
 
         LOG("Loaded %.*s from %.*s (compressed)",
             class_file.class_file_path.len, class_file.class_file_path.value,
@@ -5756,7 +5760,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
       resolver->types, declared_function_type->v.method.return_type_i, arena);
   string_append_string(&result, return_type_string, arena);
 
-  string_append_cstring(&result, " from  ", arena);
+  string_append_cstring(&result, " from ", arena);
 
   const ty_type_t *const this_class_type =
       &resolver->types[method->this_class_type_i];
@@ -5823,7 +5827,8 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
       // TODO: Walk the whole super chain upwards.
       // Right now we only do one level up.
-      // FIXME: This may pick a less specific candidate than the official resolution algorithm.
+      // FIXME: This may pick a less specific candidate than the official
+      // resolution algorithm.
       pg_assert(resolver_resolve_super_lazily(
           resolver, call_site_argument_type_i, scratch_arena, arena));
 
@@ -5939,7 +5944,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
   const char *const type_kind =
       ty_type_kind_string(resolver->types, node->type_i);
-  const string_t human_type =
+  string_t human_type =
       ty_type_to_human_string(resolver->types, node->type_i, arena);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
@@ -5952,6 +5957,17 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         resolver->parser->lexer->file_path.value, line, column,
         token.source_offset);
     break;
+  case AST_KIND_BUILTIN_PRINTLN: {
+    human_type =
+        resolver_function_to_human_string(resolver, node->type_i, arena);
+    LOG("[%ld] %s  %.*s %s (at %.*s:%u:%u:%u)", node - resolver->parser->nodes,
+        kind_string, human_type.len, human_type.value, type_kind,
+        resolver->parser->lexer->file_path.len,
+        resolver->parser->lexer->file_path.value, line, column,
+        token.source_offset);
+    break;
+  }
+
   case AST_KIND_LIST:
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
