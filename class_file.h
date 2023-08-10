@@ -5823,14 +5823,14 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
                          call_site_argument_type_i))
         continue;
 
-      resolver_resolve_super_lazily(resolver, call_site_argument_type_i,
-                                    scratch_arena, arena);
+      pg_assert(resolver_resolve_super_lazily(
+          resolver, call_site_argument_type_i, scratch_arena, arena));
 
       const ty_type_t *const call_site_argument_type =
           &resolver->types[call_site_argument_type_i];
       // Try with super.
-      if (ty_types_equal(resolver->types, call_site_argument_type->super_type_i,
-                         call_site_argument_type_i))
+      if (ty_types_equal(resolver->types, declared_argument_type_i,
+                         call_site_argument_type->super_type_i))
         continue;
 
       matching = false;
@@ -8056,7 +8056,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
-    if (type->flag & NODE_NUMBER_FLAGS_LONG) {
+    if (type->kind==TYPE_JVM_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
     }
