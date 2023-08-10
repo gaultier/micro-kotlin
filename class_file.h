@@ -5823,6 +5823,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
       // TODO: Walk the whole super chain upwards.
       // Right now we only do one level up.
+      // FIXME: This may pick a less specific candidate than the official resolution algorithm.
       pg_assert(resolver_resolve_super_lazily(
           resolver, call_site_argument_type_i, scratch_arena, arena));
 
