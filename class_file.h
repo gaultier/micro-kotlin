@@ -648,17 +648,7 @@ typedef struct {
 
 enum __attribute__((packed)) ty_type_kind_t {
   TYPE_KOTLIN_ANY = 0,
-  TYPE_KOTLIN_UNIT = 1 << 0, // i.e.: void.
   TYPE_METHOD = 1 << 1,
-  TYPE_KOTLIN_BOOLEAN = 1 << 2,
-  TYPE_KOTLIN_BYTE = 1 << 3,
-  TYPE_KOTLIN_CHAR = 1 << 4,
-  TYPE_KOTLIN_SHORT = 1 << 5,
-  TYPE_KOTLIN_INT = 1 << 6,
-  TYPE_KOTLIN_FLOAT = 1 << 7,
-  TYPE_KOTLIN_LONG = 1 << 8,
-  TYPE_KOTLIN_DOUBLE = 1 << 9,
-  TYPE_KOTLIN_STRING = 1 << 10,
   TYPE_KOTLIN_INSTANCE_REFERENCE = 1 << 11,
 
   // After lowering
@@ -699,6 +689,19 @@ typedef struct {
   pg_pad(6);
 } ty_type_method_t;
 
+typedef enum {
+  TYPE_FLAG_KOTLIN_UNIT = 1 << 0, // i.e.: void.
+  TYPE_FLAG_KOTLIN_BOOLEAN = 1 << 1,
+  TYPE_FLAG_KOTLIN_BYTE = 1 << 2,
+  TYPE_FLAG_KOTLIN_CHAR = 1 << 3,
+  TYPE_FLAG_KOTLIN_SHORT = 1 << 4,
+  TYPE_FLAG_KOTLIN_INT = 1 << 5,
+  TYPE_FLAG_KOTLIN_FLOAT = 1 << 6,
+  TYPE_FLAG_KOTLIN_LONG = 1 << 7,
+  TYPE_FLAG_KOTLIN_DOUBLE = 1 << 8,
+  TYPE_FLAG_KOTLIN_STRING = 1 << 9,
+} ty_type_flag_t;
+
 struct ty_type_t {
   string_t this_class_name;
   string_t super_class_name;
@@ -707,8 +710,7 @@ struct ty_type_t {
     u32 array_type_i;        // TYPE_ARRAY_REFERENCE
   } v;
   ty_type_kind_t kind;
-  u8 flag;
-  pg_pad(1);
+  u16 flag;
   u16 constant_pool_item_i;
   u32 super_type_i;
   pg_pad(4);
@@ -1305,14 +1307,16 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   switch (remaining.value[0]) {
   case 'V': {
-    type->kind = TYPE_KOTLIN_UNIT;
+    type->kind = TYPE_JVM_VOID;
+    type->flag |= TYPE_FLAG_KOTLIN_UNIT;
     type->this_class_name = string_make_from_c("kotlin.Unit", arena);
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'S': {
-    type->kind = TYPE_KOTLIN_SHORT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_SHORT;
     type->this_class_name = string_make_from_c("java/lang/Short", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1320,7 +1324,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'B': {
-    type->kind = TYPE_KOTLIN_BYTE;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_BYTE;
     type->this_class_name = string_make_from_c("java/lang/Byte", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1328,7 +1333,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'C': {
-    type->kind = TYPE_KOTLIN_CHAR;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_CHAR;
     type->this_class_name = string_make_from_c("java/lang/Char", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1336,7 +1342,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'D': {
-    type->kind = TYPE_KOTLIN_DOUBLE;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_DOUBLE;
     type->this_class_name = string_make_from_c("java/lang/Double", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1344,7 +1351,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'F': {
-    type->kind = TYPE_KOTLIN_FLOAT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_FLOAT;
     type->this_class_name = string_make_from_c("java/lang/Float", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1352,7 +1360,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'I': {
-    type->kind = TYPE_KOTLIN_INT;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_INT;
     type->this_class_name = string_make_from_c("java/lang/Integer", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1360,7 +1369,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'J': {
-    type->kind = TYPE_KOTLIN_LONG;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_LONG;
     type->this_class_name = string_make_from_c("java/lang/Long", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1368,7 +1378,8 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case 'Z': {
-    type->kind = TYPE_KOTLIN_BOOLEAN;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+    type->flag |= TYPE_FLAG_KOTLIN_BOOLEAN;
     type->this_class_name = string_make_from_c("java/lang/Boolean", arena);
 
     string_drop_first_n(&remaining, 1);
@@ -1381,12 +1392,10 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
     string_drop_until_incl(&remaining, ';');
     type->this_class_name.len -= remaining.len;
+    type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
     if (string_eq_c(type->this_class_name, "java/lang/String")) {
-      type->kind = TYPE_KOTLIN_STRING;
-    } else {
-      type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+      type->flag |= TYPE_FLAG_KOTLIN_STRING;
     }
-
     return remaining;
   }
 
@@ -3895,33 +3904,33 @@ static void par_find_token_position(const par_parser_t *parser,
 
 static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   const ty_type_t *const type = &types[type_i];
+
+  if (type->flag & TYPE_FLAG_KOTLIN_UNIT)
+    return "TYPE_FLAG_KOTLIN_UNIT";
+  if (type->flag & TYPE_FLAG_KOTLIN_BOOLEAN)
+    return "TYPE_FLAG_KOTLIN_BOOLEAN";
+  if (type->flag & TYPE_FLAG_KOTLIN_BYTE)
+    return "TYPE_FLAG_KOTLIN_BYTE";
+  if (type->flag & TYPE_FLAG_KOTLIN_CHAR)
+    return "TYPE_FLAG_KOTLIN_CHAR";
+  if (type->flag & TYPE_FLAG_KOTLIN_SHORT)
+    return "TYPE_FLAG_KOTLIN_SHORT";
+  if (type->flag & TYPE_FLAG_KOTLIN_INT)
+    return "TYPE_FLAG_KOTLIN_INT";
+  if (type->flag & TYPE_FLAG_KOTLIN_FLOAT)
+    return "TYPE_FLAG_KOTLIN_FLOAT";
+  if (type->flag & TYPE_FLAG_KOTLIN_LONG)
+    return "TYPE_FLAG_KOTLIN_LONG";
+  if (type->flag & TYPE_FLAG_KOTLIN_DOUBLE)
+    return "TYPE_FLAG_KOTLIN_DOUBLE";
+  if (type->flag & TYPE_FLAG_KOTLIN_STRING)
+    return "TYPE_FLAG_KOTLIN_STRING";
+
   switch (type->kind) {
   case TYPE_KOTLIN_ANY:
     return "TYPE_KOTLIN_ANY";
-  case TYPE_KOTLIN_UNIT:
-    return "TYPE_KOTLIN_UNIT";
-  case TYPE_KOTLIN_INSTANCE_REFERENCE:
-    return "TYPE_KOTLIN_INSTANCE_REFERENCE";
   case TYPE_METHOD:
     return "TYPE_METHOD";
-  case TYPE_KOTLIN_BOOLEAN:
-    return "TYPE_KOTLIN_BOOLEAN";
-  case TYPE_KOTLIN_BYTE:
-    return "TYPE_KOTLIN_BYTE";
-  case TYPE_KOTLIN_CHAR:
-    return "TYPE_KOTLIN_CHAR";
-  case TYPE_KOTLIN_SHORT:
-    return "TYPE_KOTLIN_SHORT";
-  case TYPE_KOTLIN_INT:
-    return "TYPE_KOTLIN_INT";
-  case TYPE_KOTLIN_FLOAT:
-    return "TYPE_KOTLIN_FLOAT";
-  case TYPE_KOTLIN_LONG:
-    return "TYPE_KOTLIN_LONG";
-  case TYPE_KOTLIN_DOUBLE:
-    return "TYPE_KOTLIN_DOUBLE";
-  case TYPE_KOTLIN_STRING:
-    return "TYPE_KOTLIN_STRING";
   case TYPE_JVM_VOID:
     return "TYPE_JVM_VOID";
   case TYPE_JVM_BYTE:
@@ -3956,33 +3965,34 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
                                         arena_t *arena) {
   const ty_type_t *const type = &types[type_i];
 
+  if (type->flag & TYPE_FLAG_KOTLIN_BOOLEAN)
+    return string_make_from_c("kotlin.Boolean", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_BYTE)
+    return string_make_from_c("kotlin.Byte", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_CHAR)
+    return string_make_from_c("kotlin.Char", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_SHORT)
+    return string_make_from_c("kotlin.Short", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_INT)
+    return string_make_from_c("kotlin.Int", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_FLOAT)
+    return string_make_from_c("kotlin.Float", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_LONG)
+    return string_make_from_c("kotlin.Long", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_DOUBLE)
+    return string_make_from_c("kotlin.Double", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_STRING)
+    return string_make_from_c("kotlin.String", arena);
+  if (type->flag & TYPE_FLAG_KOTLIN_UNIT)
+    return string_make_from_c("kotlin.Unit", arena);
+
   switch (type->kind) {
   case TYPE_KOTLIN_ANY:
     return string_make_from_c("kotlin.Any", arena);
-  case TYPE_KOTLIN_BOOLEAN:
-    return string_make_from_c("kotlin.Boolean", arena);
-  case TYPE_KOTLIN_BYTE:
-    return string_make_from_c("kotlin.Byte", arena);
-  case TYPE_KOTLIN_CHAR:
-    return string_make_from_c("kotlin.Char", arena);
-  case TYPE_KOTLIN_SHORT:
-    return string_make_from_c("kotlin.Short", arena);
-  case TYPE_KOTLIN_INT:
-    return string_make_from_c("kotlin.Int", arena);
-  case TYPE_KOTLIN_FLOAT:
-    return string_make_from_c("kotlin.Float", arena);
-  case TYPE_KOTLIN_LONG:
-    return string_make_from_c("kotlin.Long", arena);
-  case TYPE_KOTLIN_DOUBLE:
-    return string_make_from_c("kotlin.Double", arena);
-  case TYPE_KOTLIN_STRING:
-    return string_make_from_c("kotlin.String", arena);
   case TYPE_JVM_VOID:
     return string_make_from_c("jvm.Void", arena);
   case TYPE_JVM_INT:
     return string_make_from_c("jvm.Int", arena);
-  case TYPE_KOTLIN_UNIT:
-    return string_make_from_c("kotlin.Unit", arena);
   case TYPE_JVM_BOOL:
     return string_make_from_c("jvm.Boolean", arena);
   case TYPE_JVM_BYTE:
@@ -5256,6 +5266,10 @@ static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
   return pg_array_last_index(resolver->types);
 }
 
+static string_t resolver_function_to_human_string(const resolver_t *resolver,
+                                                  u32 function_i,
+                                                  arena_t *arena);
+
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, u32 this_class_type_i,
     const cf_class_file_t *class_file, arena_t *arena) {
@@ -5280,7 +5294,15 @@ static void resolver_load_methods_from_class_file(
     type.v.method.access_flags = method->access_flags;
     type.v.method.this_class_type_i = this_class_type_i;
 
-    resolver_add_type(resolver, &type, arena);
+    const u32 type_i = resolver_add_type(resolver, &type, arena);
+
+    {
+      arena_t tmp_arena = *arena;
+      const string_t human_type =
+          resolver_function_to_human_string(resolver, type_i, &tmp_arena);
+      LOG("Loaded method: access_flags=%u type=%.*s", method->access_flags,
+          human_type.len, human_type.value);
+    }
   }
 }
 
@@ -5658,12 +5680,19 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   if (lhs->kind != rhs->kind)
     return false;
 
+  if (lhs->flag & rhs->flag)
+    return true;
+
   if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
       rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
     return string_eq(lhs->this_class_name, rhs->this_class_name);
   }
 
-  if (lhs->kind == TYPE_KOTLIN_UNIT && rhs->kind == TYPE_KOTLIN_UNIT)
+  if ((lhs->kind == TYPE_JVM_VOID) && (rhs->kind == TYPE_JVM_VOID))
+    return true;
+
+  if ((lhs->flag & TYPE_FLAG_KOTLIN_UNIT) &&
+      (rhs->flag & TYPE_FLAG_KOTLIN_UNIT))
     return true;
 
   if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
@@ -5731,16 +5760,23 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   pg_assert(declared_function_type->v.method.argument_types_i != NULL);
   const ty_type_method_t *const method = &declared_function_type->v.method;
 
+  const ty_type_t *const this_class_type =
+      &resolver->types[method->this_class_type_i];
+
   string_t result = string_reserve(128, arena);
 
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
     string_append_cstring(&result, "private ", arena);
 
   string_append_cstring(&result, "fun ", arena);
+
+  if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0) {
+    string_append_string(&result, this_class_type->this_class_name, arena);
+    string_append_cstring(&result, ".", arena);
+  }
+
   string_append_string(&result, method->name, arena);
   string_append_cstring(&result, "(", arena);
-
-  pg_assert(method->access_flags & ACCESS_FLAGS_STATIC);
 
   const u8 argument_count =
       pg_array_len(declared_function_type->v.method.argument_types_i);
@@ -5762,8 +5798,6 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   string_append_cstring(&result, " from ", arena);
 
-  const ty_type_t *const this_class_type =
-      &resolver->types[method->this_class_type_i];
   string_append_string(&result, this_class_type->this_class_name, arena);
 
   return result;
@@ -5889,24 +5923,26 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   }
 
   // FIXME: Widen.
-  if (lhs_type->kind == TYPE_KOTLIN_INT && rhs_type->kind == TYPE_KOTLIN_BYTE) {
+  if ((lhs_type->flag & TYPE_FLAG_KOTLIN_INT) &&
+      (rhs_type->flag & TYPE_FLAG_KOTLIN_BYTE)) {
     *result_i = rhs_i;
     return true;
   }
 
-  if (lhs_type->kind == TYPE_KOTLIN_BYTE && rhs_type->kind == TYPE_KOTLIN_INT) {
+  if ((lhs_type->flag & TYPE_FLAG_KOTLIN_BYTE) &&
+      (rhs_type->flag & TYPE_FLAG_KOTLIN_INT)) {
     *result_i = lhs_i;
     return true;
   }
 
-  if (lhs_type->kind == TYPE_KOTLIN_INT &&
-      rhs_type->kind == TYPE_KOTLIN_SHORT) {
+  if ((lhs_type->flag & TYPE_FLAG_KOTLIN_INT) &&
+      (rhs_type->flag & TYPE_FLAG_KOTLIN_SHORT)) {
     *result_i = rhs_i;
     return true;
   }
 
-  if (lhs_type->kind == TYPE_KOTLIN_SHORT &&
-      rhs_type->kind == TYPE_KOTLIN_INT) {
+  if ((lhs_type->flag & TYPE_FLAG_KOTLIN_SHORT) &&
+      (rhs_type->flag & TYPE_FLAG_KOTLIN_INT)) {
     *result_i = lhs_i;
     return true;
   }
@@ -5958,8 +5994,10 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         token.source_offset);
     break;
   case AST_KIND_BUILTIN_PRINTLN: {
-    human_type =
-        resolver_function_to_human_string(resolver, node->type_i, arena);
+    if (node->type_i != 0)
+      human_type =
+          resolver_function_to_human_string(resolver, node->type_i, arena);
+
     LOG("[%ld] %s  %.*s %s (at %.*s:%u:%u:%u)", node - resolver->parser->nodes,
         kind_string, human_type.len, human_type.value, type_kind,
         resolver->parser->lexer->file_path.len,
@@ -6140,21 +6178,21 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
           .this_class_name = string_make(class_name, arena),
       };
       if (string_eq_c(class_name, "java/lang/Boolean"))
-        this_type.kind = TYPE_KOTLIN_BOOLEAN;
+        this_type.flag |= TYPE_FLAG_KOTLIN_BOOLEAN;
       else if (string_eq_c(class_name, "java/lang/Char"))
-        this_type.kind = TYPE_KOTLIN_CHAR;
+        this_type.flag |= TYPE_FLAG_KOTLIN_CHAR;
       else if (string_eq_c(class_name, "java/lang/Byte"))
-        this_type.kind = TYPE_KOTLIN_BYTE;
+        this_type.flag |= TYPE_FLAG_KOTLIN_BYTE;
       else if (string_eq_c(class_name, "java/lang/Short"))
-        this_type.kind = TYPE_KOTLIN_SHORT;
+        this_type.flag |= TYPE_FLAG_KOTLIN_SHORT;
       else if (string_eq_c(class_name, "java/lang/Integer"))
-        this_type.kind = TYPE_KOTLIN_INT;
+        this_type.flag |= TYPE_FLAG_KOTLIN_INT;
       else if (string_eq_c(class_name, "java/lang/Float"))
-        this_type.kind = TYPE_KOTLIN_FLOAT;
+        this_type.flag |= TYPE_FLAG_KOTLIN_FLOAT;
       else if (string_eq_c(class_name, "java/lang/Long"))
-        this_type.kind = TYPE_KOTLIN_LONG;
+        this_type.flag |= TYPE_FLAG_KOTLIN_LONG;
       else if (string_eq_c(class_name, "java/lang/Double"))
-        this_type.kind = TYPE_KOTLIN_DOUBLE;
+        this_type.flag |= TYPE_FLAG_KOTLIN_DOUBLE;
 
       *type_i = resolver_add_type(resolver, &this_type, arena);
 
@@ -6458,7 +6496,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       node->type_i =
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
-      if (type->kind != TYPE_KOTLIN_BOOLEAN) {
+      if ((type->flag & TYPE_FLAG_KOTLIN_BOOLEAN) == 0) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(
@@ -6516,7 +6554,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
-      if (lhs_type->kind != TYPE_KOTLIN_BOOLEAN) {
+      if ((lhs_type->flag & TYPE_FLAG_KOTLIN_BOOLEAN) == 0) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6648,7 +6686,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind != TYPE_KOTLIN_BOOLEAN) {
+    if ((type_condition->flag & TYPE_FLAG_KOTLIN_BOOLEAN) == 0) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error, "incompatible types, expected Boolean, got: ", arena);
@@ -6672,7 +6710,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind != TYPE_KOTLIN_BOOLEAN) {
+    if ((type_condition->flag & TYPE_FLAG_KOTLIN_BOOLEAN) == 0) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6885,52 +6923,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   __builtin_unreachable();
 }
 
-// --------------------------------- Lowering
-
-void lo_unbox_type_maybe(resolver_t *resolver, ty_type_t *type) {
-  pg_assert(resolver != NULL);
-  pg_assert(type != NULL);
-
-  if (type->kind == TYPE_KOTLIN_UNIT) {
-    type->kind = TYPE_JVM_VOID;
-    return;
-  }
-
-  if (type->kind == TYPE_KOTLIN_INT) {
-    type->kind = TYPE_JVM_INT;
-  } else if (type->kind == TYPE_KOTLIN_BOOLEAN) {
-    type->kind = TYPE_JVM_BOOL;
-  } else if (type->kind == TYPE_KOTLIN_CHAR) {
-    type->kind = TYPE_JVM_CHAR;
-  } else if (type->kind == TYPE_KOTLIN_BYTE) {
-    type->kind = TYPE_JVM_BYTE;
-  } else if (type->kind == TYPE_KOTLIN_SHORT) {
-    type->kind = TYPE_JVM_SHORT;
-  } else if (type->kind == TYPE_KOTLIN_INT) {
-    type->kind = TYPE_JVM_INT;
-  } else if (type->kind == TYPE_KOTLIN_FLOAT) {
-    type->kind = TYPE_JVM_FLOAT;
-  } else if (type->kind == TYPE_KOTLIN_LONG) {
-    type->kind = TYPE_JVM_LONG;
-  } else if (type->kind == TYPE_KOTLIN_DOUBLE) {
-    type->kind = TYPE_JVM_DOUBLE;
-  } else if (type->kind == TYPE_KOTLIN_STRING) {
-    type->kind = TYPE_JVM_STRING;
-  }
-}
-
-// TODO: As long as types are not nullable, we can do a naive linear unboxing
-// of all types. When nullable types are implemented, we need a tree walk to
-// unbox a node if leaves are unboxed.
 void lo_lower_types(resolver_t *resolver, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
-
-  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
-    ty_type_t *const type = &resolver->types[i];
-
-    lo_unbox_type_maybe(resolver, type);
-  }
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     ty_type_t *const type = &resolver->types[i];
