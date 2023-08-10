@@ -1246,6 +1246,9 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
     };
     remaining =
         cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
+    type->java_class_name = item_type.java_class_name;
+
+    // FIXME: Check cache before adding the type.
     pg_array_append(*types, item_type, arena);
     type->v.array_type_i = pg_array_last_index(*types);
     return remaining;
@@ -1264,6 +1267,7 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
 
       ty_type_t argument_type = {0};
       remaining = cf_parse_descriptor(remaining, &argument_type, types, arena);
+      // FIXME: Check cache before adding the type.
       pg_array_append(*types, argument_type, arena);
 
       pg_array_append(argument_types_i, pg_array_last_index(*types), arena);
@@ -1274,6 +1278,7 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
 
     ty_type_t return_type = {0};
     remaining = cf_parse_descriptor(remaining, &return_type, types, arena);
+    // FIXME: Check cache before adding the type.
     pg_array_append(*types, return_type, arena);
 
     type->v.method.argument_types_i = argument_types_i;
@@ -5271,6 +5276,7 @@ static void resolver_load_methods_from_class_file(
     pg_assert(type.kind == TYPE_KOTLIN_METHOD);
 
     type.v.method.name = string_make(name, arena);
+    type.v.method.access_flags=method->access_flags;
 
     ty_add_type(&resolver->types, &type, arena);
   }
@@ -8917,6 +8923,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
       const ty_type_t source_method_argument_types = {
           .kind = TYPE_JVM_ARRAY_REFERENCE,
+          .java_class_name = string_make_from_c("FIXME", arena),
           .v = {.array_type_i = string_type_i},
       };
       pg_array_append(gen->resolver->types, source_method_argument_types,
