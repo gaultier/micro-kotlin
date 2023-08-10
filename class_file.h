@@ -5813,8 +5813,6 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     for (u8 j = 0; j < function_argument_count; j++) {
       const u32 declared_argument_type_i =
           declared_function_type->v.method.argument_types_i[j];
-      const ty_type_t *const declared_argument_type =
-          &resolver->types[declared_argument_type_i];
 
       const u32 call_site_argument_type_i =
           call_site_type->v.method.argument_types_i[j];
@@ -5823,6 +5821,8 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
                          call_site_argument_type_i))
         continue;
 
+      // TODO: Walk the whole super chain upwards.
+      // Right now we only do one level up.
       pg_assert(resolver_resolve_super_lazily(
           resolver, call_site_argument_type_i, scratch_arena, arena));
 
@@ -8056,7 +8056,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
-    if (type->kind==TYPE_JVM_LONG) {
+    if (type->kind == TYPE_JVM_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
     }
