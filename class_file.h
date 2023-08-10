@@ -5703,7 +5703,6 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   string_t result = string_reserve(128, arena);
 
-  LOG("access_flags=%u", method->access_flags);
 
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
     string_append_cstring(&result, "private ", arena);
