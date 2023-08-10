@@ -1152,6 +1152,7 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
   switch (remaining.value[0]) {
   case 'V': {
     type->kind = TYPE_KOTLIN_UNIT;
+    type->java_class_name = string_make_from_c("kotlin.Unit", arena);
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
@@ -8814,6 +8815,7 @@ static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
 
 static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
                                                cf_class_file_t *class_file,
+                                               arena_t *scratch_arena,
                                                arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
@@ -8892,7 +8894,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    const ty_type_method_t target_method_type = {};
+    ty_type_method_t target_method_type = {0};
     pg_assert(ty_resolve_class_name(
         gen->resolver, string_make_from_c("kotlin.Unit", arena),
         &target_method_type.return_type_i, scratch_arena, arena));
@@ -8979,7 +8981,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 }
 
 static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
-                    u32 root_i, arena_t *arena) {
+                    u32 root_i, arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);
@@ -8996,5 +8998,5 @@ static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
 
   cg_emit_node(&gen, class_file, root_i, arena);
 
-  cg_supplement_entrypoint_if_exists(&gen, class_file, arena);
+  cg_supplement_entrypoint_if_exists(&gen, class_file, scratch_arena, arena);
 }
