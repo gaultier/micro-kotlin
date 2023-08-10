@@ -143,18 +143,25 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, 1 << 15, &arena);
     const ty_type_t any_type = {
-        .java_class_name = string_make_from_c("kotlin.Any", &arena),
+        .this_class_name = string_make_from_c("kotlin.Any", &arena),
     };
     pg_array_append(resolver.types, any_type, &arena);
 
     const ty_type_t unit_type = {
-        .java_class_name = string_make_from_c("kotlin.Unit", &arena),
+        .this_class_name = string_make_from_c("kotlin.Unit", &arena),
     };
     pg_array_append(resolver.types, unit_type, &arena);
 
-    ty_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
+    resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
+
     arena_clear(&scratch_arena);
-    ty_resolve_node(&resolver, root_i, &scratch_arena, &arena);
+
+    u32 string_type_i = 0;
+    pg_assert(resolver_resolve_class_name(
+        &resolver, string_make_from_c_no_alloc("java/lang/String"),
+        &string_type_i, &scratch_arena, &arena));
+
+    resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
 
     // Debug types.
     {
@@ -183,7 +190,7 @@ int main(int argc, char *argv[]) {
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
-    cg_emit(&resolver, &class_file, root_i,&scratch_arena, &arena);
+    cg_emit(&resolver, &class_file, root_i, &scratch_arena, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 

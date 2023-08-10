@@ -700,7 +700,8 @@ typedef struct {
 } ty_type_method_t;
 
 struct ty_type_t {
-  string_t java_class_name;
+  string_t this_class_name;
+  string_t super_class_name;
   union {
     ty_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;        // TYPE_ARRAY_REFERENCE
@@ -843,6 +844,12 @@ typedef struct {
   lex_token_t *tokens;
   u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
 } lex_lexer_t;
+
+typedef struct {
+  string_t super_class_name;
+  u32 this_class_type_i;
+  pg_pad(4);
+} resolver_super_class_to_resolve_t;
 
 typedef struct {
   char *buf;
@@ -1240,7 +1247,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     break;
   }
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
-    const string_t java_class_name = type->java_class_name;
+    const string_t java_class_name = type->this_class_name;
 
     string_append_char(descriptor, 'L', arena);
     string_append_string(descriptor, java_class_name, arena);
@@ -1299,14 +1306,14 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   switch (remaining.value[0]) {
   case 'V': {
     type->kind = TYPE_KOTLIN_UNIT;
-    type->java_class_name = string_make_from_c("kotlin.Unit", arena);
+    type->this_class_name = string_make_from_c("kotlin.Unit", arena);
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'S': {
     type->kind = TYPE_KOTLIN_SHORT;
-    type->java_class_name = string_make_from_c("java/lang/Short", arena);
+    type->this_class_name = string_make_from_c("java/lang/Short", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1314,7 +1321,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'B': {
     type->kind = TYPE_KOTLIN_BYTE;
-    type->java_class_name = string_make_from_c("java/lang/Byte", arena);
+    type->this_class_name = string_make_from_c("java/lang/Byte", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1322,7 +1329,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'C': {
     type->kind = TYPE_KOTLIN_CHAR;
-    type->java_class_name = string_make_from_c("java/lang/Char", arena);
+    type->this_class_name = string_make_from_c("java/lang/Char", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1330,7 +1337,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'D': {
     type->kind = TYPE_KOTLIN_DOUBLE;
-    type->java_class_name = string_make_from_c("java/lang/Double", arena);
+    type->this_class_name = string_make_from_c("java/lang/Double", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1338,7 +1345,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'F': {
     type->kind = TYPE_KOTLIN_FLOAT;
-    type->java_class_name = string_make_from_c("java/lang/Float", arena);
+    type->this_class_name = string_make_from_c("java/lang/Float", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1346,7 +1353,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'I': {
     type->kind = TYPE_KOTLIN_INT;
-    type->java_class_name = string_make_from_c("java/lang/Integer", arena);
+    type->this_class_name = string_make_from_c("java/lang/Integer", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1354,7 +1361,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'J': {
     type->kind = TYPE_KOTLIN_LONG;
-    type->java_class_name = string_make_from_c("java/lang/Long", arena);
+    type->this_class_name = string_make_from_c("java/lang/Long", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1362,7 +1369,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'Z': {
     type->kind = TYPE_KOTLIN_BOOLEAN;
-    type->java_class_name = string_make_from_c("java/lang/Boolean", arena);
+    type->this_class_name = string_make_from_c("java/lang/Boolean", arena);
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1370,11 +1377,11 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'L': {
     string_drop_first_n(&remaining, 1);
-    type->java_class_name = remaining;
+    type->this_class_name = remaining;
 
     string_drop_until_incl(&remaining, ';');
-    type->java_class_name.len -= remaining.len;
-    if (string_eq_c(type->java_class_name, "java/lang/String")) {
+    type->this_class_name.len -= remaining.len;
+    if (string_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_KOTLIN_STRING;
     } else {
       type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
@@ -1393,7 +1400,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     };
     remaining =
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
-    type->java_class_name = item_type.java_class_name;
+    type->this_class_name = item_type.this_class_name;
 
     type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
@@ -1413,7 +1420,9 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
       ty_type_t argument_type = {0};
       remaining =
           cf_parse_descriptor(resolver, remaining, &argument_type, arena);
-      resolver_add_type(resolver, &argument_type, arena);
+      const u32 argument_type_i =
+          resolver_add_type(resolver, &argument_type, arena);
+      pg_array_append(argument_types_i, argument_type_i, arena);
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.value[0] = ')');
@@ -3992,12 +4001,12 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("jvm.String", arena);
   case TYPE_JVM_ARRAY_REFERENCE: {
     string_t result = string_make_from_c("jvm.Array<", arena);
-    string_append_string(&result, type->java_class_name, arena);
+    string_append_string(&result, type->this_class_name, arena);
     string_append_char(&result, '>', arena);
     return result;
   }
   case TYPE_KOTLIN_INSTANCE_REFERENCE: {
-    return string_make(type->java_class_name, arena);
+    return string_make(type->this_class_name, arena);
   }
   case TYPE_KOTLIN_METHOD: {
     const ty_type_method_t *const method_type = &type->v.method;
@@ -5262,7 +5271,7 @@ static void resolver_load_methods_from_class_file(
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
 
-    ty_type_t type = {.java_class_name = this_class_name};
+    ty_type_t type = {.this_class_name = this_class_name};
     cf_parse_descriptor(resolver, descriptor, &type, arena);
     pg_assert(type.kind == TYPE_KOTLIN_METHOD);
 
@@ -5466,21 +5475,24 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
 
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-            .java_class_name = string_make(class_file.class_name, arena),
+            .this_class_name = string_make(class_file.class_name, arena),
         };
-        if (class_file.super_class != 0) {
-          //          TODO
-          //          const cf_constant_t *const constant_super =
-          //          cf_constant_array_get(
-          //              &class_file.constant_pool, class_file.super_class);
-          //
-          //          pg_assert(constant_super->kind ==
-          //          CONSTANT_POOL_KIND_CLASS_INFO); class.super_class_name =
-          //          cf_constant_array_get_as_string(
-          //              &class_file.constant_pool,
-          //              constant_super->v.string_utf8_i);
-        }
         resolver_add_type(resolver, &type, arena);
+
+        if (class_file.super_class != 0) {
+          const cf_constant_t *const constant_super = cf_constant_array_get(
+              &class_file.constant_pool, class_file.super_class);
+
+          pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+          const string_t super_class_name = cf_constant_array_get_as_string(
+              &class_file.constant_pool, constant_super->v.string_utf8_i);
+
+          if (!string_eq(super_class_name,
+                         string_make_from_c_no_alloc("java/lang/Object"))) {
+            type.super_class_name = string_make(super_class_name, arena);
+          }
+        }
+
         resolver_load_methods_from_class_file(resolver, &class_file, arena);
 
         LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
@@ -5519,9 +5531,23 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
 
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-            .java_class_name = string_make(class_file.class_name, arena),
+            .this_class_name = string_make(class_file.class_name, arena),
         };
         resolver_add_type(resolver, &type, arena);
+
+        if (class_file.super_class != 0) {
+          const cf_constant_t *const constant_super = cf_constant_array_get(
+              &class_file.constant_pool, class_file.super_class);
+
+          pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+          const string_t super_class_name = cf_constant_array_get_as_string(
+              &class_file.constant_pool, constant_super->v.string_utf8_i);
+
+          if (!string_eq(super_class_name,
+                         string_make_from_c_no_alloc("java/lang/Object"))) {
+            type.super_class_name = string_make(super_class_name, arena);
+          }
+        }
 
         resolver_load_methods_from_class_file(resolver, &class_file, arena);
 
@@ -5630,7 +5656,7 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
   if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
       rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-    return string_eq(lhs->java_class_name, rhs->java_class_name);
+    return string_eq(lhs->this_class_name, rhs->this_class_name);
   }
 
   if (lhs->kind == TYPE_KOTLIN_UNIT && rhs->kind == TYPE_KOTLIN_UNIT)
@@ -5703,7 +5729,6 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   string_t result = string_reserve(128, arena);
 
-
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
     string_append_cstring(&result, "private ", arena);
 
@@ -5735,16 +5760,21 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   const ty_type_t *const this_class_type =
       &resolver->types[method->this_class_type_i];
-  string_append_string(&result, this_class_type->java_class_name, arena);
+  string_append_string(&result, this_class_type->this_class_name, arena);
 
   return result;
 }
+
+static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
+                                          arena_t *scratch_arena,
+                                          arena_t *arena);
 
 // TODO: Keep track of imported packages (including those imported by default).
 static bool
 resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
                                u32 call_site_type_i, u32 *picked_method_type_i,
-                               u32 **candidate_functions_i, arena_t *arena) {
+                               u32 **candidate_functions_i,
+                               arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
@@ -5770,8 +5800,8 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
     pg_assert(declared_function_type->kind == TYPE_KOTLIN_METHOD);
     pg_assert(declared_function_type->v.method.argument_types_i != NULL);
-    pg_assert(declared_function_type->java_class_name.value != NULL);
-    pg_assert(declared_function_type->java_class_name.len > 0);
+    pg_assert(declared_function_type->this_class_name.value != NULL);
+    pg_assert(declared_function_type->this_class_name.len > 0);
 
     const u8 function_argument_count =
         pg_array_len(declared_function_type->v.method.argument_types_i);
@@ -5788,14 +5818,20 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
       const u32 call_site_argument_type_i =
           call_site_type->v.method.argument_types_i[j];
-      const ty_type_t *const used_argument_type =
-          &resolver->types[call_site_argument_type_i];
 
       if (ty_types_equal(resolver->types, declared_argument_type_i,
                          call_site_argument_type_i))
         continue;
 
-      // TODO: Try the chain of super classes for the call_site_argument_type.
+      resolver_resolve_super_lazily(resolver, call_site_argument_type_i,
+                                    scratch_arena, arena);
+
+      const ty_type_t *const call_site_argument_type =
+          &resolver->types[call_site_argument_type_i];
+      // Try with super.
+      if (ty_types_equal(resolver->types, call_site_argument_type->super_type_i,
+                         call_site_argument_type_i))
+        continue;
 
       matching = false;
       break;
@@ -6021,9 +6057,10 @@ static string_t find_java_home(arena_t *arena) {
   exit(EINVAL);
 }
 
-static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
-                                  u32 *type_i, arena_t *scratch_arena,
-                                  arena_t *arena) {
+static bool resolver_resolve_class_name(resolver_t *resolver,
+                                        string_t class_name, u32 *type_i,
+                                        arena_t *scratch_arena,
+                                        arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_name.value != NULL);
   pg_assert(type_i != NULL);
@@ -6036,7 +6073,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
     if (type->kind == TYPE_KOTLIN_METHOD)
       continue;
 
-    if (string_eq(class_name, type->java_class_name)) {
+    if (string_eq(class_name, type->this_class_name)) {
       *type_i = i;
       return true;
     }
@@ -6083,7 +6120,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
       // TODO: super type.
       ty_type_t this_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-          .java_class_name = string_make(class_name, arena),
+          .this_class_name = string_make(class_name, arena),
       };
       if (string_eq_c(class_name, "java/lang/Boolean"))
         this_type.kind = TYPE_KOTLIN_BOOLEAN;
@@ -6121,7 +6158,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
     cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
 
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
-      if (string_eq(class_name, resolver->types[i].java_class_name)) {
+      if (string_eq(class_name, resolver->types[i].this_class_name)) {
         *type_i = i;
         return true;
       }
@@ -6131,8 +6168,28 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
   return false;
 }
 
-static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
-                                   arena_t *scratch_arena, arena_t *arena) {
+static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
+                                          arena_t *scratch_arena,
+                                          arena_t *arena) {
+
+  ty_type_t *const type = &resolver->types[this_type_i];
+  if (type->super_type_i > 0)
+    return true;
+
+  if (type->super_class_name.len == 0) {
+    return resolver_resolve_class_name(
+        resolver, string_make_from_c_no_alloc("java/lang/Object"),
+        &type->super_type_i, scratch_arena, arena);
+  }
+
+  return resolver_resolve_class_name(resolver, type->super_class_name,
+                                     &type->super_type_i, scratch_arena, arena);
+}
+
+static void resolver_load_standard_types(resolver_t *resolver,
+                                         string_t java_home,
+                                         arena_t *scratch_arena,
+                                         arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(java_home.value != NULL);
   pg_assert(arena != NULL);
@@ -6146,7 +6203,7 @@ static void ty_load_standard_types(resolver_t *resolver, string_t java_home,
                     arena);
 
   u32 dummy = 0;
-  pg_assert(ty_resolve_class_name(
+  pg_assert(resolver_resolve_class_name(
       resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
       scratch_arena, arena));
 }
@@ -6261,8 +6318,8 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
   return false;
 }
 
-static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
-                           arena_t *scratch_arena, arena_t *arena) {
+static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
+                                 arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
@@ -6277,20 +6334,20 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     return node->type_i = pg_array_last_index(resolver->types);
   case AST_KIND_BOOL: {
-    pg_assert(ty_resolve_class_name(
+    pg_assert(resolver_resolve_class_name(
         resolver, string_make_from_c("java/lang/Boolean", arena), &node->type_i,
         scratch_arena, arena));
 
     return node->type_i;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
-    ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     u32 unit_type_i = 0;
-    pg_assert(ty_resolve_class_name(resolver,
-                                    string_make_from_c("kotlin.Unit", arena),
-                                    &unit_type_i, scratch_arena, arena));
+    pg_assert(resolver_resolve_class_name(
+        resolver, string_make_from_c("kotlin.Unit", arena), &unit_type_i,
+        scratch_arena, arena));
 
     ty_type_t println_type_exact = {.kind = TYPE_KOTLIN_METHOD,
                                     .v = {.method = {
@@ -6306,40 +6363,36 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     u32 picked_method_type_i = 0;
     {
-      arena_t tmp_arena = *arena;
-
       u32 *candidate_functions_i = NULL;
-      pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
+      pg_array_init_reserve(candidate_functions_i, 128, scratch_arena);
 
       if (!resolver_resolve_free_function(
               resolver, string_make_from_c_no_alloc("println"),
               println_type_exact_i, &picked_method_type_i,
-              &candidate_functions_i, &tmp_arena)) {
+              &candidate_functions_i, scratch_arena, arena)) {
 
-        string_t error = string_reserve(256, &tmp_arena);
+        string_t error = string_reserve(256, arena);
         string_append_cstring(&error,
-                              "failed to find matching function: ", &tmp_arena);
+                              "failed to find matching function: ", arena);
         string_append_string(&error,
-                             ty_type_to_human_string(resolver->types,
-                                                     println_type_exact_i,
-                                                     &tmp_arena),
-                             &tmp_arena);
+                             ty_type_to_human_string(
+                                 resolver->types, println_type_exact_i, arena),
+                             arena);
 
         if (pg_array_len(candidate_functions_i) == 0) {
-          string_append_cstring(&error,
-                                ", could not find any function with this name",
-                                &tmp_arena);
+          string_append_cstring(
+              &error, ", could not find any function with this name", arena);
         } else {
-          string_append_cstring(&error, ", possible candidates: ", &tmp_arena);
+          string_append_cstring(&error, ", possible candidates: ", arena);
 
           for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
-            const u32 candidate_i = candidate_functions_i[i];
+            const u32 candidate_type_i = candidate_functions_i[i];
 
-            string_append_cstring(&error, "\n  ", &tmp_arena);
+            string_append_cstring(&error, "\n  ", arena);
             string_append_string(&error,
                                  resolver_function_to_human_string(
-                                     resolver, candidate_i, &tmp_arena),
-                                 &tmp_arena);
+                                     resolver, candidate_type_i, arena),
+                                 arena);
           }
         }
         par_error(resolver->parser, token, error.value);
@@ -6362,7 +6415,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
       return 0;
 
     } else if (flag & NODE_NUMBER_FLAGS_LONG) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Long", arena), &node->type_i,
           scratch_arena, arena));
     } else {
@@ -6372,7 +6425,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
         return 0;
       }
 
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Integer", arena),
           &node->type_i, scratch_arena, arena));
     }
@@ -6385,7 +6438,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_UNARY:
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      node->type_i = ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+      node->type_i =
+          resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (type->kind != TYPE_KOTLIN_BOOLEAN) {
         string_t error = string_reserve(256, arena);
@@ -6402,8 +6456,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
       return node->type_i;
 
     case TOKEN_KIND_MINUS:
-      return node->type_i =
-                 ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+      return node->type_i = resolver_resolve_node(resolver, node->lhs,
+                                                  scratch_arena, arena);
 
     default:
       pg_assert(0 && "todo");
@@ -6413,9 +6467,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(node->main_token_i > 0);
 
     const u32 lhs_i =
-        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const u32 rhs_i =
-        ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
       string_t error = string_reserve(256, arena);
@@ -6437,7 +6491,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_GE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Boolean", arena),
           &node->type_i, scratch_arena, arena));
       return node->type_i;
@@ -6463,29 +6517,29 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      ty_resolve_node(resolver, node->nodes[i], scratch_arena, arena);
+      resolver_resolve_node(resolver, node->nodes[i], scratch_arena, arena);
       // Clean up after each statement.
       resolver->current_type_i = 0;
     }
 
-    pg_assert(ty_resolve_class_name(resolver,
-                                    string_make_from_c_no_alloc("kotlin.Unit"),
-                                    &node->type_i, scratch_arena, arena));
+    pg_assert(resolver_resolve_class_name(
+        resolver, string_make_from_c_no_alloc("kotlin.Unit"), &node->type_i,
+        scratch_arena, arena));
     return node->type_i;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     ty_begin_scope(resolver);
     // Arguments (lhs).
-    ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
     u32 return_type_i = 0;
     if (node->extra_data_i > 0) {
-      return_type_i =
-          ty_resolve_node(resolver, node->extra_data_i, scratch_arena, arena);
+      return_type_i = resolver_resolve_node(resolver, node->extra_data_i,
+                                            scratch_arena, arena);
     } else {
-      pg_assert(ty_resolve_class_name(resolver,
-                                      string_make_from_c("kotlin.Unit", arena),
-                                      &return_type_i, scratch_arena, arena));
+      pg_assert(resolver_resolve_class_name(
+          resolver, string_make_from_c("kotlin.Unit", arena), &return_type_i,
+          scratch_arena, arena));
     }
 
     resolver->current_function_i = node_i;
@@ -6516,7 +6570,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     node->type_i = resolver_add_type(resolver, &type, arena);
 
     // Inspect body (rhs).
-    ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+    resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     ty_end_scope(resolver);
 
@@ -6536,9 +6590,9 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
         node_i, arena);
 
     const u32 lhs_type_i =
-        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const u32 rhs_type_i =
-        ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
       const string_t lhs_type_human =
@@ -6574,7 +6628,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i =
-        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_KOTLIN_BOOLEAN) {
@@ -6589,7 +6643,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     return node->type_i =
-               ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+               resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
   }
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
@@ -6598,7 +6652,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i =
-        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_KOTLIN_BOOLEAN) {
@@ -6613,16 +6667,16 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     ty_begin_scope(resolver);
-    ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+    resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
-    pg_assert(ty_resolve_class_name(resolver,
-                                    string_make_from_c("kotlin.Unit", arena),
-                                    &node->type_i, scratch_arena, arena));
+    pg_assert(resolver_resolve_class_name(
+        resolver, string_make_from_c("kotlin.Unit", arena), &node->type_i,
+        scratch_arena, arena));
     return node->type_i;
   }
   case AST_KIND_STRING: {
-    pg_assert(ty_resolve_class_name(
+    pg_assert(resolver_resolve_class_name(
         resolver, string_make_from_c("java/lang/String", arena), &node->type_i,
         scratch_arena, arena));
     return node->type_i;
@@ -6640,7 +6694,8 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     const u32 variable_i = ty_declare_variable(
         resolver, par_token_to_string(resolver->parser, node->main_token_i),
         node_i, arena);
-    node->type_i = ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    node->type_i =
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     ty_mark_variable_as_initialized(resolver, variable_i);
 
     return node->type_i;
@@ -6652,47 +6707,47 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (string_eq_c(type_literal_string, "Int") ||
         string_eq_c(type_literal_string, "kotlin.Int")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Integer", arena),
           &node->type_i, scratch_arena, arena));
 
     } else if (string_eq_c(type_literal_string, "Boolean") ||
                string_eq_c(type_literal_string, "kotlin.Boolean")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Boolean", arena),
           &node->type_i, scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Byte") ||
                string_eq_c(type_literal_string, "kotlin.Byte")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Byte", arena), &node->type_i,
           scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Char") ||
                string_eq_c(type_literal_string, "kotlin.Char")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Char", arena), &node->type_i,
           scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Short") ||
                string_eq_c(type_literal_string, "kotlin.Short")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Short", arena), &node->type_i,
           scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Float") ||
                string_eq_c(type_literal_string, "kotlin.Float")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Float", arena), &node->type_i,
           scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Double") ||
                string_eq_c(type_literal_string, "kotlin.Double")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Double", arena),
           &node->type_i, scratch_arena, arena));
     } else if (string_eq_c(type_literal_string, "Long") ||
                string_eq_c(type_literal_string, "kotlin.Long")) {
-      pg_assert(ty_resolve_class_name(
+      pg_assert(resolver_resolve_class_name(
           resolver, string_make_from_c("java/lang/Long", arena), &node->type_i,
           scratch_arena, arena));
     } else {
-      const bool found = ty_resolve_class_name(
+      const bool found = resolver_resolve_class_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
       if (!found) {
         string_t error = string_reserve(256, arena);
@@ -6720,7 +6775,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     node->kind = AST_KIND_VAR_REFERENCE;
     node->lhs = resolver->variables[variable_i].var_definition_node_i;
 
-    return ty_resolve_node(resolver, node_i, scratch_arena, arena);
+    return resolver_resolve_node(resolver, node_i, scratch_arena, arena);
 
     break;
   }
@@ -6728,12 +6783,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_THEN_ELSE:
     ty_begin_scope(resolver);
     const u32 lhs_type_i =
-        ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
     ty_begin_scope(resolver);
     const u32 rhs_type_i =
-        ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
     ty_end_scope(resolver);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
@@ -6753,7 +6808,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     break;
 
   case AST_KIND_ASSIGNMENT:
-    ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
     if (!par_is_lvalue(resolver->parser, node->lhs)) {
       par_error(
@@ -6762,11 +6817,12 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     return node->type_i =
-               ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
+               resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
   case AST_KIND_RETURN: {
     pg_assert(resolver->current_function_i);
-    node->type_i = ty_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    node->type_i =
+        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const par_ast_node_t *const current_function =
         &resolver->parser->nodes[resolver->current_function_i];
     const ty_type_t *const function_type =
@@ -8029,8 +8085,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(gen->out_field_ref_i > 0);
     pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
-    pg_assert(type->java_class_name.value != NULL);
-    pg_assert(type->java_class_name.len > 0);
+    pg_assert(type->this_class_name.value != NULL);
+    pg_assert(type->this_class_name.len > 0);
 
     // FIXME
     //    cg_emit_get_static(gen, gen->out_field_ref_i,
@@ -8058,7 +8114,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         &class_file->constant_pool, &name_and_type, arena);
 
     const u16 class_name_i = cf_add_constant_string(
-        &class_file->constant_pool, type->java_class_name, arena);
+        &class_file->constant_pool, type->this_class_name, arena);
 
     const cf_constant_t class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                  .v = {.java_class_name = class_name_i}};
@@ -8895,7 +8951,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
         &class_file->constant_pool, &target_method_ref, arena);
 
     ty_type_method_t target_method_type = {0};
-    pg_assert(ty_resolve_class_name(
+    pg_assert(resolver_resolve_class_name(
         gen->resolver, string_make_from_c("kotlin.Unit", arena),
         &target_method_type.return_type_i, scratch_arena, arena));
 
@@ -8910,14 +8966,14 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     {
       const ty_type_t string_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
-          .java_class_name = string_make_from_c("java/lang/String", arena),
+          .this_class_name = string_make_from_c("java/lang/String", arena),
       };
       pg_array_append(gen->resolver->types, string_type, arena);
       const u32 string_type_i = pg_array_last_index(gen->resolver->types);
 
       const ty_type_t source_method_argument_types = {
           .kind = TYPE_JVM_ARRAY_REFERENCE,
-          .java_class_name = string_make_from_c("FIXME", arena),
+          .this_class_name = string_make_from_c("FIXME", arena),
           .v = {.array_type_i = string_type_i},
       };
       pg_array_append(gen->resolver->types, source_method_argument_types,
