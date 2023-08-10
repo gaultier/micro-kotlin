@@ -866,8 +866,8 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
-static u32 resolver_add_type(resolver_t *resolver,
-                                     const ty_type_t *new_type, arena_t *arena);
+static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
+                             arena_t *arena);
 
 static void stack_map_fill_same_frame(cf_stack_map_frame_t *stack_map_frame,
                                       u16 offset_delta) {
@@ -1395,8 +1395,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
     type->java_class_name = item_type.java_class_name;
 
-    type->v.array_type_i =
-        resolver_add_type(resolver, &item_type, arena);
+    type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -5238,13 +5237,11 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 // --------------------------------- Typing
 
 // TODO: Caching?
-static u32 resolver_add_type(resolver_t *resolver,
-                                     const ty_type_t *new_type,
-                                     arena_t *arena) {
+static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
+                             arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(new_type != NULL);
-
 
   pg_array_append(resolver->types, *new_type, arena);
   return pg_array_last_index(resolver->types);
@@ -6036,7 +6033,11 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
 
   // Check if cached first.
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
-    if (string_eq(class_name, resolver->types[i].java_class_name)) {
+    const ty_type_t *const type = &resolver->types[i];
+    if (type->kind == TYPE_KOTLIN_METHOD)
+      continue;
+
+    if (string_eq(class_name, type->java_class_name)) {
       *type_i = i;
       return true;
     }
