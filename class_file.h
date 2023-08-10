@@ -709,7 +709,7 @@ struct ty_type_t {
   u8 flag;
   pg_pad(1);
   u16 constant_pool_item_i;
-  u32 super_i;
+  u32 super_type_i;
   pg_pad(4);
 };
 
@@ -721,6 +721,153 @@ typedef struct {
   u16 handler_pc;
   u16 catch_type;
 } cf_exception_t;
+
+typedef enum __attribute__((packed)) {
+  AST_KIND_NONE,
+  AST_KIND_NUMBER,
+  AST_KIND_BOOL,
+  AST_KIND_BUILTIN_PRINTLN,
+  AST_KIND_FUNCTION_DEFINITION,
+  AST_KIND_FUNCTION_PARAMETER,
+  AST_KIND_TYPE,
+  AST_KIND_BINARY,
+  AST_KIND_ASSIGNMENT,
+  AST_KIND_THEN_ELSE,
+  AST_KIND_UNARY,
+  AST_KIND_VAR_DEFINITION,
+  AST_KIND_VAR_REFERENCE,
+  AST_KIND_CLASS_REFERENCE,
+  AST_KIND_IF,
+  AST_KIND_LIST,
+  AST_KIND_WHILE_LOOP,
+  AST_KIND_STRING,
+  AST_KIND_FIELD_ACCESS,
+  AST_KIND_UNRESOLVED_NAME,
+  AST_KIND_RETURN,
+  AST_KIND_MAX,
+} par_ast_node_kind_t;
+
+static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
+    [AST_KIND_NONE] = "NONE",
+    [AST_KIND_NUMBER] = "NUMBER",
+    [AST_KIND_BOOL] = "BOOL",
+    [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
+    [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
+    [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
+    [AST_KIND_TYPE] = "TYPE",
+    [AST_KIND_BINARY] = "BINARY",
+    [AST_KIND_ASSIGNMENT] = "ASSIGNMENT",
+    [AST_KIND_THEN_ELSE] = "THEN_ELSE",
+    [AST_KIND_UNARY] = "UNARY",
+    [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
+    [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
+    [AST_KIND_CLASS_REFERENCE] = "CLASS_REFERENCE",
+    [AST_KIND_IF] = "IF",
+    [AST_KIND_LIST] = "LIST",
+    [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
+    [AST_KIND_STRING] = "STRING",
+    [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
+    [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
+    [AST_KIND_RETURN] = "RETURN",
+};
+
+// TODO: compact fields.
+typedef struct {
+  u32 main_token_i;
+  u32 lhs;
+  u32 rhs;
+  u32 type_i; // TODO: should it be separate?
+  // TODO: should it be separate?
+  u32 *nodes; // AST_KIND_LIST
+  par_ast_node_kind_t kind;
+  pg_pad(1);
+  u16 flags;
+  u32 extra_data_i;
+} par_ast_node_t;
+
+typedef enum __attribute__((packed)) {
+  PARSER_STATE_OK,
+  PARSER_STATE_ERROR,
+  PARSER_STATE_PANIC,
+  PARSER_STATE_SYNCED,
+} par_parser_state_t;
+
+typedef enum __attribute__((packed)) {
+  TOKEN_KIND_NONE,
+  TOKEN_KIND_NUMBER,
+  TOKEN_KIND_PLUS,
+  TOKEN_KIND_MINUS,
+  TOKEN_KIND_STAR,
+  TOKEN_KIND_SLASH,
+  TOKEN_KIND_PERCENT,
+  TOKEN_KIND_AMPERSAND,
+  TOKEN_KIND_AMPERSAND_AMPERSAND,
+  TOKEN_KIND_PIPE,
+  TOKEN_KIND_PIPE_PIPE,
+  TOKEN_KIND_LEFT_PAREN,
+  TOKEN_KIND_RIGHT_PAREN,
+  TOKEN_KIND_LEFT_BRACE,
+  TOKEN_KIND_RIGHT_BRACE,
+  TOKEN_KIND_BUILTIN_PRINTLN,
+  TOKEN_KIND_KEYWORD_FUN,
+  TOKEN_KIND_KEYWORD_RETURN,
+  TOKEN_KIND_KEYWORD_FALSE,
+  TOKEN_KIND_KEYWORD_TRUE,
+  TOKEN_KIND_KEYWORD_VAR,
+  TOKEN_KIND_KEYWORD_IF,
+  TOKEN_KIND_KEYWORD_ELSE,
+  TOKEN_KIND_KEYWORD_WHILE,
+  TOKEN_KIND_IDENTIFIER,
+  TOKEN_KIND_EQUAL,
+  TOKEN_KIND_COMMA,
+  TOKEN_KIND_DOT,
+  TOKEN_KIND_COLON,
+  TOKEN_KIND_NOT,
+  TOKEN_KIND_EQUAL_EQUAL,
+  TOKEN_KIND_NOT_EQUAL,
+  TOKEN_KIND_LE,
+  TOKEN_KIND_LT,
+  TOKEN_KIND_GE,
+  TOKEN_KIND_GT,
+  TOKEN_KIND_STRING_LITERAL,
+} lex_token_kind_t;
+
+typedef struct {
+  u32 source_offset;
+  lex_token_kind_t kind;
+  pg_pad(3);
+} lex_token_t;
+
+typedef struct {
+  string_t file_path;
+  lex_token_t *tokens;
+  u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
+} lex_lexer_t;
+
+typedef struct {
+  char *buf;
+  lex_lexer_t *lexer;
+  par_ast_node_t *nodes;
+  u32 current_function_i;
+  pg_pad(4);
+  u32 buf_len;
+  u32 tokens_i;
+  par_parser_state_t state;
+  pg_pad(7);
+} par_parser_t;
+typedef struct {
+  par_parser_t *parser;
+  string_t *class_path_entries;
+  ty_variable_t *variables;
+  ty_type_t *types;
+  u32 current_type_i;
+  u32 scope_depth;
+  u32 current_function_i;
+  pg_pad(4);
+} resolver_t;
+
+static u32 resolver_add_type(resolver_t *resolver,
+                                     const ty_type_t *new_type, arena_t *arena);
 
 static void stack_map_fill_same_frame(cf_stack_map_frame_t *stack_map_frame,
                                       u16 offset_delta) {
@@ -1138,10 +1285,10 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   }
 }
 
-static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
-                                    ty_type_t **types, arena_t *arena) {
+static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
+                                    ty_type_t *type, arena_t *arena) {
+  pg_assert(resolver != NULL);
   pg_assert(type != NULL);
-  pg_assert(*types != NULL);
   pg_assert(arena != NULL);
 
   if (descriptor.len == 0)
@@ -1245,12 +1392,11 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
         .len = remaining.len - 1,
     };
     remaining =
-        cf_parse_descriptor(descriptor_remaining, &item_type, types, arena);
+        cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
     type->java_class_name = item_type.java_class_name;
 
-    // FIXME: Check cache before adding the type.
-    pg_array_append(*types, item_type, arena);
-    type->v.array_type_i = pg_array_last_index(*types);
+    type->v.array_type_i =
+        resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -1266,23 +1412,21 @@ static string_t cf_parse_descriptor(string_t descriptor, ty_type_t *type,
         break;
 
       ty_type_t argument_type = {0};
-      remaining = cf_parse_descriptor(remaining, &argument_type, types, arena);
-      // FIXME: Check cache before adding the type.
-      pg_array_append(*types, argument_type, arena);
-
-      pg_array_append(argument_types_i, pg_array_last_index(*types), arena);
+      remaining =
+          cf_parse_descriptor(resolver, remaining, &argument_type, arena);
+      resolver_add_type(resolver, &argument_type, arena);
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.value[0] = ')');
     string_drop_first_n(&remaining, 1);
 
     ty_type_t return_type = {0};
-    remaining = cf_parse_descriptor(remaining, &return_type, types, arena);
+    remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
     // FIXME: Check cache before adding the type.
-    pg_array_append(*types, return_type, arena);
 
     type->v.method.argument_types_i = argument_types_i;
-    type->v.method.return_type_i = pg_array_last_index(*types);
+    type->v.method.return_type_i =
+        resolver_add_type(resolver, &return_type, arena);
 
     return remaining;
   }
@@ -3088,58 +3232,6 @@ static void cf_read_jmod_and_jar_and_class_files_recursively(
 
 // ---------------------------------- Lexer
 
-typedef enum __attribute__((packed)) {
-  TOKEN_KIND_NONE,
-  TOKEN_KIND_NUMBER,
-  TOKEN_KIND_PLUS,
-  TOKEN_KIND_MINUS,
-  TOKEN_KIND_STAR,
-  TOKEN_KIND_SLASH,
-  TOKEN_KIND_PERCENT,
-  TOKEN_KIND_AMPERSAND,
-  TOKEN_KIND_AMPERSAND_AMPERSAND,
-  TOKEN_KIND_PIPE,
-  TOKEN_KIND_PIPE_PIPE,
-  TOKEN_KIND_LEFT_PAREN,
-  TOKEN_KIND_RIGHT_PAREN,
-  TOKEN_KIND_LEFT_BRACE,
-  TOKEN_KIND_RIGHT_BRACE,
-  TOKEN_KIND_BUILTIN_PRINTLN,
-  TOKEN_KIND_KEYWORD_FUN,
-  TOKEN_KIND_KEYWORD_RETURN,
-  TOKEN_KIND_KEYWORD_FALSE,
-  TOKEN_KIND_KEYWORD_TRUE,
-  TOKEN_KIND_KEYWORD_VAR,
-  TOKEN_KIND_KEYWORD_IF,
-  TOKEN_KIND_KEYWORD_ELSE,
-  TOKEN_KIND_KEYWORD_WHILE,
-  TOKEN_KIND_IDENTIFIER,
-  TOKEN_KIND_EQUAL,
-  TOKEN_KIND_COMMA,
-  TOKEN_KIND_DOT,
-  TOKEN_KIND_COLON,
-  TOKEN_KIND_NOT,
-  TOKEN_KIND_EQUAL_EQUAL,
-  TOKEN_KIND_NOT_EQUAL,
-  TOKEN_KIND_LE,
-  TOKEN_KIND_LT,
-  TOKEN_KIND_GE,
-  TOKEN_KIND_GT,
-  TOKEN_KIND_STRING_LITERAL,
-} lex_token_kind_t;
-
-typedef struct {
-  u32 source_offset;
-  lex_token_kind_t kind;
-  pg_pad(3);
-} lex_token_t;
-
-typedef struct {
-  string_t file_path;
-  lex_token_t *tokens;
-  u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
-} lex_lexer_t;
-
 static u32 lex_get_current_offset(const char *buf, u32 buf_len,
                                   const char *const *current) {
   pg_assert(buf != NULL);
@@ -3743,88 +3835,6 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 }
 
 // ------------------------------ Parser
-
-typedef enum __attribute__((packed)) {
-  AST_KIND_NONE,
-  AST_KIND_NUMBER,
-  AST_KIND_BOOL,
-  AST_KIND_BUILTIN_PRINTLN,
-  AST_KIND_FUNCTION_DEFINITION,
-  AST_KIND_FUNCTION_PARAMETER,
-  AST_KIND_TYPE,
-  AST_KIND_BINARY,
-  AST_KIND_ASSIGNMENT,
-  AST_KIND_THEN_ELSE,
-  AST_KIND_UNARY,
-  AST_KIND_VAR_DEFINITION,
-  AST_KIND_VAR_REFERENCE,
-  AST_KIND_CLASS_REFERENCE,
-  AST_KIND_IF,
-  AST_KIND_LIST,
-  AST_KIND_WHILE_LOOP,
-  AST_KIND_STRING,
-  AST_KIND_FIELD_ACCESS,
-  AST_KIND_UNRESOLVED_NAME,
-  AST_KIND_RETURN,
-  AST_KIND_MAX,
-} par_ast_node_kind_t;
-
-static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
-    [AST_KIND_NONE] = "NONE",
-    [AST_KIND_NUMBER] = "NUMBER",
-    [AST_KIND_BOOL] = "BOOL",
-    [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
-    [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
-    [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
-    [AST_KIND_TYPE] = "TYPE",
-    [AST_KIND_BINARY] = "BINARY",
-    [AST_KIND_ASSIGNMENT] = "ASSIGNMENT",
-    [AST_KIND_THEN_ELSE] = "THEN_ELSE",
-    [AST_KIND_UNARY] = "UNARY",
-    [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
-    [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
-    [AST_KIND_CLASS_REFERENCE] = "CLASS_REFERENCE",
-    [AST_KIND_IF] = "IF",
-    [AST_KIND_LIST] = "LIST",
-    [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
-    [AST_KIND_STRING] = "STRING",
-    [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
-    [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
-    [AST_KIND_RETURN] = "RETURN",
-};
-
-// TODO: compact fields.
-typedef struct {
-  u32 main_token_i;
-  u32 lhs;
-  u32 rhs;
-  u32 type_i; // TODO: should it be separate?
-  // TODO: should it be separate?
-  u32 *nodes; // AST_KIND_LIST
-  par_ast_node_kind_t kind;
-  pg_pad(1);
-  u16 flags;
-  u32 extra_data_i;
-} par_ast_node_t;
-
-typedef enum __attribute__((packed)) {
-  PARSER_STATE_OK,
-  PARSER_STATE_ERROR,
-  PARSER_STATE_PANIC,
-  PARSER_STATE_SYNCED,
-} par_parser_state_t;
-
-typedef struct {
-  char *buf;
-  lex_lexer_t *lexer;
-  par_ast_node_t *nodes;
-  u32 current_function_i;
-  pg_pad(4);
-  u32 buf_len;
-  u32 tokens_i;
-  par_parser_state_t state;
-  pg_pad(7);
-} par_parser_t;
 
 static u32 par_add_node(par_parser_t *parser, const par_ast_node_t *node,
                         arena_t *arena) {
@@ -5227,33 +5237,17 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
-typedef struct {
-  string_t this_class_name;
-  string_t field_name;
-  u32 type_i;
-  u16 access_flags;
-  pg_pad(2);
-} resolver_class_field_t;
+// TODO: Caching?
+static u32 resolver_add_type(resolver_t *resolver,
+                                     const ty_type_t *new_type,
+                                     arena_t *arena) {
+  pg_assert(resolver != NULL);
+  pg_assert(resolver->types != NULL);
+  pg_assert(new_type != NULL);
 
-typedef struct {
-  par_parser_t *parser;
-  string_t *class_path_entries;
-  ty_variable_t *variables;
-  ty_type_t *types;
-  u32 current_type_i;
-  u32 scope_depth;
-  u32 current_function_i;
-  pg_pad(4);
-} resolver_t;
 
-static u32 ty_add_type(ty_type_t **types, const ty_type_t *type,
-                       arena_t *arena) {
-  pg_assert(types != NULL);
-  pg_assert(type != NULL);
-
-  // TODO: Deduplicate.
-  pg_array_append(*types, *type, arena);
-  return pg_array_last_index(*types);
+  pg_array_append(resolver->types, *new_type, arena);
+  return pg_array_last_index(resolver->types);
 }
 
 static void resolver_load_methods_from_class_file(
@@ -5272,13 +5266,13 @@ static void resolver_load_methods_from_class_file(
         &class_file->constant_pool, method->name);
 
     ty_type_t type = {.java_class_name = this_class_name};
-    cf_parse_descriptor(descriptor, &type, &resolver->types, arena);
+    cf_parse_descriptor(resolver, descriptor, &type, arena);
     pg_assert(type.kind == TYPE_KOTLIN_METHOD);
 
     type.v.method.name = string_make(name, arena);
-    type.v.method.access_flags=method->access_flags;
+    type.v.method.access_flags = method->access_flags;
 
-    ty_add_type(&resolver->types, &type, arena);
+    resolver_add_type(resolver, &type, arena);
   }
 }
 
@@ -5489,7 +5483,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
           //              &class_file.constant_pool,
           //              constant_super->v.string_utf8_i);
         }
-        ty_add_type(&resolver->types, &type, arena);
+        resolver_add_type(resolver, &type, arena);
         resolver_load_methods_from_class_file(resolver, &class_file, arena);
 
         LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
@@ -5530,7 +5524,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
             .java_class_name = string_make(class_file.class_name, arena),
         };
-        ty_add_type(&resolver->types, &type, arena);
+        resolver_add_type(resolver, &type, arena);
 
         resolver_load_methods_from_class_file(resolver, &class_file, arena);
 
@@ -6108,7 +6102,7 @@ static bool ty_resolve_class_name(resolver_t *resolver, string_t class_name,
       else if (string_eq_c(class_name, "java/lang/Double"))
         this_type.kind = TYPE_KOTLIN_DOUBLE;
 
-      *type_i = ty_add_type(&resolver->types, &this_type, arena);
+      *type_i = resolver_add_type(resolver, &this_type, arena);
 
       return true;
     }
@@ -6308,7 +6302,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
                     arena);
 
     const u32 println_type_exact_i =
-        ty_add_type(&resolver->types, &println_type_exact, arena);
+        resolver_add_type(resolver, &println_type_exact, arena);
 
     u32 picked_method_type_i = 0;
     {
@@ -6519,7 +6513,7 @@ static u32 ty_resolve_node(resolver_t *resolver, u32 node_i,
 
     // TODO: Check that if the return type is not Unit, there was a return.
     // Ideally we would have a CFG to check that every path returns a value.
-    node->type_i = ty_add_type(&resolver->types, &type, arena);
+    node->type_i = resolver_add_type(resolver, &type, arena);
 
     // Inspect body (rhs).
     ty_resolve_node(resolver, node->rhs, scratch_arena, arena);
