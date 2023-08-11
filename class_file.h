@@ -1444,6 +1444,8 @@ struct cf_attribute_t {
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
     cf_stack_map_frame_t *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
+    cf_annotation_t *
+        runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
   } v;
   u16 name;
   enum __attribute__((packed)) cf_attribute_kind_t {
@@ -1451,6 +1453,7 @@ struct cf_attribute_t {
     ATTRIBUTE_KIND_CODE,
     ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
     ATTRIBUTE_KIND_STACK_MAP_TABLE,
+    ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
   } kind;
   pg_pad(5);
 };
@@ -1994,33 +1997,111 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
   pg_assert(read_bytes == attribute_len);
 }
 
+static void cf_buf_read_annotation(char *buf, u64 buf_len, char **current,
+                                   cf_class_file_t *class_file,
+                                   cf_annotation_t *annotation, arena_t *arena);
+
 static void cf_buf_read_element_value(char *buf, u64 buf_len, char **current,
                                       cf_class_file_t *class_file,
-                                      arena_t *arena) {}
+                                      cf_element_value_t *element_value,
+                                      arena_t *arena) {
+  element_value->tag = buf_read_u8(buf, buf_len, current);
+  switch (element_value->tag) {
+  case 'B':
+  case 'C':
+  case 'D':
+  case 'I':
+  case 'J':
+  case 'S':
+  case 'Z':
+  case 's':
+    element_value->v.const_value_index = buf_read_be_u16(buf, buf_len, current);
+    break;
+
+  case 'e':
+    element_value->v.enum_const_value.type_name_index =
+        buf_read_be_u16(buf, buf_len, current);
+    element_value->v.enum_const_value.const_name_index =
+        buf_read_be_u16(buf, buf_len, current);
+    break;
+
+  case 'c':
+    element_value->v.class_info_index = buf_read_be_u16(buf, buf_len, current);
+    break;
+
+  case '@': {
+    element_value->v.annotation_value =
+        arena_alloc(arena, 1, sizeof(cf_annotation_t));
+
+    cf_buf_read_annotation(buf, buf_len, current, class_file,
+                           element_value->v.annotation_value, arena);
+
+    break;
+  }
+
+  case '[': {
+    const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+    pg_array_init_reserve(element_value->v.array_value, table_len, arena);
+
+    for (u64 i = 0; i < table_len; i++) {
+      cf_element_value_t element_value_child = {0};
+      cf_buf_read_element_value(buf, buf_len, current, class_file,
+                                &element_value_child, arena);
+
+      pg_array_append(element_value->v.array_value, element_value_child, arena);
+    }
+    break;
+  }
+
+  default:
+    pg_assert(0 && "Unexpected value");
+  }
+}
 
 static void cf_buf_read_annotation(char *buf, u64 buf_len, char **current,
                                    cf_class_file_t *class_file,
+                                   cf_annotation_t *annotation,
                                    arena_t *arena) {
 
-  const u16 type_index = buf_read_be_u16(buf, buf_len, current);
+  annotation->type_index = buf_read_be_u16(buf, buf_len, current);
   const u16 num_element_value_pairs = buf_read_be_u16(buf, buf_len, current);
 
+  pg_array_init_reserve(annotation->element_value_pairs,
+                        num_element_value_pairs, arena);
+
   for (u64 i = 0; i < num_element_value_pairs; i++) {
-    const u16 element_name_index = buf_read_be_u16(buf, buf_len, current);
-    cf_buf_read_element_value(buf, buf_len, current, class_file, arena);
+    cf_element_value_pair_t element_value_pair = {
+        .element_name_index = buf_read_be_u16(buf, buf_len, current),
+    };
+    cf_buf_read_element_value(buf, buf_len, current, class_file,
+                              &element_value_pair.element_value, arena);
+
+    pg_array_append(annotation->element_value_pairs, element_value_pair, arena);
   }
 }
 
 static void cf_buf_read_runtime_invisible_annotations_attribute(
     char *buf, u64 buf_len, char **current, cf_class_file_t *class_file,
-    u32 attribute_len, arena_t *arena) {
+    u32 attribute_len, cf_attribute_t **attributes, arena_t *arena) {
 
   const char *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+
+  cf_attribute_t attribute = {
+      .kind = ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
+  };
+  pg_array_init_reserve(attribute.v.runtime_invisible_annotations, table_len,
+                        arena);
+
   for (u64 i = 0; i < table_len; i++) {
-    cf_buf_read_annotation(buf, buf_len, current, class_file, arena);
+    cf_annotation_t annotation = {0};
+    cf_buf_read_annotation(buf, buf_len, current, class_file, &annotation,
+                           arena);
+    pg_array_append(attribute.v.runtime_invisible_annotations, annotation,
+                    arena);
   }
+  pg_array_append(*attributes, attribute, arena);
 
   const char *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -2091,7 +2172,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
   } else if (string_eq_c(attribute_name, "RuntimeVisibleAnnotations")) {
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
-    *current += size; // TODO
+    cf_buf_read_runtime_invisible_annotations_attribute(buf,buf_len,current,class_file,size,attributes,arena);
   } else if (string_eq_c(attribute_name,
                          "RuntimeVisibleParameterAnnotations")) {
     *current += size; // TODO
@@ -2797,6 +2878,9 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     }
 
     return size;
+  }
+  case ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS: {
+    pg_assert(0 && "todo");
   }
   }
   pg_assert(0 && "unreachable");
