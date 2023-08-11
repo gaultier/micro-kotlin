@@ -878,87 +878,6 @@ typedef struct {
 static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
                              arena_t *arena);
 
-static void stack_map_fill_same_frame(cf_stack_map_frame_t *stack_map_frame,
-                                      u16 offset_delta) {
-
-  pg_assert(stack_map_frame != NULL);
-
-  pg_assert(offset_delta <= 63);
-  pg_assert(offset_delta <= stack_map_frame->pc);
-
-  stack_map_frame->kind = offset_delta;
-  stack_map_frame->offset_delta = offset_delta;
-}
-
-static void stack_map_fill_full_frame(cf_stack_map_frame_t *stack_map_frame,
-                                      u16 offset_delta) {
-
-  pg_assert(stack_map_frame != NULL);
-
-  stack_map_frame->kind = 255;
-  stack_map_frame->offset_delta = offset_delta;
-}
-
-// static void stack_map_add_chop_frame(cf_stack_map_frame_t **stack_map_frames,
-//                                      u8 chopped_locals_count,
-//                                      u16 current_offset, u16 offset_delta,
-//                                      arena_t *arena) {
-//   pg_assert(stack_map_frames != NULL);
-//   pg_assert(*stack_map_frames != NULL);
-//
-//   pg_assert(offset_delta > 0);
-//   pg_assert(offset_delta <= current_offset);
-//
-//   const cf_stack_map_frame_t stack_map_frame = {
-//       .kind = 251 - chopped_locals_count,
-//       .offset_delta = offset_delta,
-//       .pc = current_offset,
-//   };
-//   pg_assert(stack_map_frame.kind >= 248);
-//   pg_assert(stack_map_frame.kind <= 250);
-//   pg_array_append(*stack_map_frames, stack_map_frame, arena);
-// }
-//
-// static void stack_map_add_append_frame(cf_stack_map_frame_t
-// **stack_map_frames,
-//                                        u8 added_locals_count,
-//                                        cf_verification_info_t
-//                                        verification_info, u16 current_offset,
-//                                        u16 offset_delta, arena_t *arena) {
-//   pg_assert(stack_map_frames != NULL);
-//   pg_assert(*stack_map_frames != NULL);
-//
-//   pg_assert(offset_delta > 0);
-//   pg_assert(offset_delta <= current_offset);
-//
-//   cf_stack_map_frame_t stack_map_frame = {
-//       .kind = 251 + added_locals_count,
-//       .offset_delta = offset_delta,
-//       .pc = current_offset,
-//   };
-//   pg_array_init_reserve(stack_map_frame.locals, 1, arena);
-//   pg_array_append(stack_map_frame.locals, verification_info, arena);
-//
-//   pg_assert(stack_map_frame.kind >= 252);
-//   pg_assert(stack_map_frame.kind <= 254);
-//   pg_array_append(*stack_map_frames, stack_map_frame, arena);
-//
-//   LOG("fact=stack_map_add_append_frame pc=%u", current_offset);
-// }
-
-static void stack_map_fill_same_locals_1_stack_item_frame(
-    cf_stack_map_frame_t *stack_map_frame, u16 offset_delta) {
-  pg_assert(stack_map_frame != NULL);
-
-  pg_assert(offset_delta > 0);
-  pg_assert(offset_delta <= stack_map_frame->pc);
-
-  stack_map_frame->kind = offset_delta + 64;
-  stack_map_frame->offset_delta = offset_delta;
-
-  pg_assert(stack_map_frame->kind >= 64);
-  pg_assert(stack_map_frame->kind <= 127);
-}
 
 static u16
 cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
@@ -7985,14 +7904,18 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
 
     if (frame->stack_physical_count == 0 && locals_delta == 0 &&
         offset_delta <= 63) {
-      stack_map_fill_same_frame(stack_map_frame, offset_delta);
+      stack_map_frame->kind = offset_delta;
+      stack_map_frame->offset_delta = offset_delta;
     } else if (frame->stack_physical_count == 0 && locals_delta == 0 &&
                offset_delta > 63) {
       pg_assert(0 && "todo"); // same_frame_extended
     } else if (frame->stack_physical_count == 1 && locals_delta == 0 &&
                offset_delta <= 63) {
-      stack_map_fill_same_locals_1_stack_item_frame(stack_map_frame,
-                                                    offset_delta);
+      stack_map_frame->kind = offset_delta + 64;
+      stack_map_frame->offset_delta = offset_delta;
+
+      pg_assert(stack_map_frame->kind >= 64);
+      pg_assert(stack_map_frame->kind <= 127);
     } else if (frame->stack_physical_count == 1 && locals_delta == 0 &&
                offset_delta <= 63) {
       pg_assert(0 && "todo"); // same_locals_1_stack_item_frame_extended
@@ -8006,7 +7929,8 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
                offset_delta <= 3) {
       pg_assert(0 && "todo"); // chop_frame
     } else {
-      stack_map_fill_full_frame(stack_map_frame, offset_delta);
+      stack_map_frame->kind = 255;
+      stack_map_frame->offset_delta = offset_delta;
     }
   }
 }
