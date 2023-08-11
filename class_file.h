@@ -2172,7 +2172,8 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
   } else if (string_eq_c(attribute_name, "RuntimeVisibleAnnotations")) {
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "RuntimeInvisibleAnnotations")) {
-    cf_buf_read_runtime_invisible_annotations_attribute(buf,buf_len,current,class_file,size,attributes,arena);
+    cf_buf_read_runtime_invisible_annotations_attribute(
+        buf, buf_len, current, class_file, size, attributes, arena);
   } else if (string_eq_c(attribute_name,
                          "RuntimeVisibleParameterAnnotations")) {
     *current += size; // TODO
@@ -5311,7 +5312,7 @@ static void resolver_load_methods_from_class_file(
 
     const u32 type_i = resolver_add_type(resolver, &type, arena);
 
-    {
+    if(log_verbose){
       arena_t tmp_arena = *arena;
       const string_t human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
