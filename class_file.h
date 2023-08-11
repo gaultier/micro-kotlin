@@ -5338,6 +5338,8 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flag |= TYPE_FLAG_INLINE_ONLY;
+
+      // TODO: Save the bytecode somewhere.
     }
 
     const u32 type_i = resolver_add_type(resolver, &type, arena);
