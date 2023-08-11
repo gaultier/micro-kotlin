@@ -700,6 +700,7 @@ typedef enum {
   TYPE_FLAG_KOTLIN_LONG = 1 << 7,
   TYPE_FLAG_KOTLIN_DOUBLE = 1 << 8,
   TYPE_FLAG_KOTLIN_STRING = 1 << 9,
+  TYPE_FLAG_INLINE_ONLY = 1 << 10,
 } ty_type_flag_t;
 
 struct ty_type_t {
@@ -1372,6 +1373,39 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   __builtin_unreachable();
 }
 
+struct cf_annotation_t;
+
+typedef struct {
+  u16 type_name_index;
+  u16 const_name_index;
+} cf_enum_const_value_t;
+
+struct cf_element_value_t {
+  union {
+    u16 const_value_index;
+    cf_enum_const_value_t enum_const_value;
+    u16 class_info_index;
+    struct cf_annotation_t *annotation_value;
+    struct cf_element_value_t *array_value;
+  } v;
+  u8 tag;
+  pg_pad(7);
+};
+typedef struct cf_element_value_t cf_element_value_t;
+
+typedef struct {
+  u16 element_name_index;
+  pg_pad(6);
+  cf_element_value_t element_value;
+} cf_element_value_pair_t;
+
+struct cf_annotation_t {
+  u16 type_index;
+  pg_pad(6);
+  cf_element_value_pair_t *element_value_pairs;
+};
+typedef struct cf_annotation_t cf_annotation_t;
+
 typedef struct cf_attribute_t cf_attribute_t;
 
 typedef struct {
@@ -1955,6 +1989,39 @@ static void cf_buf_read_inner_classes_attribute(char *buf, u64 buf_len,
 
     // TODO store.
   }
+  const char *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == attribute_len);
+}
+
+static void cf_buf_read_element_value(char *buf, u64 buf_len, char **current,
+                                      cf_class_file_t *class_file,
+                                      arena_t *arena) {}
+
+static void cf_buf_read_annotation(char *buf, u64 buf_len, char **current,
+                                   cf_class_file_t *class_file,
+                                   arena_t *arena) {
+
+  const u16 type_index = buf_read_be_u16(buf, buf_len, current);
+  const u16 num_element_value_pairs = buf_read_be_u16(buf, buf_len, current);
+
+  for (u64 i = 0; i < num_element_value_pairs; i++) {
+    const u16 element_name_index = buf_read_be_u16(buf, buf_len, current);
+    cf_buf_read_element_value(buf, buf_len, current, class_file, arena);
+  }
+}
+
+static void cf_buf_read_runtime_invisible_annotations_attribute(
+    char *buf, u64 buf_len, char **current, cf_class_file_t *class_file,
+    u32 attribute_len, arena_t *arena) {
+
+  const char *const current_start = *current;
+
+  const u16 table_len = buf_read_be_u16(buf, buf_len, current);
+  for (u64 i = 0; i < table_len; i++) {
+    cf_buf_read_annotation(buf, buf_len, current, class_file, arena);
+  }
+
   const char *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
@@ -6786,6 +6853,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   }
   __builtin_unreachable();
 }
+
+// --------------------------------- Inlining
 
 // --------------------------------- Code generation
 
