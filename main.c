@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
 
     const ty_type_t unit_type = {
         .kind = TYPE_JVM_VOID,
-        .flag=TYPE_FLAG_KOTLIN_UNIT,
+        .flag = TYPE_FLAG_KOTLIN_UNIT,
         .this_class_name = string_make_from_c("kotlin.Unit", &arena),
     };
     pg_array_append(resolver.types, unit_type, &arena);
@@ -175,7 +175,6 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    lo_lower_types(&resolver, &arena);
     // Debug.
     {
       LOG("------ After lowering%s", "");

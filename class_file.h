@@ -6787,19 +6787,6 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   __builtin_unreachable();
 }
 
-void lo_lower_types(resolver_t *resolver, arena_t *arena) {
-  pg_assert(resolver != NULL);
-  pg_assert(resolver->types != NULL);
-
-  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
-    ty_type_t *const type = &resolver->types[i];
-    if (type->kind == TYPE_METHOD) {
-      string_t method_descriptor = string_reserve(64, arena);
-      cf_fill_descriptor_string(resolver->types, i, &method_descriptor, arena);
-    }
-  }
-}
-
 // --------------------------------- Code generation
 
 typedef struct {
