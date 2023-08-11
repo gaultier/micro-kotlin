@@ -197,7 +197,8 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("types=%lu", pg_array_len(resolver.types));
+    LOG("types=%lu sizeof(ty_type_t)=%lu", pg_array_len(resolver.types),
+        sizeof(ty_type_t));
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
@@ -228,7 +229,7 @@ int main(int argc, char *argv[]) {
                                                class_file.class_file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                          &tmp_arena);
+                             &tmp_arena);
     }
   }
   LOG("arena=%lu", arena.current_offset);

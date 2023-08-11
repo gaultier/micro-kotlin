@@ -3163,7 +3163,6 @@ cf_get_this_class_name(const cf_class_file_t *class_file) {
                                          this_class_i);
 }
 
-
 // ---------------------------------- Lexer
 
 static u32 lex_get_current_offset(const char *buf, u32 buf_len,
@@ -6207,9 +6206,14 @@ static void resolver_load_standard_types(resolver_t *resolver,
                     arena);
 
   u32 dummy = 0;
-  pg_assert(resolver_resolve_class_name(
-      resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
-      scratch_arena, arena));
+  if (!resolver_resolve_class_name(
+          resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
+          scratch_arena, arena)) {
+    fprintf(stderr,
+            "Could not load the kotlin stdlib classes. Please provide the CLI "
+            "option manually e.g.: -c /usr/share/java/kotlin-stdlib.jar\n");
+    exit(ENOENT);
+  }
 }
 
 static void ty_begin_scope(resolver_t *resolver) {
