@@ -155,15 +155,10 @@ int main(int argc, char *argv[]) {
     pg_array_append(resolver.types, unit_type, &arena);
 
     resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
-
     arena_clear(&scratch_arena);
 
-    u32 string_type_i = 0;
-    pg_assert(resolver_resolve_class_name(
-        &resolver, string_make_from_c_no_alloc("java/lang/String"),
-        &string_type_i, &scratch_arena, &arena));
-
     resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
+    arena_clear(&scratch_arena);
 
     // Debug types.
     {
