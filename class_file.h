@@ -5286,6 +5286,30 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
                                                   u32 function_i,
                                                   arena_t *arena);
 
+static bool
+cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
+                                     const cf_method_t *method) {
+
+  for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
+    const cf_attribute_t *const attribute = &method->attributes[i];
+    if (attribute->kind != ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS)
+      continue;
+
+    for (u64 j = 0;
+         j < pg_array_len(attribute->v.runtime_invisible_annotations); j++) {
+      const cf_annotation_t *const annotation =
+          &attribute->v.runtime_invisible_annotations[j];
+
+      const string_t descriptor = cf_constant_array_get_as_string(
+          &class_file->constant_pool, annotation->type_index);
+
+      if (string_eq_c(descriptor, "Lkotlin/internal/InlineOnly;"))
+        return true;
+    }
+  }
+  return false;
+}
+
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, u32 this_class_type_i,
     const cf_class_file_t *class_file, arena_t *arena) {
@@ -5310,9 +5334,15 @@ static void resolver_load_methods_from_class_file(
     type.v.method.access_flags = method->access_flags;
     type.v.method.this_class_type_i = this_class_type_i;
 
+    if (cf_method_has_inline_only_annotation(class_file, method)) {
+      type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
+      type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
+      type.flag |= TYPE_FLAG_INLINE_ONLY;
+    }
+
     const u32 type_i = resolver_add_type(resolver, &type, arena);
 
-    if(log_verbose){
+    if (log_verbose) {
       arena_t tmp_arena = *arena;
       const string_t human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
