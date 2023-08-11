@@ -175,12 +175,6 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    // Debug.
-    {
-      LOG("------ After lowering%s", "");
-      arena_t tmp_arena = arena;
-      resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
-    }
 
     // Emit bytecode.
     cf_class_file_t class_file = {
