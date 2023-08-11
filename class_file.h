@@ -878,7 +878,6 @@ typedef struct {
 static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
                              arena_t *arena);
 
-
 static u16
 cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
   switch (kind) {
@@ -1372,60 +1371,6 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   __builtin_unreachable();
 }
-
-#if 0
-static void cg_emit_invoke_special(u8 **code, u16 method_ref_i,
-                                  cg_frame_t *frame,
-                                  const par_type_method_t *method_type,
-                                  arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(*code != NULL);
-  pg_assert(method_ref_i > 0);
-  pg_assert(frame != NULL);
-  pg_assert(frame->stack != NULL);
-  pg_assert(pg_array_len(frame->stack) <= UINT16_MAX);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_INVOKE_SPECIAL, arena);
-  cf_code_array_push_u16(code, method_ref_i, arena);
-
-  for (u8 i = 0; i < 1 + method_type->argument_count; i++)
-    cg_frame_stack_pop(frame);
-}
-
-static void cg_emit_call_superclass_constructor(
-    u8 **code, u16 super_class_constructor_i, cg_frame_t *frame,
-    const ty_type_t *constructor_type, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(super_class_constructor_i > 0);
-  pg_assert(frame != NULL);
-  pg_assert(constructor_type != NULL);
-  pg_assert(constructor_type->kind == TYPE_CONSTRUCTOR);
-
-  cf_code_array_push_u8(code, BYTECODE_ALOAD_0,
-                        arena); // TODO: move the responsability to the caller?
-
-  const par_type_method_t *const method_type = &constructor_type->v.method;
-  pg_assert(method_type != NULL);
-  cg_emit_invoke_special(code, super_class_constructor_i, frame, method_type,
-                        arena);
-}
-
-static void cg_emit_i2l(u8 **code, cg_frame_t *frame, arena_t *arena) {
-  pg_assert(code != NULL);
-  pg_assert(frame != NULL);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(code, BYTECODE_I2L, arena);
-
-  cg_frame_stack_pop(frame);
-
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_TOP}, arena);
-  cg_frame_stack_push(
-      frame, (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG}, arena);
-}
-#endif
 
 typedef struct cf_attribute_t cf_attribute_t;
 
@@ -7253,80 +7198,6 @@ static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-#if 0
-static void cg_emit_bitwise_and(cg_generator_t *gen, arena_t *arena) {
-pg_assert(gen != NULL);
-pg_assert(gen->code != NULL);
-pg_assert(gen->code->code != NULL);
-pg_assert(gen->frame != NULL);
-pg_assert(gen->frame->stack != NULL);
-pg_assert(pg_array_len(gen->frame->stack) >= 2);
-pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-
-const cf_verification_info_kind_t kind_a =
-    gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
-
-const cf_verification_info_kind_t kind_b =
-    gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
-
-pg_assert(kind_a == kind_b);
-
-switch (kind_a) {
-case VERIFICATION_INFO_INT:
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_IAND, arena);
-  break;
-case VERIFICATION_INFO_LONG:
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_LAND, arena);
-  break;
-default:
-  pg_assert(0 && "todo");
-}
-
-cg_frame_stack_pop(gen->frame);
-cg_frame_stack_pop(gen->frame);
-cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
-                    arena);
-}
-
-static void cg_emit_bitwise_or(cg_generator_t *gen, arena_t *arena) {
-pg_assert(gen != NULL);
-pg_assert(gen->code != NULL);
-pg_assert(gen->code->code != NULL);
-pg_assert(gen->frame != NULL);
-pg_assert(gen->frame->stack != NULL);
-pg_assert(pg_array_len(gen->frame->stack) >= 2);
-pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-
-const cf_verification_info_kind_t kind_a =
-    gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-const u8 word_count = cf_verification_info_kind_word_count(kind_a);
-pg_assert(pg_array_len(gen->frame->stack) >= 2 * word_count);
-
-const cf_verification_info_kind_t kind_b =
-    gen->frame->stack[pg_array_len(gen->frame->stack) - 1 - word_count].kind;
-
-pg_assert(kind_a == kind_b);
-
-switch (kind_a) {
-case VERIFICATION_INFO_INT:
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_IOR, arena);
-  break;
-case VERIFICATION_INFO_LONG:
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_LOR, arena);
-  break;
-default:
-  pg_assert(0 && "todo");
-}
-
-cg_frame_stack_pop(gen->frame);
-cg_frame_stack_pop(gen->frame);
-cg_frame_stack_push(gen->frame, (cf_verification_info_t){.kind = kind_a},
-                    arena);
-}
-#endif
-
 static void
 cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
                                   cf_verification_info_t verification_info,
@@ -8566,66 +8437,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   }
   case AST_KIND_FIELD_ACCESS: {
     pg_assert(0 && "todo");
-#if 0
-    const par_ast_node_t *const lhs = &parser->nodes[node->lhs];
-
-    // FIXME: For now, this is the only kind of field access that's supported
-    // e.g. `System.out`.
-
-
-    const cf_class_file_t *field_class_file =
-        &parser->class_files[type->class_file_i];
-    const cf_field_t external_field_ref =
-        field_class_file->fields[type->field_i];
-    const string_t external_field_descriptor = cf_constant_array_get_as_string(
-        &field_class_file->constant_pool, external_field_ref.descriptor);
-    const string_t field_name_string = cf_constant_array_get_as_string(
-        &field_class_file->constant_pool, external_field_ref.name);
-
-    const cf_constant_t field_name = {.kind = CONSTANT_POOL_KIND_UTF8,
-                                      .v = {.s = field_name_string}};
-    const u16 field_name_i =
-        cf_constant_array_push(&class_file->constant_pool, &field_name, arena);
-
-    const cf_constant_t field_descriptor = {
-        .kind = CONSTANT_POOL_KIND_UTF8, .v = {.s = external_field_descriptor}};
-    const u16 field_descriptor_i = cf_constant_array_push(
-        &class_file->constant_pool, &field_descriptor, arena);
-
-    const cf_constant_t field_name_and_type = {
-        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {
-                  .name = field_name_i,
-                  .descriptor = field_descriptor_i,
-              }}};
-    const u16 field_name_and_type_i = cf_constant_array_push(
-        &class_file->constant_pool, &field_name_and_type, arena);
-
-    pg_assert(lhs->kind == AST_KIND_CLASS_REFERENCE);
-    const ty_type_t *const lhs_type = &gen->resolver->types[lhs->type_i];
-    pg_assert(lhs_type->class_file_i != (u32)-1);
-    pg_assert(lhs_type->constant_pool_item_i != (u16)-1);
-    pg_assert(lhs_type->constant_pool_item_i > 0);
-
-    const cf_class_file_t *lhs_class_file =
-        &parser->class_files[lhs_type->class_file_i];
-    const string_t lhs_class_name = cf_constant_array_get_as_string(
-        &lhs_class_file->constant_pool, lhs_type->constant_pool_item_i);
-    const u16 lhs_class_name_i =
-        cg_add_class_name_in_constant_pool(class_file, lhs_class_name, arena);
-
-    const cf_constant_t field_ref = {
-        .kind = CONSTANT_POOL_KIND_FIELD_REF,
-        .v = {.field_ref = {
-                  .name = lhs_class_name_i,
-                  .descriptor = field_name_and_type_i,
-              }}};
-    const u16 field_ref_i =
-        cf_constant_array_push(&class_file->constant_pool, &field_ref, arena);
-
-    cg_emit_get_static(gen, field_ref_i, lhs_class_name_i, arena);
-
-#endif
     break;
   }
   case AST_KIND_FUNCTION_PARAMETER: {
