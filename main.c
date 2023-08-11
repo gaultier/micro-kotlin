@@ -175,7 +175,6 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-
     // Emit bytecode.
     cf_class_file_t class_file = {
         .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
@@ -229,7 +228,7 @@ int main(int argc, char *argv[]) {
                                                class_file.class_file_path};
       char *current = buf;
       cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                             READ_CLASS_FILE_FLAG_ALL, &tmp_arena);
+                          &tmp_arena);
     }
   }
   LOG("arena=%lu", arena.current_offset);
