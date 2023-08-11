@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
         .class_path_entries = class_path_entries,
     };
     pg_array_init_reserve(resolver.variables, 512, &arena);
-    pg_array_init_reserve(resolver.types, 1 << 15, &arena);
+    pg_array_init_reserve(resolver.types, 1 << 18, &arena);
     const ty_type_t any_type = {
         .this_class_name = string_make_from_c("kotlin.Any", &arena),
     };
@@ -197,8 +197,11 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("types=%lu sizeof(ty_type_t)=%lu", pg_array_len(resolver.types),
-        sizeof(ty_type_t));
+    LOG("nodes=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(parser.nodes),
+        sizeof(par_ast_node_t),
+        pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
+    LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
+        sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
