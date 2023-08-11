@@ -259,6 +259,8 @@ typedef struct {
   char *value;
 } string_t;
 
+static bool string_is_empty(string_t s) { return s.len == 0; }
+
 static void string_append_char(string_t *s, char c, arena_t *arena);
 
 static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
@@ -363,7 +365,9 @@ static bool string_starts_with_cstring(string_t s, char *needle) {
   return memcmp(s.value, needle, needle_len) == 0;
 }
 
-static char string_first(string_t s) { return s.len == 0 ? 0 : s.value[0]; }
+static char string_first(string_t s) {
+  return string_is_empty(s) ? 0 : s.value[0];
+}
 
 static void string_drop_first_n(string_t *s, u64 n) {
   pg_assert(s != NULL);
@@ -1222,7 +1226,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   pg_assert(type != NULL);
   pg_assert(arena != NULL);
 
-  if (descriptor.len == 0)
+  if (string_is_empty(descriptor))
     return (string_t){0};
 
   string_t remaining = descriptor;
@@ -6182,7 +6186,7 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
   if (type->super_type_i > 0)
     return true;
 
-  if (type->super_class_name.len == 0) {
+  if (string_is_empty(type->super_class_name)) {
     return resolver_resolve_class_name(
         resolver, string_make_from_c_no_alloc("java/lang/Object"),
         &type->super_type_i, scratch_arena, arena);
