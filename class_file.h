@@ -2157,7 +2157,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
     cf_buf_read_signature_attribute(buf, buf_len, current, class_file, size,
                                     arena);
   } else if (string_eq_c(attribute_name, "SourceDebugExtension")) {
-    pg_assert(0 && "unreachable");
+    *current += size; // TODO
   } else if (string_eq_c(attribute_name, "LineNumberTable")) {
     cf_buf_read_line_number_table_attribute(buf, buf_len, current, class_file,
                                             size, arena);
@@ -5543,7 +5543,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         pg_assert(path != NULL);
         cf_buf_read_class_file(local_file_header,
                                uncompressed_size_according_to_directory_entry,
-                               &local_file_header, &class_file, 0, arena);
+                               &local_file_header, &class_file,
+                               READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES, arena);
 
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
@@ -5600,7 +5601,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
 
         char *dst_current = (char *)dst;
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
-                               0, arena);
+                               READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES, arena);
 
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
@@ -6216,7 +6217,8 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       cf_class_file_t class_file = {
           .class_file_path = tentative_class_file_path,
       };
-      cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
+      cf_buf_read_class_file(buf, read_bytes, &current, &class_file,
+                             READ_CLASS_FILE_FLAG_ALL_ATTRIBUTES, arena);
 
       pg_assert(string_eq(class_name, class_file.class_name));
 
