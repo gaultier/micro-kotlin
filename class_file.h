@@ -33,6 +33,13 @@
 #define u8 uint8_t
 #define i8 int8_t
 
+// ------------------- Logs
+
+static bool log_verbose = false;
+#define LOG(fmt, ...)                                                          \
+  if (log_verbose)                                                             \
+  fprintf(stderr, fmt "\n", __VA_ARGS__)
+
 // ----------- Utility macros
 
 // Check that __COUNTER__ is defined and that __COUNTER__ increases by 1
@@ -129,6 +136,9 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert(arena->current_offset < arena->cap);
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
+
+  LOG("arena_alloc len=%lu element_size=%lu total_mem=%lu", len, element_size,
+      arena->current_offset);
   return res;
 }
 
@@ -541,13 +551,6 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
   }
   return -1;
 }
-
-// ------------------- Logs
-
-static bool log_verbose = false;
-#define LOG(fmt, ...)                                                          \
-  if (log_verbose)                                                             \
-  fprintf(stderr, fmt "\n", __VA_ARGS__)
 
 // ------------------------ Class file code
 
@@ -6156,7 +6159,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
     if (!string_ends_with_cstring(class_path_entry, ".jar"))
       continue;
 
-    LOG("[D002] path=%.*s", class_path_entry.len, class_path_entry.value);
+    LOG("class_path_entry=%.*s", class_path_entry.len, class_path_entry.value);
     const u64 previous_len = pg_array_len(resolver->types);
     cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
 
