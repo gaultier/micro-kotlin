@@ -1711,7 +1711,7 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
   cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
                                         &code.exceptions, arena);
 
-  cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes, 
+  cf_buf_read_attributes(buf, buf_len, current, class_file, &code.attributes,
                          arena);
 
   cf_attribute_t attribute = {
@@ -3163,91 +3163,6 @@ cf_get_this_class_name(const cf_class_file_t *class_file) {
                                          this_class_i);
 }
 
-// TODO: one thread that walks the directory recursively and one/many worker
-// threads to parse class files?
-#if 0
-static void cf_read_jmod_and_jar_and_class_files_recursively(
-    char *path, u64 path_len, cf_class_file_t **class_files, arena_t *arena) {
-  pg_assert(path != NULL);
-  pg_assert(path_len > 0);
-  pg_assert(class_files != NULL);
-  pg_assert(arena != NULL);
-
-  struct stat st = {0};
-  if (stat(path, &st) == -1) {
-    return;
-  }
-
-  const string_t last_path_component =
-      string_find_last_path_component(string_make_from_c_no_alloc(path));
-
-  if (S_ISREG(st.st_mode) &&
-      string_ends_with_cstring(last_path_component, ".class")) {
-    const int fd = open(path, O_RDONLY);
-    pg_assert(fd > 0);
-
-    char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
-    const ssize_t read_bytes = read(fd, buf, st.st_size);
-    pg_assert(read_bytes == st.st_size);
-    close(fd);
-
-    char *current = buf;
-    cf_class_file_t class_file = {
-        .class_file_path = string_make_from_c(path, arena),
-    };
-    cf_buf_read_class_file(buf, read_bytes, &current, &class_file, 0, arena);
-    pg_array_append(*class_files, class_file, arena);
-  } else if (S_ISREG(st.st_mode) &&
-             string_ends_with_cstring(last_path_component, ".jar")) {
-    cf_read_jar_file(path, class_files, arena);
-  } else if (S_ISREG(st.st_mode) &&
-             string_ends_with_cstring(last_path_component, ".jmod")) {
-    cf_read_jmod_file(path, class_files, arena);
-  }
-
-  if (!S_ISDIR(st.st_mode))
-    return;
-
-  pg_assert(S_ISDIR(st.st_mode));
-
-  // Recurse
-  DIR *dirp = opendir(path);
-  if (dirp == NULL)
-    return;
-
-  struct dirent *entry = {0};
-
-#define PATH_MAX 4096
-  char pathbuf[PATH_MAX + 1] = {0};
-  u64 pathbuf_len = path_len;
-  pg_assert(pathbuf_len < PATH_MAX);
-
-  memcpy(pathbuf, path, path_len);
-  if (pathbuf[pathbuf_len - 1] != '/') {
-    pathbuf[pathbuf_len++] = '/';
-  }
-
-  pg_assert(pathbuf_len < PATH_MAX);
-
-  while ((entry = readdir(dirp)) != NULL) {
-    pg_assert(entry->d_name != NULL);
-    const u64 d_name_len = strlen(entry->d_name);
-    pg_assert(d_name_len > 0);
-
-    // Skip over `.` and `..`.
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-      continue;
-
-    pg_assert(pathbuf_len + d_name_len < PATH_MAX);
-    memcpy(pathbuf + pathbuf_len, entry->d_name, d_name_len);
-    pathbuf[pathbuf_len + d_name_len] = 0;
-
-    cf_read_jmod_and_jar_and_class_files_recursively(
-        pathbuf, pathbuf_len + d_name_len, class_files, arena);
-  }
-  closedir(dirp);
-}
-#endif
 
 // ---------------------------------- Lexer
 
