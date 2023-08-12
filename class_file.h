@@ -148,9 +148,9 @@ typedef struct pg_array_header_t {
 } pg_array_header_t;
 
 #define pg_array_t(Type) Type *
-#define PG_ARRAY_HEADER(x) (((pg_array_header_t *)((void *)x)) - 1)
-#define pg_array_len(x) (((x) == NULL) ? 0 : (PG_ARRAY_HEADER(x)->len))
-#define pg_array_cap(x) (PG_ARRAY_HEADER(x)->cap)
+#define pg_array_header(x) (((pg_array_header_t *)((void *)x)) - 1)
+#define pg_array_len(x) (((x) == NULL) ? 0 : (pg_array_header(x)->len))
+#define pg_array_cap(x) (pg_array_header(x)->cap)
 
 #define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
   do {                                                                         \
@@ -172,10 +172,10 @@ typedef struct pg_array_header_t {
   do {                                                                         \
     pg_assert(x != NULL);                                                      \
     pg_assert(pg_array_len(x) > 0);                                            \
-    PG_ARRAY_HEADER(x)->len -= 1;                                              \
+    pg_array_header(x)->len -= 1;                                              \
   } while (0)
 
-#define pg_array_clear(x) PG_ARRAY_HEADER(x)->len = 0
+#define pg_array_clear(x) pg_array_header(x)->len = 0
 
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
@@ -193,14 +193,14 @@ typedef struct pg_array_header_t {
           arena_alloc(arena, 1, new_physical_len);                             \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
           "new_ptr=%p diff=%lu",                                               \
-          old_physical_len, new_physical_len, PG_ARRAY_HEADER(x), pg__ah,      \
-          (u64)pg__ah - (u64)PG_ARRAY_HEADER(x));                              \
-      pg_assert((u64)pg__ah >= (u64)PG_ARRAY_HEADER(x) + old_physical_len);    \
-      memcpy(pg__ah, PG_ARRAY_HEADER(x), old_physical_len);                    \
+          old_physical_len, new_physical_len, pg_array_header(x), pg__ah,      \
+          (u64)pg__ah - (u64)pg_array_header(x));                              \
+      pg_assert((u64)pg__ah >= (u64)pg_array_header(x) + old_physical_len);    \
+      memcpy(pg__ah, pg_array_header(x), old_physical_len);                    \
       x = (void *)(pg__ah + 1);                                                \
-      PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
+      pg_array_header(x)->cap = new_cap;                                       \
     }                                                                          \
-    (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
+    (x)[pg_array_header(x)->len++] = (item);                                   \
   } while (0)
 
 #define pg_array_drop_last_n(x, n)                                             \
@@ -1728,7 +1728,7 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
 
   pg_array_init_reserve(code.code, code_len, arena);
   buf_read_n_u8(buf, buf_len, code.code, code_len, current);
-  PG_ARRAY_HEADER(code.code)->len = code_len;
+  pg_array_header(code.code)->len = code_len;
 
   cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
                                         &code.exceptions, arena);
