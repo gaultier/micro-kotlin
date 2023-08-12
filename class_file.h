@@ -5698,6 +5698,8 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
 static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
   pg_assert(types != NULL);
+  pg_assert(lhs_i < pg_array_len(types));
+  pg_assert(rhs_i < pg_array_len(types));
 
   const ty_type_t *const lhs = &types[lhs_i];
   const ty_type_t *const rhs = &types[rhs_i];
@@ -5923,6 +5925,8 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
                            u32 *result_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
+  pg_assert(lhs_i < pg_array_len(resolver->types));
+  pg_assert(rhs_i < pg_array_len(resolver->types));
   pg_assert(result_i != NULL);
 
   const ty_type_t *const lhs_type = &resolver->types[lhs_i];
