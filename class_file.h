@@ -211,6 +211,12 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
+static u32 ut_ht_lookup(u64 hash, u32 exp, u32 idx) {
+  const u32 mask = ((u32)1 << exp) - 1;
+  const u32 step = (hash >> (64 - exp)) | 1;
+  return (idx + step) & mask;
+}
+
 __attribute__((unused)) static bool ut_cstring_ends_with(const char *s,
                                                          u64 s_len,
                                                          const char *suffix,
@@ -258,6 +264,17 @@ typedef struct {
 } string_t;
 
 static bool string_is_empty(string_t s) { return s.len == 0; }
+
+static u64 string_fnv1_hash(string_t s) {
+  u64 h = 0x100;
+  for (u64 i = 0; i < s.len; i++) {
+    pg_assert(s.value != NULL);
+
+    h ^= s.value[i] & 255;
+    h *= 1111111111111111111;
+  }
+  return h ^ h >> 32;
+}
 
 static void string_append_char(string_t *s, char c, arena_t *arena);
 
