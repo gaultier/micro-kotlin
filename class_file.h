@@ -137,8 +137,6 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
-  LOG("arena_alloc len=%lu element_size=%lu total_mem=%lu", len, element_size,
-      arena->current_offset);
   return res;
 }
 
