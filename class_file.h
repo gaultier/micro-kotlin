@@ -150,9 +150,9 @@ typedef struct pg_array_header_t {
 } pg_array_header_t;
 
 #define pg_array_t(Type) Type *
-#define pg_array_header(x) (((pg_array_header_t *)((void *)x)) - 1)
-#define pg_array_len(x) (((x) == NULL) ? 0 : (pg_array_header(x)->len))
-#define pg_array_cap(x) (pg_array_header(x)->cap)
+#define PG_ARRAY_HEADER(x) (((pg_array_header_t *)((void *)x)) - 1)
+#define pg_array_len(x) (((x) == NULL) ? 0 : (PG_ARRAY_HEADER(x)->len))
+#define pg_array_cap(x) (PG_ARRAY_HEADER(x)->cap)
 
 #define pg_array_init_reserve(x, arg_capacity, arg_arena)                      \
   do {                                                                         \
@@ -174,10 +174,10 @@ typedef struct pg_array_header_t {
   do {                                                                         \
     pg_assert(x != NULL);                                                      \
     pg_assert(pg_array_len(x) > 0);                                            \
-    pg_array_header(x)->len -= 1;                                              \
+    PG_ARRAY_HEADER(x)->len -= 1;                                              \
   } while (0)
 
-#define pg_array_clear(x) pg_array_header(x)->len = 0
+#define pg_array_clear(x) PG_ARRAY_HEADER(x)->len = 0
 
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
@@ -195,14 +195,14 @@ typedef struct pg_array_header_t {
           arena_alloc(arena, 1, new_physical_len);                             \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
           "new_ptr=%p diff=%lu",                                               \
-          old_physical_len, new_physical_len, pg_array_header(x), pg__ah,      \
-          (u64)pg__ah - (u64)pg_array_header(x));                              \
-      pg_assert((u64)pg__ah >= (u64)pg_array_header(x) + old_physical_len);    \
-      memcpy(pg__ah, pg_array_header(x), old_physical_len);                    \
+          old_physical_len, new_physical_len, PG_ARRAY_HEADER(x), pg__ah,      \
+          (u64)pg__ah - (u64)PG_ARRAY_HEADER(x));                              \
+      pg_assert((u64)pg__ah >= (u64)PG_ARRAY_HEADER(x) + old_physical_len);    \
+      memcpy(pg__ah, PG_ARRAY_HEADER(x), old_physical_len);                    \
       x = (void *)(pg__ah + 1);                                                \
-      pg_array_header(x)->cap = new_cap;                                       \
+      PG_ARRAY_HEADER(x)->cap = new_cap;                                       \
     }                                                                          \
-    (x)[pg_array_header(x)->len++] = (item);                                   \
+    (x)[PG_ARRAY_HEADER(x)->len++] = (item);                                   \
   } while (0)
 
 #define pg_array_drop_last_n(x, n)                                             \
@@ -212,12 +212,6 @@ typedef struct pg_array_header_t {
   } while (0)
 
 // ------------------- Utils
-
-static u32 ut_ht_lookup(u64 hash, u32 exp, u32 idx) {
-  const u32 mask = ((u32)1 << exp) - 1;
-  const u32 step = (hash >> (64 - exp)) | 1;
-  return (idx + step) & mask;
-}
 
 __attribute__((unused)) static bool ut_cstring_ends_with(const char *s,
                                                          u64 s_len,
@@ -264,17 +258,6 @@ typedef struct {
   u32 len;
   char *value;
 } string_t;
-
-static u64 string_fnv1_hash(string_t s) {
-  u64 h = 0x100;
-  for (u64 i = 0; i < s.len; i++) {
-    pg_assert(s.value != NULL);
-
-    h ^= s.value[i] & 255;
-    h *= 1111111111111111111;
-  }
-  return h ^ h >> 32;
-}
 
 static bool string_is_empty(string_t s) { return s.len == 0; }
 
@@ -728,7 +711,6 @@ typedef enum {
 } ty_type_flag_t;
 
 struct ty_type_t {
-  string_t descriptor;
   string_t this_class_name;
   string_t super_class_name;
   union {
@@ -901,10 +883,8 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
-static const u32 TYPES_EXP = 19;
-
-static u32 resolver_intern_type(resolver_t *resolver,
-                                const ty_type_t *new_type);
+static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
+                             arena_t *arena);
 
 static u16
 cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
@@ -1357,13 +1337,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
     type->this_class_name = item_type.this_class_name;
 
-    const string_t item_descriptor = (string_t){
-        .len = descriptor_remaining.len - remaining.len,
-        .value = descriptor_remaining.value,
-    };
-    item_type.descriptor = string_make(item_descriptor, arena);
-
-    type->v.array_type_i = resolver_intern_type(resolver, &item_type);
+    type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -1379,32 +1353,23 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
         break;
 
       ty_type_t argument_type = {0};
-      string_t argument_descriptor = remaining;
       remaining =
           cf_parse_descriptor(resolver, remaining, &argument_type, arena);
-
-      argument_descriptor.len -= remaining.len;
-      argument_type.descriptor = string_make(argument_descriptor, arena);
-
       const u32 argument_type_i =
-          resolver_intern_type(resolver, &argument_type);
+          resolver_add_type(resolver, &argument_type, arena);
       pg_array_append(argument_types_i, argument_type_i, arena);
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.value[0] = ')');
     string_drop_first_n(&remaining, 1);
 
-    type->v.method.argument_types_i = argument_types_i;
-
     ty_type_t return_type = {0};
-    string_t return_descriptor = remaining;
-
     remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
+    // FIXME: Check cache before adding the type.
 
-    return_descriptor.len -= remaining.len;
-    return_type.descriptor = string_make(return_descriptor, arena);
-
-    type->v.method.return_type_i = resolver_intern_type(resolver, &return_type);
+    type->v.method.argument_types_i = argument_types_i;
+    type->v.method.return_type_i =
+        resolver_add_type(resolver, &return_type, arena);
 
     return remaining;
   }
@@ -1748,7 +1713,7 @@ static void cf_buf_read_code_attribute(char *buf, u64 buf_len, char **current,
 
   pg_array_init_reserve(code.code, code_len, arena);
   buf_read_n_u8(buf, buf_len, code.code, code_len, current);
-  pg_array_header(code.code)->len = code_len;
+  PG_ARRAY_HEADER(code.code)->len = code_len;
 
   cf_buf_read_code_attribute_exceptions(buf, buf_len, current, class_file,
                                         &code.exceptions, arena);
@@ -5214,34 +5179,14 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 // --------------------------------- Typing
 
 // TODO: Caching?
-static u32 resolver_intern_type(resolver_t *resolver,
-                                const ty_type_t *new_type) {
+static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
+                             arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(new_type != NULL);
-  pg_assert(!string_is_empty(new_type->descriptor));
-  pg_assert(pg_array_cap(resolver->types) == ((u64)1 << TYPES_EXP));
 
-  const u64 h = string_fnv1_hash(new_type->descriptor);
-  for (u32 i = h;;) {
-    i = ut_ht_lookup(h, TYPES_EXP, i);
-    if (string_is_empty(resolver->types[i].descriptor)) {
-      // Empty, insert here.
-
-      // Check for OOM.
-      pg_assert(pg_array_len(resolver->types) + 1 < (u32)1 << TYPES_EXP);
-
-      pg_array_header(resolver->types)->len += 1;
-      resolver->types[i] = *new_type;
-      return i;
-    } else if (string_eq(resolver->types[i].descriptor, new_type->descriptor)) {
-      // Found, return existing item.
-
-      return i;
-    }
-  }
-
-  pg_assert(0 && "unreachable");
+  pg_array_append(resolver->types, *new_type, arena);
+  return pg_array_last_index(resolver->types);
 }
 
 static string_t resolver_function_to_human_string(const resolver_t *resolver,
@@ -5288,10 +5233,7 @@ static void resolver_load_methods_from_class_file(
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
 
-    ty_type_t type = {
-        .this_class_name = this_class_name,
-        .descriptor = string_make(descriptor, arena),
-    };
+    ty_type_t type = {.this_class_name = this_class_name};
     cf_parse_descriptor(resolver, descriptor, &type, arena);
     pg_assert(type.kind == TYPE_METHOD);
 
@@ -5307,7 +5249,7 @@ static void resolver_load_methods_from_class_file(
       // TODO: Save the bytecode somewhere.
     }
 
-    const u32 type_i = resolver_intern_type(resolver, &type);
+    const u32 type_i = resolver_add_type(resolver, &type, arena);
 
     if (log_verbose) {
       arena_t tmp_arena = *arena;
@@ -5510,18 +5452,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
                                uncompressed_size_according_to_directory_entry,
                                &local_file_header, &class_file, arena);
 
-        string_t descriptor =
-            string_reserve(class_file.class_name.len + 2, arena);
-        string_append_char(&descriptor, 'L', arena);
-        string_append_string(&descriptor, class_file.class_name, arena);
-        string_append_char(&descriptor, ';', arena);
-
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
             .this_class_name = string_make(class_file.class_name, arena),
-            .descriptor = descriptor,
         };
-        const u32 this_class_type_i = resolver_intern_type(resolver, &type);
+        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const cf_constant_t *const constant_super = cf_constant_array_get(
@@ -5574,18 +5509,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                arena);
 
-        string_t descriptor =
-            string_reserve(class_file.class_name.len + 2, arena);
-        string_append_char(&descriptor, 'L', arena);
-        string_append_string(&descriptor, class_file.class_name, arena);
-        string_append_char(&descriptor, ';', arena);
-
         ty_type_t type = {
             .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
             .this_class_name = string_make(class_file.class_name, arena),
-            .descriptor = descriptor,
         };
-        const u32 this_class_type_i = resolver_intern_type(resolver, &type);
+        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const cf_constant_t *const constant_super = cf_constant_array_get(
@@ -6199,15 +6127,10 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
 
       pg_assert(string_eq(class_name, class_file.class_name));
 
-      string_t descriptor =
-          string_reserve(class_file.class_name.len + 2, arena);
-      string_append_char(&descriptor, 'L', arena);
-      string_append_string(&descriptor, class_file.class_name, arena);
-      string_append_char(&descriptor, ';', arena);
+      // TODO: super type.
       ty_type_t this_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
           .this_class_name = string_make(class_name, arena),
-          .descriptor = descriptor,
       };
       if (string_eq_c(class_name, "java/lang/Boolean"))
         this_type.flag |= TYPE_FLAG_KOTLIN_BOOLEAN;
@@ -6226,7 +6149,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       else if (string_eq_c(class_name, "java/lang/Double"))
         this_type.flag |= TYPE_FLAG_KOTLIN_DOUBLE;
 
-      *type_i = resolver_intern_type(resolver, &this_type);
+      *type_i = resolver_add_type(resolver, &this_type, arena);
 
       return true;
     }
@@ -6451,7 +6374,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                     arena);
 
     const u32 println_type_exact_i =
-        resolver_intern_type(resolver, &println_type_exact);
+        resolver_add_type(resolver, &println_type_exact, arena);
 
     u32 picked_method_type_i = 0;
     {
@@ -6659,7 +6582,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     // TODO: Check that if the return type is not Unit, there was a return.
     // Ideally we would have a CFG to check that every path returns a value.
-    node->type_i = resolver_intern_type(resolver, &type);
+    node->type_i = resolver_add_type(resolver, &type, arena);
 
     // Inspect body (rhs).
     resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
@@ -8056,15 +7979,23 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
-    pg_assert(type->kind == TYPE_METHOD);
-    pg_assert(!string_is_empty(type->descriptor));
+
+    // FIXME
+    //    cg_emit_get_static(gen, gen->out_field_ref_i,
+    //    gen->out_field_ref_class_i,
+    //                       arena);
 
     cg_emit_node(gen, class_file, node->lhs, arena);
 
+    pg_assert(type->kind == TYPE_METHOD);
+
     const ty_type_method_t *const method = &type->v.method;
 
-    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
-                                                    type->descriptor, arena);
+    string_t descriptor = string_reserve(256, arena);
+    cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
+                              arena);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
     const u16 name_i =
         cf_add_constant_cstring(&class_file->constant_pool, "println", arena);
 
@@ -8094,8 +8025,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     pg_array_clear(gen->locals);
-    pg_assert(type->kind == TYPE_METHOD);
-    pg_assert(!string_is_empty(type->descriptor));
 
     const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i <
@@ -8113,8 +8042,11 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name, arena);
 
-    const u16 descriptor_i = cf_add_constant_string(&class_file->constant_pool,
-                                                    type->descriptor, arena);
+    string_t descriptor = string_reserve(64, arena);
+    cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
+                              arena);
+    const u16 descriptor_i =
+        cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
 
     cf_method_t method = {
         .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC,

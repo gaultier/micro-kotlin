@@ -141,10 +141,9 @@ int main(int argc, char *argv[]) {
         .class_path_entries = class_path_entries,
     };
     pg_array_init_reserve(resolver.variables, 512, &arena);
-    pg_array_init_reserve(resolver.types, 1 << TYPES_EXP, &arena);
+    pg_array_init_reserve(resolver.types, 1 << 18, &arena);
     const ty_type_t any_type = {
         .this_class_name = string_make_from_c("kotlin.Any", &arena),
-        .descriptor = string_make_from_c("Lkotlin.Any;", &arena),
     };
     pg_array_append(resolver.types, any_type, &arena);
 
@@ -152,85 +151,84 @@ int main(int argc, char *argv[]) {
         .kind = TYPE_JVM_VOID,
         .flag = TYPE_FLAG_KOTLIN_UNIT,
         .this_class_name = string_make_from_c("kotlin.Unit", &arena),
-        .descriptor = string_make_from_c("Lkotlin.Unit;", &arena),
-  };
-  pg_array_append(resolver.types, unit_type, &arena);
+    };
+    pg_array_append(resolver.types, unit_type, &arena);
 
-  resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
-  arena_clear(&scratch_arena);
+    resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
+    arena_clear(&scratch_arena);
 
-  resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
-  arena_clear(&scratch_arena);
+    resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
+    arena_clear(&scratch_arena);
 
-  // Debug types.
-  {
-    LOG("------ After type checking%s", "");
-    arena_t tmp_arena = arena;
-    resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
-  }
+    // Debug types.
+    {
+      LOG("------ After type checking%s", "");
+      arena_t tmp_arena = arena;
+      resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
+    }
 
-  if (parser.state != PARSER_STATE_OK)
-    return 1;
+    if (parser.state != PARSER_STATE_OK)
+      return 1;
 
-  // Emit bytecode.
-  cf_class_file_t class_file = {
-      .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
-      .minor_version = 0,
-      .major_version =
-          17, // TODO: Add a CLI option to choose the jdk/jre version
-      .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
-  };
-  cf_init(&class_file, &arena);
-  cg_emit(&resolver, &class_file, root_i, &scratch_arena, &arena);
-  if (parser.state != PARSER_STATE_OK)
-    return 1;
+    // Emit bytecode.
+    cf_class_file_t class_file = {
+        .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
+        .minor_version = 0,
+        .major_version =
+            17, // TODO: Add a CLI option to choose the jdk/jre version
+        .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
+    };
+    cf_init(&class_file, &arena);
+    cg_emit(&resolver, &class_file, root_i, &scratch_arena, &arena);
+    if (parser.state != PARSER_STATE_OK)
+      return 1;
 
-  FILE *file = fopen(class_file.class_file_path.value, "w");
-  if (file == NULL) {
-    fprintf(stderr, "Failed to open the file %.*s: %s\n", source_file_name.len,
-            source_file_name.value, strerror(errno));
-    return errno;
-  }
-  cf_write(&class_file, file);
-  fclose(file);
-
-  LOG("nodes=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(parser.nodes),
-      sizeof(par_ast_node_t),
-      pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
-  LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
-      sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
-  {
-    arena_t tmp_arena = arena;
-    LOG("\n----------- Verifiying%s", "");
-
-    int fd = open(class_file.class_file_path.value, O_RDONLY);
-    if (fd == -1) {
+    FILE *file = fopen(class_file.class_file_path.value, "w");
+    if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
               source_file_name.len, source_file_name.value, strerror(errno));
       return errno;
     }
+    cf_write(&class_file, file);
+    fclose(file);
 
-    struct stat st = {0};
-    if (stat(class_file.class_file_path.value, &st) == -1) {
-      fprintf(stderr, "Failed to get the file size %.*s: %s\n",
-              source_file_name.len, source_file_name.value, strerror(errno));
-      return errno;
+    LOG("nodes=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(parser.nodes),
+        sizeof(par_ast_node_t),
+        pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
+    LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
+        sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
+    {
+      arena_t tmp_arena = arena;
+      LOG("\n----------- Verifiying%s", "");
+
+      int fd = open(class_file.class_file_path.value, O_RDONLY);
+      if (fd == -1) {
+        fprintf(stderr, "Failed to open the file %.*s: %s\n",
+                source_file_name.len, source_file_name.value, strerror(errno));
+        return errno;
+      }
+
+      struct stat st = {0};
+      if (stat(class_file.class_file_path.value, &st) == -1) {
+        fprintf(stderr, "Failed to get the file size %.*s: %s\n",
+                source_file_name.len, source_file_name.value, strerror(errno));
+        return errno;
+      }
+      pg_assert(st.st_size > 0);
+      pg_assert(st.st_size <= UINT32_MAX);
+
+      const u32 buf_len = st.st_size;
+      char *const buf = arena_alloc(&tmp_arena, buf_len, sizeof(u8));
+
+      pg_assert(read(fd, buf, buf_len) == buf_len);
+      close(fd);
+
+      cf_class_file_t class_file_verify = {.class_file_path =
+                                               class_file.class_file_path};
+      char *current = buf;
+      cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
+                             &tmp_arena);
     }
-    pg_assert(st.st_size > 0);
-    pg_assert(st.st_size <= UINT32_MAX);
-
-    const u32 buf_len = st.st_size;
-    char *const buf = arena_alloc(&tmp_arena, buf_len, sizeof(u8));
-
-    pg_assert(read(fd, buf, buf_len) == buf_len);
-    close(fd);
-
-    cf_class_file_t class_file_verify = {.class_file_path =
-                                             class_file.class_file_path};
-    char *current = buf;
-    cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                           &tmp_arena);
   }
-}
-LOG("arena=%lu", arena.current_offset);
+  LOG("arena=%lu", arena.current_offset);
 }
