@@ -1684,6 +1684,7 @@ static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
   pg_assert(source_file.source_file > 0);
   pg_assert(source_file.source_file <= class_file->constant_pool.len);
 
+
   cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                               .v = {.source_file = source_file}};
   pg_array_append(*attributes, attribute, arena);
@@ -6427,11 +6428,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_assert(resolver_resolve_class_name(
-        resolver, string_make_from_c_no_alloc("kotlin.Any"), &node->type_i,
-        scratch_arena, arena));
-    return node->type_i;
+    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_ANY},
+                    arena);
 
+    return node->type_i = pg_array_last_index(resolver->types);
   case AST_KIND_BOOL: {
     pg_assert(resolver_resolve_class_name(
         resolver, string_make_from_c("java/lang/Boolean", arena), &node->type_i,
@@ -8879,13 +8879,23 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     // Fill locals (method arguments).
     {
-      u32 string_type_i = 0;
-      pg_assert(resolver_resolve_class_name(
-          gen->resolver, string_make_from_c_no_alloc("java/lang/String"),
-          &string_type_i, scratch_arena, arena));
+      const ty_type_t string_type = {
+          .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+          .this_class_name = string_make_from_c("java/lang/String", arena),
+      };
+      pg_array_append(gen->resolver->types, string_type, arena);
+      const u32 string_type_i = pg_array_last_index(gen->resolver->types);
 
-      u32 source_argument_types_i = 0; // FIXME
+      const ty_type_t source_method_argument_types = {
+          .kind = TYPE_JVM_ARRAY_REFERENCE,
+          .this_class_name = string_make_from_c("FIXME", arena),
+          .v = {.array_type_i = string_type_i},
+      };
+      pg_array_append(gen->resolver->types, source_method_argument_types,
+                      arena);
 
+      const u32 source_argument_types_i =
+          pg_array_last_index(gen->resolver->types);
       const u16 source_method_arg0_string = cf_add_constant_cstring(
           &class_file->constant_pool, "[Ljava/lang/String;", arena);
 
