@@ -1684,14 +1684,13 @@ static void cf_buf_read_sourcefile_attribute(char *buf, u64 buf_len,
   pg_assert(source_file.source_file > 0);
   pg_assert(source_file.source_file <= class_file->constant_pool.len);
 
+  const char *const current_end = *current;
+  const u64 read_bytes = current_end - current_start;
+  pg_assert(read_bytes == 2);
 
   cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                               .v = {.source_file = source_file}};
   pg_array_append(*attributes, attribute, arena);
-
-  const char *const current_end = *current;
-  const u64 read_bytes = current_end - current_start;
-  pg_assert(read_bytes == 2);
 }
 
 static void cf_buf_read_code_attribute_exceptions(char *buf, u64 buf_len,
