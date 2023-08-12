@@ -6467,8 +6467,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_array_append(println_type_exact.v.method.argument_types_i, lhs->type_i,
                     arena);
 
-    cf_fill_descriptor_string(resolver->types, &println_type_exact,
-                              &println_type_exact.descriptor, arena);
+    cf_fill_descriptor_string(resolver->types,&println_type_exact,&println_type_exact.descriptor,arena);
     const u32 println_type_exact_i =
         resolver_intern_type(resolver, &println_type_exact);
 
