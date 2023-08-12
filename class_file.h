@@ -137,6 +137,8 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
+  LOG("arena_alloc len=%lu element_size=%lu total_mem=%lu", len, element_size,
+      arena->current_offset);
   return res;
 }
 
@@ -5213,6 +5215,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
+// TODO: Caching?
 static u32 resolver_intern_type(resolver_t *resolver,
                                 const ty_type_t *new_type) {
   pg_assert(resolver != NULL);
@@ -5304,7 +5307,7 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flag |= TYPE_FLAG_INLINE_ONLY;
 
-      // TODO: Save the bytecode + accessories somewhere.
+      // TODO: Save the bytecode somewhere.
     }
 
     const u32 type_i = resolver_intern_type(resolver, &type);
@@ -5757,7 +5760,7 @@ static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
   pg_assert(candidate_functions_i != NULL);
   pg_assert(*candidate_functions_i != NULL);
 
-  for (u64 i = 0; i < pg_array_cap(resolver->types); i++) {
+  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
     if (type->kind != TYPE_METHOD)
       continue;
