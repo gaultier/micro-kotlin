@@ -1153,13 +1153,13 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-// FIXME: Weird signature.
-static void cf_fill_descriptor_string(const ty_type_t *types,
-                                      const ty_type_t *type,
+static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
                                       string_t *descriptor, arena_t *arena) {
   pg_assert(types != NULL);
-  pg_assert(type != NULL);
+  pg_assert(type_i < pg_array_len(types));
   pg_assert(descriptor != NULL);
+
+  const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
   case TYPE_JVM_VOID: {
@@ -1214,8 +1214,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types,
   case TYPE_JVM_ARRAY_REFERENCE: {
     string_append_char(descriptor, '[', arena);
 
-    cf_fill_descriptor_string(types, &types[type->v.array_type_i], descriptor,
-                              arena);
+    cf_fill_descriptor_string(types, type->v.array_type_i, descriptor, arena);
 
     break;
   }
@@ -1225,15 +1224,14 @@ static void cf_fill_descriptor_string(const ty_type_t *types,
     string_append_char(descriptor, '(', arena);
 
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
-      const u32 argument_type_i = method_type->argument_types_i[i];
-      cf_fill_descriptor_string(types, &types[argument_type_i], descriptor,
-                                arena);
+      cf_fill_descriptor_string(types, method_type->argument_types_i[i],
+                                descriptor, arena);
     }
 
     string_append_char(descriptor, ')', arena);
 
-    cf_fill_descriptor_string(types, &types[method_type->return_type_i],
-                              descriptor, arena);
+    cf_fill_descriptor_string(types, method_type->return_type_i, descriptor,
+                              arena);
 
     break;
   }
@@ -5235,7 +5233,6 @@ static u32 resolver_intern_type(resolver_t *resolver,
 
       pg_array_header(resolver->types)->len += 1;
       resolver->types[i] = *new_type;
-
       return i;
     } else if (string_eq(resolver->types[i].descriptor, new_type->descriptor)) {
       // Found, return existing item.
@@ -6147,27 +6144,18 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
                                         arena_t *scratch_arena,
                                         arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(!string_is_empty(class_name));
+  pg_assert(class_name.value != NULL);
   pg_assert(type_i != NULL);
   pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
-  string_t descriptor = string_reserve(class_name.len + 2, arena);
-  string_append_char(&descriptor, 'L', arena);
-  string_append_string(&descriptor, class_name, arena);
-  string_append_char(&descriptor, ';', arena);
+  // Check if cached first.
+  for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
+    const ty_type_t *const type = &resolver->types[i];
+    if (type->kind == TYPE_METHOD)
+      continue;
 
-  // Check for the cache first.
-  const u64 h = string_fnv1_hash(descriptor);
-  for (u32 i = h;;) {
-    i = ut_ht_lookup(h, TYPES_EXP, i);
-
-    if (string_is_empty(resolver->types[i].descriptor)) {
-      // Empty, stop the search.
-
-      break;
-    } else if (string_eq(resolver->types[i].descriptor, descriptor)) {
-      // Found, return existing item.
+    if (string_eq(class_name, type->this_class_name)) {
       *type_i = i;
       return true;
     }
@@ -6211,6 +6199,11 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
 
       pg_assert(string_eq(class_name, class_file.class_name));
 
+      string_t descriptor =
+          string_reserve(class_file.class_name.len + 2, arena);
+      string_append_char(&descriptor, 'L', arena);
+      string_append_string(&descriptor, class_file.class_name, arena);
+      string_append_char(&descriptor, ';', arena);
       ty_type_t this_type = {
           .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
           .this_class_name = string_make(class_name, arena),
@@ -6233,32 +6226,26 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       else if (string_eq_c(class_name, "java/lang/Double"))
         this_type.flag |= TYPE_FLAG_KOTLIN_DOUBLE;
 
-      *type_i = resolver_resolve_class_name(resolver, class_name, type_i,
-                                            scratch_arena, arena);
+      *type_i = resolver_intern_type(resolver, &this_type);
 
       return true;
     }
   }
 
-  // Load all jar files specified in the class path entries (non recursive).
+  // Scan the class path entries for `$CLASS_PATH_ENTRY` which is a jar file
+  // that contains
+  // `$CLASS_NAME.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
     const string_t class_path_entry = resolver->class_path_entries[i];
     if (!string_ends_with_cstring(class_path_entry, ".jar"))
       continue;
 
     LOG("class_path_entry=%.*s", class_path_entry.len, class_path_entry.value);
+    const u64 previous_len = pg_array_len(resolver->types);
     cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
 
-    // Now search the cache .
-    const u64 h = string_fnv1_hash(descriptor);
-    for (u32 i = h;;) {
-      i = ut_ht_lookup(h, TYPES_EXP, i);
-      if (string_is_empty(resolver->types[i].descriptor)) {
-        // Empty, stop the search.
-
-        return false;
-      } else if (string_eq(resolver->types[i].descriptor, descriptor)) {
-        // Found, return existing item.
+    for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
+      if (string_eq(class_name, resolver->types[i].this_class_name)) {
         *type_i = i;
         return true;
       }
@@ -6454,20 +6441,15 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver, string_make_from_c("kotlin.Unit", arena), &unit_type_i,
         scratch_arena, arena));
 
-    ty_type_t println_type_exact = {
-        .kind = TYPE_METHOD,
-        .v = {.method =
-                  {
-                      .return_type_i = unit_type_i,
-                  }},
-        .descriptor = string_reserve(128, arena),
-    };
+    ty_type_t println_type_exact = {.kind = TYPE_METHOD,
+                                    .v = {.method = {
+                                              .return_type_i = unit_type_i,
+                                          }}};
     pg_array_init_reserve(println_type_exact.v.method.argument_types_i, 1,
                           arena);
     pg_array_append(println_type_exact.v.method.argument_types_i, lhs->type_i,
                     arena);
 
-    cf_fill_descriptor_string(resolver->types,&println_type_exact,&println_type_exact.descriptor,arena);
     const u32 println_type_exact_i =
         resolver_intern_type(resolver, &println_type_exact);
 
@@ -6660,7 +6642,6 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                   {
                       .return_type_i = return_type_i,
                   }},
-        .descriptor = string_reserve(128, arena),
     };
 
     if (node->lhs > 0) {
@@ -6676,7 +6657,6 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       }
     }
 
-    cf_fill_descriptor_string(resolver->types, &type, &type.descriptor, arena);
     // TODO: Check that if the return type is not Unit, there was a return.
     // Ideally we would have a CFG to check that every path returns a value.
     node->type_i = resolver_intern_type(resolver, &type);
