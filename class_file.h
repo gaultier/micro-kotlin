@@ -997,7 +997,7 @@ static bool resolver_is_type_subtype_of(const resolver_t *resolver,
 
   // Integers have special rules.
   if (resolver_is_type_integer(a))
-    return resolver_is_integer_type_subtype_of( a, b);
+    return resolver_is_integer_type_subtype_of(a, b);
 
   pg_assert(0 && "todo");
 }
@@ -5327,6 +5327,7 @@ static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
   pg_assert(resolver->types != NULL);
   pg_assert(new_type != NULL);
 
+  if (new_type->kind==TYPE_INSTANCE){
   if (string_eq_c(new_type->this_class_name, "java/lang/Boolean"))
     new_type->kind = TYPE_BOOLEAN;
   else if (string_eq_c(new_type->this_class_name, "java/lang/Char"))
@@ -5345,6 +5346,7 @@ static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
     new_type->kind = TYPE_DOUBLE;
   else if (string_eq_c(new_type->this_class_name, "java/lang/String"))
     new_type->kind = TYPE_STRING;
+  }
 
   pg_array_append(resolver->types, *new_type, arena);
   return pg_array_last_index(resolver->types);
@@ -5943,7 +5945,17 @@ static u32 resolver_select_most_specific_candidate_function(
           .a_b = resolver_check_applicability_of_candidate_pair(resolver, a, b),
           .b_a = resolver_check_applicability_of_candidate_pair(resolver, b, a),
       };
+
       pg_array_append(checks, check, &tmp_arena);
+
+      const string_t a_human_type = resolver_function_to_human_string(
+          resolver, check.a_type_i, &tmp_arena);
+      const string_t b_human_type = resolver_function_to_human_string(
+          resolver, check.b_type_i, &tmp_arena);
+
+      LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
+          a_human_type.value, b_human_type.len, b_human_type.value, check.a_b,
+          check.b_a);
     }
   }
   pg_assert(0 && "fixme");
