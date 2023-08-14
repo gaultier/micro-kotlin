@@ -5938,6 +5938,13 @@ static u32 resolver_select_most_specific_candidate_function(
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
               a_human_type.value, b_human_type.len, b_human_type.value, a_b,
               b_a);
+
+          if (a_more_applicable_than_b && !b_more_applicable_than_a) {
+            LOG("[D002] removing %.*s", b_human_type.len, b_human_type.value);
+          }
+          if (b_more_applicable_than_a && !a_more_applicable_than_b) {
+            LOG("[D003] removing %.*s", a_human_type.len, a_human_type.value);
+          }
         }
 
         if (a_more_applicable_than_b && !b_more_applicable_than_a) {
@@ -5962,7 +5969,7 @@ static u32 resolver_select_most_specific_candidate_function(
       return candidates[i];
   }
 
-  __builtin_unreachable();
+  pg_assert(0 && "unreachable");
 }
 
 // TODO: Keep track of imported packages (including those imported by
@@ -5994,10 +6001,10 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     return true;
   }
 
-  resolver_select_most_specific_candidate_function(
+*picked_method_type_i=  resolver_select_most_specific_candidate_function(
       resolver, *candidate_functions_i, scratch_arena, arena);
 
-  return false;
+  return true;
 }
 
 // TODO: Remove.
