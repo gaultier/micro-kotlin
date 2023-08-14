@@ -26,7 +26,7 @@
 - [x] Grouping
 - [ ] Explicit casts
 - [x] Long
-- [ ] Refactor/rename stuff
+- [x] Refactor/rename stuff
 - [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
 - [x] Byte
 - [ ] Char
@@ -64,7 +64,8 @@
 - [ ] Default imports
 - [ ] Imports
 - [ ] Arena dump to see how/where memory is utilized
-- [ ] **Resolve free functions by building candidate sets**
+- [x] Resolve free functions by building candidate sets
+- [ ] **Trivial inline** (no jumps, no exceptions, etc)
 - [ ] Remove builtin println
 - [ ] Read kotlin metadata in class files
 - [ ] Class definition (BIG!)
@@ -121,7 +122,6 @@
 - [ ] Multi-threading stuff (volatile, synchronized, etc)
 - [ ] Annotation
 - [ ] Complicated OOP stuff (companion objects, singleton, extension methods, etc)
-- [ ] Inline
 - [ ] Async stuff (suspend, etc)
 - [ ] Java <-> Kotlin interop e.g. @JvmName, etc
 - [ ] Runtime reflection
