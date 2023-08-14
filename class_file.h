@@ -733,7 +733,6 @@ struct ty_type_t {
     u32 array_type_i;        // TYPE_ARRAY_REFERENCE
   } v;
   ty_type_kind_t kind;
-  pg_pad(1);
   u16 flag;
   u16 constant_pool_item_i;
   pg_pad(2);
