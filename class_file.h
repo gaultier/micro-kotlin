@@ -962,7 +962,6 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
                                                 const ty_type_t *b) {
   pg_assert(resolver_is_type_integer(a));
 
-  // Every type is a subtype of Any.
   if (b->kind == TYPE_ANY)
     return true;
 
@@ -975,23 +974,63 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
          resolver_widen_integer_type(b);
 }
 
-static bool resolver_is_type_subtype_of(const resolver_t *resolver,
-                                        const ty_type_t *a,
-                                        const ty_type_t *b) {
+static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
+                                          arena_t *scratch_arena,
+                                          arena_t *arena);
+
+static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
+                                        const ty_type_t *b,
+                                        arena_t *scratch_arena,
+                                        arena_t *arena) {
   // `A <: A` always.
   if (resolver_are_types_equal(resolver, a, b))
+    return true;
+
+  // Every type is a subtype of Any.
+  if (b->kind == TYPE_ANY)
     return true;
 
   // Integers have special rules.
   if (resolver_is_type_integer(a))
     return resolver_is_integer_type_subtype_of(a, b);
 
-  pg_assert(0 && "todo");
+  switch (a->kind) {
+    // Those types are not a subtype of anything (expect Any).
+  case TYPE_METHOD:
+  case TYPE_DOUBLE:
+  case TYPE_FLOAT:
+  case TYPE_CHAR:
+    return false;
+
+  case TYPE_INSTANCE: {
+    ty_type_t *it = a;
+    while (true) {
+      if (!resolver_resolve_super_lazily(resolver, it, scratch_arena, arena))
+        return false;
+
+      if (it->super_type_i == 0)
+        return false; // Reached the top
+
+      it = &resolver->types[it->super_type_i];
+      if (resolver_are_types_equal(resolver, it, b))
+        return true;
+    }
+    return false;
+  }
+  case TYPE_STRING: {
+    return b->kind == TYPE_INSTANCE &&
+           string_eq_c(b->this_class_name, "java/lang/Object");
+  }
+
+  default:
+    pg_assert(0 && "unreachable");
+  }
 }
 
 static bool resolver_is_function_candidate_applicable(
-    const resolver_t *resolver, const ty_type_t *function_call_type,
-    const ty_type_t *function_definition_type) {
+    resolver_t *resolver, const ty_type_t *function_call_type,
+    const ty_type_t *function_definition_type, arena_t *scratch_arena,
+    arena_t *arena) {
   pg_assert(function_call_type->kind == TYPE_METHOD);
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
@@ -1008,14 +1047,13 @@ static bool resolver_is_function_candidate_applicable(
     return false;
 
   for (u8 i = 0; i < call_argument_count; i++) {
-    const ty_type_t *call_argument =
-        &resolver->types[call->argument_types_i[i]];
+    ty_type_t *call_argument = &resolver->types[call->argument_types_i[i]];
     const ty_type_t *definition_argument =
         &resolver->types[definition->argument_types_i[i]];
 
     const bool is_call_argument_subtype_of_definition_argument =
         resolver_is_type_subtype_of(resolver, call_argument,
-                                    definition_argument);
+                                    definition_argument, scratch_arena, arena);
 
     // TODO: Technically, we need to add the constraint `call argument <:
     // definition_argument` and afterwards check the soundness, but for now it
@@ -5803,20 +5841,16 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   return result;
 }
 
-static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
-                                          arena_t *scratch_arena,
-                                          arena_t *arena);
-
 static void resolver_remove_non_applicable_function_candidates(
-    const resolver_t *resolver, u32 *candidate_functions_i,
-    const ty_type_t *call_site_type) {
+    resolver_t *resolver, u32 *candidate_functions_i,
+    const ty_type_t *call_site_type, arena_t *scratch_arena, arena_t *arena) {
 
   u64 i = 0;
   while (i < pg_array_len(candidate_functions_i)) {
     const ty_type_t *const candidate_type =
         &resolver->types[candidate_functions_i[i]];
-    if (!resolver_is_function_candidate_applicable(resolver, call_site_type,
-                                                   candidate_type)) {
+    if (!resolver_is_function_candidate_applicable(
+            resolver, call_site_type, candidate_type, scratch_arena, arena)) {
       pg_array_swap_remove_at(candidate_functions_i, i);
     } else {
       i++;
@@ -5831,7 +5865,8 @@ typedef enum __attribute__((packed)) {
 } type_applicability_t;
 
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
-    const resolver_t *resolver, const ty_type_t *a, const ty_type_t *b) {
+    resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
+    arena_t *scratch_arena, arena_t *arena) {
   pg_assert(a->kind == TYPE_METHOD);
   pg_assert(a->v.method.argument_types_i != NULL);
   pg_assert(a->this_class_name.value != NULL);
@@ -5845,12 +5880,12 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
   pg_assert(pg_array_len(b->v.method.argument_types_i) == call_argument_count);
 
   for (u64 k = 0; k < call_argument_count; k++) {
-    const ty_type_t *argument_a =
-        &resolver->types[a->v.method.argument_types_i[k]];
+    ty_type_t *argument_a = &resolver->types[a->v.method.argument_types_i[k]];
     const ty_type_t *argument_b =
         &resolver->types[b->v.method.argument_types_i[k]];
 
-    if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b)) {
+    if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b,
+                                     scratch_arena, arena)) {
       return APPLICABILITY_LESS;
     }
   }
@@ -5859,13 +5894,13 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
 }
 
 static u32 resolver_select_most_specific_candidate_function(
-    const resolver_t *resolver, u32 *candidates, arena_t *arena) {
+    resolver_t *resolver, u32 *candidates, arena_t *scratch_arena,
+    arena_t *arena) {
 
-  arena_t tmp_arena = *arena;
   const u64 candidates_count = pg_array_len(candidates);
 
   bool *tombstones = NULL;
-  pg_array_init_reserve(tombstones, candidates_count, &tmp_arena);
+  pg_array_init_reserve(tombstones, candidates_count, scratch_arena);
   pg_array_header(tombstones)->len = candidates_count;
   memset(tombstones, false, pg_array_len(tombstones));
   u64 tombstones_count = 0;
@@ -5875,20 +5910,35 @@ static u32 resolver_select_most_specific_candidate_function(
       for (u64 j = 0; j < i; j++) {
         const u32 a_index = i;
         const u32 b_index = j;
+        const u32 a_type_i = candidates[a_index];
+        const u32 b_type_i = candidates[b_index];
 
         if (tombstones[a_index] || tombstones[b_index])
           continue;
 
-        const ty_type_t *const a = &resolver->types[a_index];
-        const ty_type_t *const b = &resolver->types[b_index];
+        const ty_type_t *const a = &resolver->types[a_type_i];
+        const ty_type_t *const b = &resolver->types[b_type_i];
 
         const type_applicability_t a_b =
-            resolver_check_applicability_of_candidate_pair(resolver, a, b);
+            resolver_check_applicability_of_candidate_pair(
+                resolver, a, b, scratch_arena, arena);
         const type_applicability_t b_a =
-            resolver_check_applicability_of_candidate_pair(resolver, b, a);
+            resolver_check_applicability_of_candidate_pair(
+                resolver, b, a, scratch_arena, arena);
 
         const bool a_more_applicable_than_b = a_b & APPLICABILITY_MORE;
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
+
+        if (log_verbose) {
+          const string_t a_human_type = resolver_function_to_human_string(
+              resolver, a_type_i, scratch_arena);
+          const string_t b_human_type = resolver_function_to_human_string(
+              resolver, b_type_i, scratch_arena);
+
+          LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
+              a_human_type.value, b_human_type.len, b_human_type.value, a_b,
+              b_a);
+        }
 
         if (a_more_applicable_than_b && !b_more_applicable_than_a) {
           // A clearly more applicable than B, mark B as deleted so that it will
@@ -5901,19 +5951,7 @@ static u32 resolver_select_most_specific_candidate_function(
           tombstones[a_index] = true;
           tombstones_count += 1;
         } else {
-          // Need to do more checks.
-          pg_assert(0 && "todo");
-        }
-
-        if (log_verbose) {
-          const string_t a_human_type = resolver_function_to_human_string(
-              resolver, candidates[a_index], &tmp_arena);
-          const string_t b_human_type = resolver_function_to_human_string(
-              resolver, candidates[b_index], &tmp_arena);
-
-          LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
-              a_human_type.value, b_human_type.len, b_human_type.value, a_b,
-              b_a);
+          // TODO: Need to do more checks.
         }
       }
     }
@@ -5946,7 +5984,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   pg_assert(call_site_type->v.method.argument_types_i != NULL);
 
   resolver_remove_non_applicable_function_candidates(
-      resolver, *candidate_functions_i, call_site_type);
+      resolver, *candidate_functions_i, call_site_type, scratch_arena, arena);
 
   if (pg_array_len(*candidate_functions_i) == 0) {
     return false;
@@ -5957,7 +5995,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   }
 
   resolver_select_most_specific_candidate_function(
-      resolver, *candidate_functions_i, arena);
+      resolver, *candidate_functions_i, scratch_arena, arena);
 
   return false;
 }
@@ -6334,14 +6372,21 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
   return false;
 }
 
-static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
+// TODO: Check if there is a way not to do it lazily. Not goog to have I/O
+// randomly pop up in the middle of type checking.
+static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
                                           arena_t *scratch_arena,
                                           arena_t *arena) {
 
-  ty_type_t *const type = &resolver->types[this_type_i];
+  // Already done?
   if (type->super_type_i > 0)
     return true;
 
+  if (string_eq_c(type->this_class_name, "java/lang/Object"))
+    return true; // Reached the top.
+
+  // Since most types inherit from Object, we do not allocate a string for it
+  // for optimization purposes.
   if (string_is_empty(type->super_class_name)) {
     return resolver_resolve_class_name(
         resolver, string_make_from_c_no_alloc("java/lang/Object"),
