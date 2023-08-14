@@ -972,7 +972,7 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
     return false;
 
   return (resolver_widen_integer_type(a) & resolver_widen_integer_type(b)) ==
-         resolver_widen_integer_type(a);
+         resolver_widen_integer_type(b);
 }
 
 static bool resolver_is_type_subtype_of(const resolver_t *resolver,
@@ -5830,14 +5830,6 @@ typedef enum __attribute__((packed)) {
   APPLICABILITY_MORE = 4,
 } type_applicability_t;
 
-typedef struct {
-  u32 a_type_i;
-  u32 b_type_i;
-  type_applicability_t a_b;
-  type_applicability_t b_a;
-  pg_pad(2);
-} type_applicability_check_t;
-
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
     const resolver_t *resolver, const ty_type_t *a, const ty_type_t *b) {
   pg_assert(a->kind == TYPE_METHOD);
@@ -5871,10 +5863,6 @@ static u32 resolver_select_most_specific_candidate_function(
 
   arena_t tmp_arena = *arena;
   const u64 candidates_count = pg_array_len(candidates);
-  const u64 pairs_count = candidates_count * (candidates_count - 1) / 2;
-
-  type_applicability_check_t *checks = NULL;
-  pg_array_init_reserve(checks, pairs_count, &tmp_arena);
 
   bool *tombstones = NULL;
   pg_array_init_reserve(tombstones, candidates_count, &tmp_arena);
@@ -5882,52 +5870,55 @@ static u32 resolver_select_most_specific_candidate_function(
   memset(tombstones, false, pg_array_len(tombstones));
   u64 tombstones_count = 0;
 
-  for (u64 i = 0; i < candidates_count; i++) {
-    for (u64 j = 0; j < i; j++) {
-      const u32 a_index = candidates[i];
-      const u32 b_index = candidates[j];
+  while (tombstones_count < candidates_count - 1) {
+    for (u64 i = 0; i < candidates_count; i++) {
+      for (u64 j = 0; j < i; j++) {
+        const u32 a_index = i;
+        const u32 b_index = j;
 
-      if (tombstones[a_index] || tombstones[b_index])
-        continue;
+        if (tombstones[a_index] || tombstones[b_index])
+          continue;
 
-      const ty_type_t *const a = &resolver->types[a_index];
-      const ty_type_t *const b = &resolver->types[b_index];
+        const ty_type_t *const a = &resolver->types[a_index];
+        const ty_type_t *const b = &resolver->types[b_index];
 
-      type_applicability_check_t check = {
-          .a_type_i = a_index,
-          .b_type_i = b_index,
-          .a_b = resolver_check_applicability_of_candidate_pair(resolver, a, b),
-          .b_a = resolver_check_applicability_of_candidate_pair(resolver, b, a),
-      };
+        const type_applicability_t a_b =
+            resolver_check_applicability_of_candidate_pair(resolver, a, b);
+        const type_applicability_t b_a =
+            resolver_check_applicability_of_candidate_pair(resolver, b, a);
 
-      const bool a_more_applicable_than_b = check.a_b & APPLICABILITY_MORE;
-      const bool b_more_applicable_than_a = check.b_a & APPLICABILITY_MORE;
+        const bool a_more_applicable_than_b = a_b & APPLICABILITY_MORE;
+        const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
-      if (a_more_applicable_than_b && !b_more_applicable_than_a) {
-        // A clearly more applicable than B.
-        tombstones[b_index] = true;
-        tombstones_count += 1;
-      } else if (b_more_applicable_than_a && !a_more_applicable_than_b) {
-        // B clearly more applicable than A.
-        tombstones[a_index] = true;
-        tombstones_count += 1;
+        if (a_more_applicable_than_b && !b_more_applicable_than_a) {
+          // A clearly more applicable than B.
+          tombstones[b_index] = true;
+          tombstones_count += 1;
+        } else if (b_more_applicable_than_a && !a_more_applicable_than_b) {
+          // B clearly more applicable than A.
+          tombstones[a_index] = true;
+          tombstones_count += 1;
+        }
+
+        if (log_verbose){
+        const string_t a_human_type = resolver_function_to_human_string(
+            resolver, candidates[a_index], &tmp_arena);
+        const string_t b_human_type = resolver_function_to_human_string(
+            resolver, candidates[b_index], &tmp_arena);
+
+        LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
+            a_human_type.value, b_human_type.len, b_human_type.value, a_b, b_a);
+        }
       }
-
-      pg_array_append(checks, check, &tmp_arena);
-
-      const string_t a_human_type = resolver_function_to_human_string(
-          resolver, check.a_type_i, &tmp_arena);
-      const string_t b_human_type = resolver_function_to_human_string(
-          resolver, check.b_type_i, &tmp_arena);
-
-      LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
-          a_human_type.value, b_human_type.len, b_human_type.value, check.a_b,
-          check.b_a);
     }
   }
 
-  pg_assert(0 && "fixme");
-  return 0; // FIXME
+  for (u64 i = 0; i < pg_array_len(tombstones); i++) {
+    if (!tombstones[i])
+      return candidates[i];
+  }
+
+  __builtin_unreachable();
 }
 
 // TODO: Keep track of imported packages (including those imported by
@@ -6203,7 +6194,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
   pg_assert(arena != NULL);
 
   // TODO: Flag types coming from java as nullable.
-  
+
   if (string_eq_c(class_name, "kotlin.Any")) {
     *type_i = TYPE_ANY_I;
     return true;
@@ -6865,8 +6856,14 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const string_t type_literal_string =
         par_token_to_string(resolver->parser, node->main_token_i);
 
-    if (string_eq_c(type_literal_string, "Int") ||
-        string_eq_c(type_literal_string, "kotlin.Int")) {
+    if (string_eq_c(type_literal_string, "Any") ||
+        string_eq_c(type_literal_string, "kotlin.Any")) {
+      node->type_i = TYPE_ANY_I;
+    } else if (string_eq_c(type_literal_string, "Unit") ||
+               string_eq_c(type_literal_string, "kotlin.Unit")) {
+      node->type_i = TYPE_UNIT_I;
+    } else if (string_eq_c(type_literal_string, "Int") ||
+               string_eq_c(type_literal_string, "kotlin.Int")) {
       node->type_i = TYPE_INT_I;
     } else if (string_eq_c(type_literal_string, "Boolean") ||
                string_eq_c(type_literal_string, "kotlin.Boolean")) {
