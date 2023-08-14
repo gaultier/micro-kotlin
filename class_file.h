@@ -5327,25 +5327,25 @@ static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
   pg_assert(resolver->types != NULL);
   pg_assert(new_type != NULL);
 
-  if (new_type->kind==TYPE_INSTANCE){
-  if (string_eq_c(new_type->this_class_name, "java/lang/Boolean"))
-    new_type->kind = TYPE_BOOLEAN;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Char"))
-    new_type->kind = TYPE_CHAR;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Byte"))
-    new_type->kind = TYPE_BYTE;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Short"))
-    new_type->kind = TYPE_SHORT;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Integer"))
-    new_type->kind = TYPE_INT;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Float"))
-    new_type->kind = TYPE_FLOAT;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Long"))
-    new_type->kind = TYPE_LONG;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/Double"))
-    new_type->kind = TYPE_DOUBLE;
-  else if (string_eq_c(new_type->this_class_name, "java/lang/String"))
-    new_type->kind = TYPE_STRING;
+  if (new_type->kind == TYPE_INSTANCE) { // Try to lower to a know type.
+    if (string_eq_c(new_type->this_class_name, "java/lang/Boolean"))
+      new_type->kind = TYPE_BOOLEAN;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Char"))
+      new_type->kind = TYPE_CHAR;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Byte"))
+      new_type->kind = TYPE_BYTE;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Short"))
+      new_type->kind = TYPE_SHORT;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Integer"))
+      new_type->kind = TYPE_INT;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Float"))
+      new_type->kind = TYPE_FLOAT;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Long"))
+      new_type->kind = TYPE_LONG;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/Double"))
+      new_type->kind = TYPE_DOUBLE;
+    else if (string_eq_c(new_type->this_class_name, "java/lang/String"))
+      new_type->kind = TYPE_STRING;
   }
 
   pg_array_append(resolver->types, *new_type, arena);
