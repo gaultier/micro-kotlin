@@ -208,6 +208,13 @@ typedef struct pg_array_header_t {
       pg_array_drop_last(x);                                                   \
   } while (0)
 
+#define pg_array_swap_remove_at(x, i)                                          \
+  do {                                                                         \
+    pg_assert(i < pg_array_len(x));                                            \
+    x[i] = x[pg_array_len(x) - 1]; /* Swap. */                                 \
+    pg_array_drop_last(x);                                                     \
+  } while (0)
+
 // ------------------- Utils
 
 static u32 ut_ht_lookup(u64 hash, u32 exp, u32 idx) {
@@ -668,17 +675,17 @@ typedef struct {
 } cf_stack_map_frame_t;
 
 enum __attribute__((packed)) ty_type_kind_t {
-  TYPE_KOTLIN_ANY = 0,
-  TYPE_KOTLIN_UNIT = 1 << 0,
-  TYPE_KOTLIN_BOOLEAN = 1 << 1,
-  TYPE_KOTLIN_BYTE = 1 << 2,
-  TYPE_KOTLIN_CHAR = 1 << 3,
-  TYPE_KOTLIN_SHORT = 1 << 4,
-  TYPE_KOTLIN_INT = 1 << 5,
-  TYPE_KOTLIN_FLOAT = 1 << 6,
-  TYPE_KOTLIN_LONG = 1 << 7,
-  TYPE_KOTLIN_DOUBLE = 1 << 8,
-  TYPE_KOTLIN_STRING = 1 << 9,
+  TYPE_ANY = 0,
+  TYPE_UNIT = 1 << 0,
+  TYPE_BOOLEAN = 1 << 1,
+  TYPE_BYTE = 1 << 2,
+  TYPE_CHAR = 1 << 3,
+  TYPE_SHORT = 1 << 4,
+  TYPE_INT = 1 << 5,
+  TYPE_FLOAT = 1 << 6,
+  TYPE_LONG = 1 << 7,
+  TYPE_DOUBLE = 1 << 8,
+  TYPE_STRING = 1 << 9,
   TYPE_METHOD = 1 << 10,
   TYPE_INSTANCE = 1 << 11,
 
@@ -898,48 +905,39 @@ typedef struct {
 
 static bool resolver_is_type_integer(const ty_type_t *type) {
   switch (type->kind) {
-  case TYPE_KOTLIN_BYTE:
-  case TYPE_KOTLIN_SHORT:
-  case TYPE_KOTLIN_INT:
-  case TYPE_KOTLIN_LONG:
+  case TYPE_BYTE:
+  case TYPE_SHORT:
+  case TYPE_INT:
+  case TYPE_LONG:
     return true;
   default:
     return false;
   }
 }
 
-static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
-
-  pg_assert(types != NULL);
-  pg_assert(lhs_i < pg_array_len(types));
-  pg_assert(rhs_i < pg_array_len(types));
-
-  const ty_type_t *const lhs = &types[lhs_i];
-  const ty_type_t *const rhs = &types[rhs_i];
-
+static bool resolver_are_types_equal(const resolver_t *resolver,
+                                     const ty_type_t *lhs,
+                                     const ty_type_t *rhs) {
   if (lhs->kind != rhs->kind)
     return false;
 
-  if (lhs->flag & rhs->flag)
-    return true;
-
-  if (lhs->kind == TYPE_INSTANCE &&
-      rhs->kind == TYPE_INSTANCE) {
+  // Instances: Check the class name is the same.
+  if (lhs->kind == TYPE_INSTANCE && rhs->kind == TYPE_INSTANCE) {
     return string_eq(lhs->this_class_name, rhs->this_class_name);
   }
 
-  if ((lhs->kind == TYPE_JVM_VOID) && (rhs->kind == TYPE_JVM_VOID))
-    return true;
-
-  if ((lhs->kind == TYPE_KOTLIN_UNIT) && (rhs->kind == TYPE_KOTLIN_UNIT))
-    return true;
-
+  // Methods: Check that the class name, argument types, and return types, are
+  // the same.
   if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
     const ty_type_method_t *const lhs_method = &lhs->v.method;
     const ty_type_method_t *const rhs_method = &rhs->v.method;
 
-    if (!ty_types_equal(types, lhs_method->return_type_i,
-                        rhs_method->return_type_i))
+    if (!string_eq(lhs->this_class_name, rhs->this_class_name))
+      return false;
+
+    if (!resolver_are_types_equal(resolver,
+                                  &resolver->types[lhs_method->return_type_i],
+                                  &resolver->types[rhs_method->return_type_i]))
       return false;
 
     if (pg_array_len(lhs_method->argument_types_i) !=
@@ -950,14 +948,98 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
       const u32 lhs_arg_i = lhs_method->argument_types_i[i];
       const u32 rhs_arg_i = rhs_method->argument_types_i[i];
 
-      if (!ty_types_equal(types, lhs_arg_i, rhs_arg_i))
+      if (!resolver_are_types_equal(resolver, &resolver->types[lhs_arg_i],
+                                    &resolver->types[rhs_arg_i]))
         return false;
     }
 
     return true;
   }
 
-  return lhs->kind == rhs->kind;
+  // Otherwise, having the same `kind` is enough.
+  return true;
+}
+
+static u16 resolver_widen_integer_type(const ty_type_t *type) {
+  pg_assert(resolver_is_type_integer(type));
+
+  if (type->kind == TYPE_INT) {
+    return TYPE_INT | TYPE_LONG | TYPE_BYTE | TYPE_SHORT;
+  } else if (type->kind == TYPE_SHORT) {
+    return TYPE_BYTE | TYPE_SHORT;
+  } else {
+    return type->kind;
+  }
+}
+
+static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
+                                                const ty_type_t *b) {
+  pg_assert(resolver_is_type_integer(a));
+
+  // Every type is a subtype of Any.
+  if (b->kind == TYPE_ANY)
+    return true;
+
+  // Integer types are subtypes of nothing else than Any (well to be exact they
+  // are subtypes of Comparable but we do not implement interfaces yet).
+  if (!resolver_is_type_integer(b))
+    return false;
+
+  return resolver_widen_integer_type(a) & resolver_widen_integer_type(b);
+}
+
+static bool resolver_is_type_subtype_of(const resolver_t *resolver,
+                                        const ty_type_t *a,
+                                        const ty_type_t *b) {
+  // `A <: A` always.
+  if (resolver_are_types_equal(resolver, a, b))
+    return true;
+
+  // Integers have special rules.
+  if (resolver_is_type_integer(a))
+    return resolver_is_type_subtype_of(resolver, a, b);
+
+  pg_assert(0 && "todo");
+}
+
+static bool resolver_is_function_candidate_applicable(
+    const resolver_t *resolver, const ty_type_t *function_call_type,
+    const ty_type_t *function_definition_type) {
+  pg_assert(function_call_type->kind == TYPE_METHOD);
+  pg_assert(function_definition_type->kind == TYPE_METHOD);
+
+  const ty_type_method_t *call = &function_call_type->v.method;
+  const ty_type_method_t *definition = &function_definition_type->v.method;
+
+  const u8 call_argument_count = pg_array_len(call->argument_types_i);
+  const u8 definition_argument_count =
+      pg_array_len(definition->argument_types_i);
+
+  // Technically there is no such check in the spec but since we do not
+  // implement varargs or default arguments yet, this will do for now.
+  if (call_argument_count != definition_argument_count)
+    return false;
+
+  for (u8 i = 0; i < call_argument_count; i++) {
+    const ty_type_t *call_argument =
+        &resolver->types[call->argument_types_i[i]];
+    const ty_type_t *definition_argument =
+        &resolver->types[definition->argument_types_i[i]];
+
+    const bool is_call_argument_subtype_of_definition_argument =
+        resolver_is_type_subtype_of(resolver, call_argument,
+                                    definition_argument);
+
+    // TODO: Technically, we need to add the constraint `call argument <:
+    // definition_argument` and afterwards check the soundness, but for now it
+    // should do until we have generics (or varargs perhaps).
+    if (!is_call_argument_subtype_of_definition_argument)
+      return false;
+  }
+
+  // Per spec, the return type is not checked.
+
+  return true;
 }
 
 static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
@@ -1310,62 +1392,62 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   switch (remaining.value[0]) {
   case 'V': {
-    type->kind = TYPE_KOTLIN_UNIT;
+    type->kind = TYPE_UNIT;
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'S': {
-    type->kind = TYPE_KOTLIN_SHORT;
+    type->kind = TYPE_SHORT;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'B': {
-    type->kind = TYPE_KOTLIN_BYTE;
+    type->kind = TYPE_BYTE;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'C': {
-    type->kind = TYPE_KOTLIN_CHAR;
+    type->kind = TYPE_CHAR;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'D': {
-    type->kind = TYPE_KOTLIN_DOUBLE;
+    type->kind = TYPE_DOUBLE;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'F': {
-    type->kind = TYPE_KOTLIN_FLOAT;
+    type->kind = TYPE_FLOAT;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'I': {
-    type->kind = TYPE_KOTLIN_INT;
+    type->kind = TYPE_INT;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'J': {
-    type->kind = TYPE_KOTLIN_LONG;
+    type->kind = TYPE_LONG;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
   }
 
   case 'Z': {
-    type->kind = TYPE_KOTLIN_BOOLEAN;
+    type->kind = TYPE_BOOLEAN;
 
     string_drop_first_n(&remaining, 1);
     return remaining;
@@ -1378,7 +1460,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     string_drop_until_incl(&remaining, ';');
     type->this_class_name.len -= remaining.len;
     if (string_eq_c(type->this_class_name, "java/lang/String")) {
-      type->kind = TYPE_KOTLIN_STRING;
+      type->kind = TYPE_STRING;
       type->this_class_name = (string_t){0};
     } else {
       type->kind = TYPE_INSTANCE;
@@ -3891,28 +3973,28 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
-  case TYPE_KOTLIN_ANY:
-    return "TYPE_KOTLIN_ANY";
-  case TYPE_KOTLIN_UNIT:
-    return "TYPE_KOTLIN_UNIT";
-  case TYPE_KOTLIN_BOOLEAN:
-    return "TYPE_KOTLIN_BOOLEAN";
-  case TYPE_KOTLIN_BYTE:
-    return "TYPE_KOTLIN_BYTE";
-  case TYPE_KOTLIN_CHAR:
-    return "TYPE_KOTLIN_CHAR";
-  case TYPE_KOTLIN_SHORT:
-    return "TYPE_KOTLIN_SHORT";
-  case TYPE_KOTLIN_INT:
-    return "TYPE_KOTLIN_INT";
-  case TYPE_KOTLIN_FLOAT:
-    return "TYPE_KOTLIN_FLOAT";
-  case TYPE_KOTLIN_LONG:
-    return "TYPE_KOTLIN_LONG";
-  case TYPE_KOTLIN_DOUBLE:
-    return "TYPE_KOTLIN_DOUBLE";
-  case TYPE_KOTLIN_STRING:
-    return "TYPE_KOTLIN_STRING";
+  case TYPE_ANY:
+    return "TYPE_ANY";
+  case TYPE_UNIT:
+    return "TYPE_UNIT";
+  case TYPE_BOOLEAN:
+    return "TYPE_BOOLEAN";
+  case TYPE_BYTE:
+    return "TYPE_BYTE";
+  case TYPE_CHAR:
+    return "TYPE_CHAR";
+  case TYPE_SHORT:
+    return "TYPE_SHORT";
+  case TYPE_INT:
+    return "TYPE_INT";
+  case TYPE_FLOAT:
+    return "TYPE_FLOAT";
+  case TYPE_LONG:
+    return "TYPE_LONG";
+  case TYPE_DOUBLE:
+    return "TYPE_DOUBLE";
+  case TYPE_STRING:
+    return "TYPE_STRING";
   case TYPE_METHOD:
     return "TYPE_METHOD";
   case TYPE_JVM_VOID:
@@ -3950,27 +4032,27 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
-  case TYPE_KOTLIN_ANY:
+  case TYPE_ANY:
     return string_make_from_c("kotlin.Any", arena);
-  case TYPE_KOTLIN_BOOLEAN:
+  case TYPE_BOOLEAN:
     return string_make_from_c("kotlin.Boolean", arena);
-  case TYPE_KOTLIN_BYTE:
+  case TYPE_BYTE:
     return string_make_from_c("kotlin.Byte", arena);
-  case TYPE_KOTLIN_CHAR:
+  case TYPE_CHAR:
     return string_make_from_c("kotlin.Char", arena);
-  case TYPE_KOTLIN_SHORT:
+  case TYPE_SHORT:
     return string_make_from_c("kotlin.Short", arena);
-  case TYPE_KOTLIN_INT:
+  case TYPE_INT:
     return string_make_from_c("kotlin.Int", arena);
-  case TYPE_KOTLIN_FLOAT:
+  case TYPE_FLOAT:
     return string_make_from_c("kotlin.Float", arena);
-  case TYPE_KOTLIN_LONG:
+  case TYPE_LONG:
     return string_make_from_c("kotlin.Long", arena);
-  case TYPE_KOTLIN_DOUBLE:
+  case TYPE_DOUBLE:
     return string_make_from_c("kotlin.Double", arena);
-  case TYPE_KOTLIN_STRING:
+  case TYPE_STRING:
     return string_make_from_c("kotlin.String", arena);
-  case TYPE_KOTLIN_UNIT:
+  case TYPE_UNIT:
     return string_make_from_c("kotlin.Unit", arena);
   case TYPE_JVM_VOID:
     return string_make_from_c("jvm.Void", arena);
@@ -5769,6 +5851,23 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, u32 this_type_i,
                                           arena_t *scratch_arena,
                                           arena_t *arena);
 
+static void resolver_remove_non_applicable_function_candidates(
+    const resolver_t *resolver, u32 *candidate_functions_i,
+    const ty_type_t *call_site_type) {
+
+  u64 i = 0;
+  while (i < pg_array_len(candidate_functions_i)) {
+    const ty_type_t *const candidate_type =
+        &resolver->types[candidate_functions_i[i]];
+    if (!resolver_is_function_candidate_applicable(resolver, call_site_type,
+                                                   candidate_type)) {
+      pg_array_swap_remove_at(candidate_functions_i, i);
+    } else {
+      i++;
+    }
+  }
+}
+
 // TODO: Keep track of imported packages (including those imported by default).
 static bool
 resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
@@ -5782,13 +5881,16 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   resolver_collect_free_functions_of_name(resolver, method_name,
                                           candidate_functions_i, arena);
 
-  if (pg_array_len(*candidate_functions_i) == 0) {
-    return false;
-  }
-
   const ty_type_t *const call_site_type = &resolver->types[call_site_type_i];
   pg_assert(call_site_type->kind == TYPE_METHOD);
   pg_assert(call_site_type->v.method.argument_types_i != NULL);
+
+  resolver_remove_non_applicable_function_candidates(
+      resolver, *candidate_functions_i, call_site_type);
+
+  if (pg_array_len(*candidate_functions_i) == 0) {
+    return false;
+  }
 
   const u8 call_argument_count =
       pg_array_len(call_site_type->v.method.argument_types_i);
@@ -5817,8 +5919,9 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
       const u32 call_site_argument_type_i =
           call_site_type->v.method.argument_types_i[j];
 
-      if (ty_types_equal(resolver->types, declared_argument_type_i,
-                         call_site_argument_type_i))
+      if (resolver_are_types_equal(resolver,
+                                   &resolver->types[declared_argument_type_i],
+                                   &resolver->types[call_site_argument_type_i]))
         continue;
 
       matching = false;
@@ -5828,9 +5931,10 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
       continue;
 
     // Check return type
-    if (!ty_types_equal(resolver->types,
-                        declared_function_type->v.method.return_type_i,
-                        call_site_type->v.method.return_type_i))
+    if (!resolver_are_types_equal(
+            resolver,
+            &resolver->types[declared_function_type->v.method.return_type_i],
+            &resolver->types[call_site_type->v.method.return_type_i]))
       continue;
 
     *picked_method_type_i = candidate_i;
@@ -5840,8 +5944,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   return false;
 }
 
-// TODO: Something smarter.
-// TODO: Find a better name.
+// TODO: Remove.
 static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
                            u32 *result_i) {
   pg_assert(resolver != NULL);
@@ -5853,44 +5956,40 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   const ty_type_t *const lhs_type = &resolver->types[lhs_i];
   const ty_type_t *const rhs_type = &resolver->types[rhs_i];
 
-  if (ty_types_equal(resolver->types, lhs_i, rhs_i)) {
+  if (resolver_are_types_equal(resolver, lhs_type, rhs_type)) {
     *result_i = lhs_i;
     return true;
   }
 
   // Any is compatible with everything.
-  if (lhs_type->kind == TYPE_KOTLIN_ANY) {
+  if (lhs_type->kind == TYPE_ANY) {
     *result_i = rhs_i;
     return true;
   }
 
   // Any is compatible with everything.
-  if (rhs_type->kind == TYPE_KOTLIN_ANY) {
+  if (rhs_type->kind == TYPE_ANY) {
     *result_i = lhs_i;
     return true;
   }
 
   // FIXME: Widen.
-  if ((lhs_type->kind == TYPE_KOTLIN_INT) &&
-      (rhs_type->kind == TYPE_KOTLIN_BYTE)) {
+  if ((lhs_type->kind == TYPE_INT) && (rhs_type->kind == TYPE_BYTE)) {
     *result_i = rhs_i;
     return true;
   }
 
-  if ((lhs_type->kind == TYPE_KOTLIN_BYTE) &&
-      (rhs_type->kind == TYPE_KOTLIN_INT)) {
+  if ((lhs_type->kind == TYPE_BYTE) && (rhs_type->kind == TYPE_INT)) {
     *result_i = lhs_i;
     return true;
   }
 
-  if ((lhs_type->kind == TYPE_KOTLIN_INT) &&
-      (rhs_type->kind == TYPE_KOTLIN_SHORT)) {
+  if ((lhs_type->kind == TYPE_INT) && (rhs_type->kind == TYPE_SHORT)) {
     *result_i = rhs_i;
     return true;
   }
 
-  if ((lhs_type->kind == TYPE_KOTLIN_SHORT) &&
-      (rhs_type->kind == TYPE_KOTLIN_INT)) {
+  if ((lhs_type->kind == TYPE_SHORT) && (rhs_type->kind == TYPE_INT)) {
     *result_i = lhs_i;
     return true;
   }
@@ -6079,53 +6178,44 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
     if (type->kind == TYPE_METHOD)
       continue;
 
-    if (type->kind == TYPE_KOTLIN_UNIT &&
-        string_eq_c(class_name, "kotlin.Unit")) {
+    if (type->kind == TYPE_UNIT && string_eq_c(class_name, "kotlin.Unit")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_ANY &&
-        string_eq_c(class_name, "kotlin.Any")) {
+    if (type->kind == TYPE_ANY && string_eq_c(class_name, "kotlin.Any")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_BOOLEAN &&
+    if (type->kind == TYPE_BOOLEAN &&
         string_eq_c(class_name, "kotlin.Boolean")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_BYTE &&
-        string_eq_c(class_name, "kotlin.Byte")) {
+    if (type->kind == TYPE_BYTE && string_eq_c(class_name, "kotlin.Byte")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_CHAR &&
-        string_eq_c(class_name, "kotlin.Char")) {
+    if (type->kind == TYPE_CHAR && string_eq_c(class_name, "kotlin.Char")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_SHORT &&
-        string_eq_c(class_name, "kotlin.Short")) {
+    if (type->kind == TYPE_SHORT && string_eq_c(class_name, "kotlin.Short")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_INT &&
-        string_eq_c(class_name, "kotlin.Int")) {
+    if (type->kind == TYPE_INT && string_eq_c(class_name, "kotlin.Int")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_FLOAT &&
-        string_eq_c(class_name, "kotlin.Float")) {
+    if (type->kind == TYPE_FLOAT && string_eq_c(class_name, "kotlin.Float")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_LONG &&
-        string_eq_c(class_name, "kotlin.Long")) {
+    if (type->kind == TYPE_LONG && string_eq_c(class_name, "kotlin.Long")) {
       *type_i = i;
       return true;
     }
-    if (type->kind == TYPE_KOTLIN_DOUBLE &&
-        string_eq_c(class_name, "kotlin.Double")) {
+    if (type->kind == TYPE_DOUBLE && string_eq_c(class_name, "kotlin.Double")) {
       *type_i = i;
       return true;
     } else if (type->kind == TYPE_INSTANCE &&
@@ -6177,21 +6267,21 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       ty_type_t this_type = {0};
 
       if (string_eq_c(class_name, "java/lang/Boolean"))
-        this_type.kind = TYPE_KOTLIN_BOOLEAN;
+        this_type.kind = TYPE_BOOLEAN;
       else if (string_eq_c(class_name, "java/lang/Char"))
-        this_type.kind = TYPE_KOTLIN_CHAR;
+        this_type.kind = TYPE_CHAR;
       else if (string_eq_c(class_name, "java/lang/Byte"))
-        this_type.kind = TYPE_KOTLIN_BYTE;
+        this_type.kind = TYPE_BYTE;
       else if (string_eq_c(class_name, "java/lang/Short"))
-        this_type.kind = TYPE_KOTLIN_SHORT;
+        this_type.kind = TYPE_SHORT;
       else if (string_eq_c(class_name, "java/lang/Integer"))
-        this_type.kind = TYPE_KOTLIN_INT;
+        this_type.kind = TYPE_INT;
       else if (string_eq_c(class_name, "java/lang/Float"))
-        this_type.kind = TYPE_KOTLIN_FLOAT;
+        this_type.kind = TYPE_FLOAT;
       else if (string_eq_c(class_name, "java/lang/Long"))
-        this_type.kind = TYPE_KOTLIN_LONG;
+        this_type.kind = TYPE_LONG;
       else if (string_eq_c(class_name, "java/lang/Double"))
-        this_type.kind = TYPE_KOTLIN_DOUBLE;
+        this_type.kind = TYPE_DOUBLE;
       else {
         this_type.kind = TYPE_INSTANCE;
         this_type.this_class_name = string_make(class_name, arena);
@@ -6394,8 +6484,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_KOTLIN_ANY},
-                    arena);
+    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_ANY}, arena);
 
     return node->type_i = pg_array_last_index(resolver->types);
   case AST_KIND_BOOL: {
@@ -6506,7 +6595,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       node->type_i =
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
-      if (type->kind == TYPE_KOTLIN_BOOLEAN) {
+      if (type->kind == TYPE_BOOLEAN) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(
@@ -6564,7 +6653,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
-      if (lhs_type->kind == TYPE_KOTLIN_BOOLEAN) {
+      if (lhs_type->kind == TYPE_BOOLEAN) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6696,7 +6785,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind == TYPE_KOTLIN_BOOLEAN) {
+    if (type_condition->kind == TYPE_BOOLEAN) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error, "incompatible types, expected Boolean, got: ", arena);
@@ -6720,7 +6809,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind == TYPE_KOTLIN_BOOLEAN) {
+    if (type_condition->kind == TYPE_BOOLEAN) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
@@ -6896,7 +6985,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(function_type->kind == TYPE_METHOD);
     const u32 return_type_i = function_type->v.method.return_type_i;
 
-    if (!ty_types_equal(resolver->types, node->type_i, return_type_i)) {
+    if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
+                                  &resolver->types[return_type_i])) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error, "incompatible return type in function `",
                             arena);

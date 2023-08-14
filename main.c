@@ -143,12 +143,12 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, 1 << 18, &arena);
     const ty_type_t any_type = {
-        .kind = TYPE_KOTLIN_ANY,
+        .kind = TYPE_ANY,
     };
     pg_array_append(resolver.types, any_type, &arena);
 
     const ty_type_t unit_type = {
-        .kind = TYPE_KOTLIN_UNIT,
+        .kind = TYPE_UNIT,
     };
     pg_array_append(resolver.types, unit_type, &arena);
 
