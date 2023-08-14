@@ -734,10 +734,7 @@ struct ty_type_t {
   } v;
   ty_type_kind_t kind;
   u16 flag;
-  u16 constant_pool_item_i;
-  pg_pad(2);
   u32 super_type_i;
-  pg_pad(4);
 };
 
 typedef struct ty_type_t ty_type_t;
