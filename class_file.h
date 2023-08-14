@@ -6202,6 +6202,8 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
   pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
+  // TODO: Flag types coming from java as nullable.
+  
   if (string_eq_c(class_name, "kotlin.Any")) {
     *type_i = TYPE_ANY_I;
     return true;
@@ -6212,28 +6214,36 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
              string_eq_c(class_name, "java/lang/Boolean")) {
     *type_i = TYPE_BOOLEAN_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Byte")||string_eq_c(class_name,"java/lang/Byte")) {
+  } else if (string_eq_c(class_name, "kotlin.Byte") ||
+             string_eq_c(class_name, "java/lang/Byte")) {
     *type_i = TYPE_BYTE_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Char")||string_eq_c(class_name,"java/lang/Char")) {
+  } else if (string_eq_c(class_name, "kotlin.Char") ||
+             string_eq_c(class_name, "java/lang/Char")) {
     *type_i = TYPE_CHAR_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Short")||string_eq_c(class_name,"java/lang/Short")) {
+  } else if (string_eq_c(class_name, "kotlin.Short") ||
+             string_eq_c(class_name, "java/lang/Short")) {
     *type_i = TYPE_SHORT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Int")||string_eq_c(class_name,"java/lang/Integer")) {
+  } else if (string_eq_c(class_name, "kotlin.Int") ||
+             string_eq_c(class_name, "java/lang/Integer")) {
     *type_i = TYPE_INT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Float")||string_eq_c(class_name,"java/lang/Float")) {
+  } else if (string_eq_c(class_name, "kotlin.Float") ||
+             string_eq_c(class_name, "java/lang/Float")) {
     *type_i = TYPE_FLOAT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Long")||string_eq_c(class_name,"java/lang/Long")) {
+  } else if (string_eq_c(class_name, "kotlin.Long") ||
+             string_eq_c(class_name, "java/lang/Long")) {
     *type_i = TYPE_LONG_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Double")||string_eq_c(class_name,"java/lang/Double")) {
+  } else if (string_eq_c(class_name, "kotlin.Double") ||
+             string_eq_c(class_name, "java/lang/Double")) {
     *type_i = TYPE_DOUBLE_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.String")||string_eq_c(class_name, "java/lang/String")) {
+  } else if (string_eq_c(class_name, "kotlin.String") ||
+             string_eq_c(class_name, "java/lang/String")) {
     *type_i = TYPE_STRING_I;
     return true;
   }
