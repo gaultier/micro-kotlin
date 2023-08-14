@@ -6001,7 +6001,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     return true;
   }
 
-*picked_method_type_i=  resolver_select_most_specific_candidate_function(
+  *picked_method_type_i = resolver_select_most_specific_candidate_function(
       resolver, *candidate_functions_i, scratch_arena, arena);
 
   return true;
@@ -6667,7 +6667,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       node->type_i =
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
-      if (type->kind == TYPE_BOOLEAN) {
+      if (type->kind != TYPE_BOOLEAN) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "incompatible types: got ", arena);
         string_append_string(
@@ -6722,7 +6722,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
-      if (lhs_type->kind == TYPE_BOOLEAN) {
+      if (lhs_type->kind != TYPE_BOOLEAN) {
         string_t error = string_reserve(256, arena);
         string_append_cstring(
             &error, "incompatible types: expected Boolean, got: ", arena);
@@ -6846,7 +6846,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind == TYPE_BOOLEAN) {
+    if (type_condition->kind != TYPE_BOOLEAN) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(
           &error, "incompatible types, expected Boolean, got: ", arena);
@@ -6870,7 +6870,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
-    if (type_condition->kind == TYPE_BOOLEAN) {
+    if (type_condition->kind != TYPE_BOOLEAN) {
       string_t error = string_reserve(256, arena);
       string_append_cstring(&error,
                             "incompatible types, expect Boolean, got: ", arena);
