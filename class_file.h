@@ -680,7 +680,7 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_KOTLIN_DOUBLE = 1 << 8,
   TYPE_KOTLIN_STRING = 1 << 9,
   TYPE_METHOD = 1 << 10,
-  TYPE_KOTLIN_INSTANCE_REFERENCE = 1 << 11,
+  TYPE_INSTANCE = 1 << 11,
 
   // After lowering
   // TODO: Remove?
@@ -694,7 +694,7 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_JVM_LONG,
   TYPE_JVM_DOUBLE,
   TYPE_JVM_STRING,
-  TYPE_JVM_ARRAY_REFERENCE,
+  TYPE_ARRAY,
   TYPE_JVM_CONSTRUCTOR,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
@@ -923,8 +923,8 @@ static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
   if (lhs->flag & rhs->flag)
     return true;
 
-  if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-      rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
+  if (lhs->kind == TYPE_INSTANCE &&
+      rhs->kind == TYPE_INSTANCE) {
     return string_eq(lhs->this_class_name, rhs->this_class_name);
   }
 
@@ -996,7 +996,7 @@ cg_type_to_verification_info(const ty_type_t *type) {
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_FLOAT};
   case TYPE_JVM_DOUBLE:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
-  case TYPE_KOTLIN_INSTANCE_REFERENCE:
+  case TYPE_INSTANCE:
   case TYPE_JVM_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
@@ -1251,7 +1251,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     string_append_cstring(descriptor, "Ljava/lang/String;", arena);
     break;
   }
-  case TYPE_KOTLIN_INSTANCE_REFERENCE: {
+  case TYPE_INSTANCE: {
     const string_t java_class_name = type->this_class_name;
 
     string_append_char(descriptor, 'L', arena);
@@ -1268,7 +1268,7 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     string_append_char(descriptor, 'Z', arena);
     break;
   }
-  case TYPE_JVM_ARRAY_REFERENCE: {
+  case TYPE_ARRAY: {
     string_append_char(descriptor, '[', arena);
 
     cf_fill_descriptor_string(types, type->v.array_type_i, descriptor, arena);
@@ -1381,14 +1381,14 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
       type->kind = TYPE_KOTLIN_STRING;
       type->this_class_name = (string_t){0};
     } else {
-      type->kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+      type->kind = TYPE_INSTANCE;
     }
 
     return remaining;
   }
 
   case '[': {
-    type->kind = TYPE_JVM_ARRAY_REFERENCE;
+    type->kind = TYPE_ARRAY;
     ty_type_t item_type = {0};
 
     string_t descriptor_remaining = {
@@ -3935,8 +3935,8 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_JVM_LONG";
   case TYPE_JVM_DOUBLE:
     return "TYPE_JVM_DOUBLE";
-  case TYPE_JVM_ARRAY_REFERENCE:
-    return "TYPE_JVM_ARRAY_REFERENCE";
+  case TYPE_ARRAY:
+    return "TYPE_ARRAY";
   case TYPE_JVM_CONSTRUCTOR:
     return "TYPE_JVM_CONSTRUCTOR";
   default:
@@ -3992,13 +3992,13 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("jvm.Double", arena);
   case TYPE_JVM_STRING:
     return string_make_from_c("jvm.String", arena);
-  case TYPE_JVM_ARRAY_REFERENCE: {
-    string_t result = string_make_from_c("jvm.Array<", arena);
+  case TYPE_ARRAY: {
+    string_t result = string_make_from_c("Array<", arena);
     string_append_string(&result, type->this_class_name, arena);
     string_append_char(&result, '>', arena);
     return result;
   }
-  case TYPE_KOTLIN_INSTANCE_REFERENCE: {
+  case TYPE_INSTANCE: {
     return string_make(type->this_class_name, arena);
   }
   case TYPE_METHOD: {
@@ -5513,7 +5513,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
                                &local_file_header, &class_file, arena);
 
         ty_type_t type = {
-            .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+            .kind = TYPE_INSTANCE,
             .this_class_name = string_make(class_file.class_name, arena),
         };
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
@@ -5570,7 +5570,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
                                arena);
 
         ty_type_t type = {
-            .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+            .kind = TYPE_INSTANCE,
             .this_class_name = string_make(class_file.class_name, arena),
         };
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
@@ -6128,7 +6128,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
         string_eq_c(class_name, "kotlin.Double")) {
       *type_i = i;
       return true;
-    } else if (type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+    } else if (type->kind == TYPE_INSTANCE &&
                string_eq(class_name, type->this_class_name)) {
       *type_i = i;
       return true;
@@ -6193,7 +6193,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       else if (string_eq_c(class_name, "java/lang/Double"))
         this_type.kind = TYPE_KOTLIN_DOUBLE;
       else {
-        this_type.kind = TYPE_KOTLIN_INSTANCE_REFERENCE;
+        this_type.kind = TYPE_INSTANCE;
         this_type.this_class_name = string_make(class_name, arena);
       };
 
@@ -6217,7 +6217,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
 
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
       const ty_type_t *const type = &resolver->types[i];
-      if (type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      if (type->kind == TYPE_INSTANCE &&
           string_eq(class_name, type->this_class_name)) {
         *type_i = i;
         return true;
@@ -8847,14 +8847,14 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     // Fill locals (method arguments).
     {
       const ty_type_t string_type = {
-          .kind = TYPE_KOTLIN_INSTANCE_REFERENCE,
+          .kind = TYPE_INSTANCE,
           .this_class_name = string_make_from_c("java/lang/String", arena),
       };
       pg_array_append(gen->resolver->types, string_type, arena);
       const u32 string_type_i = pg_array_last_index(gen->resolver->types);
 
       const ty_type_t source_method_argument_types = {
-          .kind = TYPE_JVM_ARRAY_REFERENCE,
+          .kind = TYPE_ARRAY,
           .this_class_name = string_make_from_c("FIXME", arena),
           .v = {.array_type_i = string_type_i},
       };
