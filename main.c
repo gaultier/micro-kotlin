@@ -143,14 +143,12 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, 1 << 18, &arena);
     const ty_type_t any_type = {
-        .this_class_name = string_make_from_c("kotlin.Any", &arena),
+      .kind=TYPE_KOTLIN_ANY,
     };
     pg_array_append(resolver.types, any_type, &arena);
 
     const ty_type_t unit_type = {
-        .kind = TYPE_JVM_VOID,
-        .flag = TYPE_FLAG_KOTLIN_UNIT,
-        .this_class_name = string_make_from_c("kotlin.Unit", &arena),
+        .kind = TYPE_KOTLIN_UNIT,
     };
     pg_array_append(resolver.types, unit_type, &arena);
 

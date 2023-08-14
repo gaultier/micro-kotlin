@@ -38,6 +38,7 @@ bool is_candidate_applicable() {
 
       Add constraint: Ti subtype of Uj
     }
+    Add remaining constraints from declaration site (e.g.: remaining arguments?)
 
     return are_constraints_sound()
   }
@@ -103,6 +104,9 @@ for K1, K2 unique pair of candidates from the candidates set {
 }
 ```
 
-Example:
+Example: `println("hello")`
 
+Applicable functions:
+- `println(Any)`
+- 
 
