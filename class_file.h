@@ -688,21 +688,7 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_STRING = 1 << 9,
   TYPE_METHOD = 1 << 10,
   TYPE_INSTANCE = 1 << 11,
-
-  // After lowering
-  // TODO: Remove?
-  TYPE_JVM_VOID,
-  TYPE_JVM_BOOL,
-  TYPE_JVM_BYTE,
-  TYPE_JVM_CHAR,
-  TYPE_JVM_SHORT,
-  TYPE_JVM_INT,
-  TYPE_JVM_FLOAT,
-  TYPE_JVM_LONG,
-  TYPE_JVM_DOUBLE,
-  TYPE_JVM_STRING,
-  TYPE_ARRAY,
-  TYPE_JVM_CONSTRUCTOR,
+  TYPE_ARRAY = 1 << 12,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
 
@@ -1067,20 +1053,20 @@ static cf_verification_info_t
 cg_type_to_verification_info(const ty_type_t *type) {
 
   switch (type->kind) {
-  case TYPE_JVM_BOOL:
-  case TYPE_JVM_BYTE:
-  case TYPE_JVM_CHAR:
-  case TYPE_JVM_SHORT:
-  case TYPE_JVM_INT:
+  case TYPE_BOOLEAN:
+  case TYPE_BYTE:
+  case TYPE_CHAR:
+  case TYPE_SHORT:
+  case TYPE_INT:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_INT};
-  case TYPE_JVM_LONG:
+  case TYPE_LONG:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG};
-  case TYPE_JVM_FLOAT:
+  case TYPE_FLOAT:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_FLOAT};
-  case TYPE_JVM_DOUBLE:
+  case TYPE_DOUBLE:
     return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
   case TYPE_INSTANCE:
-  case TYPE_JVM_STRING:
+  case TYPE_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = 0 /* type->constant_pool_item_i */ // FIXME,
@@ -1302,35 +1288,35 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
-  case TYPE_JVM_VOID: {
+  case TYPE_UNIT: {
     string_append_char(descriptor, 'V', arena);
     break;
   }
-  case TYPE_JVM_BYTE: {
+  case TYPE_BYTE: {
     string_append_char(descriptor, 'B', arena);
     break;
   }
-  case TYPE_JVM_CHAR: {
+  case TYPE_CHAR: {
     string_append_char(descriptor, 'C', arena);
     break;
   }
-  case TYPE_JVM_DOUBLE: {
+  case TYPE_DOUBLE: {
     string_append_char(descriptor, 'D', arena);
     break;
   }
-  case TYPE_JVM_FLOAT: {
+  case TYPE_FLOAT: {
     string_append_char(descriptor, 'F', arena);
     break;
   }
-  case TYPE_JVM_INT: {
+  case TYPE_INT: {
     string_append_char(descriptor, 'I', arena);
     break;
   }
-  case TYPE_JVM_LONG: {
+  case TYPE_LONG: {
     string_append_char(descriptor, 'J', arena);
     break;
   }
-  case TYPE_JVM_STRING: {
+  case TYPE_STRING: {
     string_append_cstring(descriptor, "Ljava/lang/String;", arena);
     break;
   }
@@ -1343,11 +1329,11 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
 
     break;
   }
-  case TYPE_JVM_SHORT: {
+  case TYPE_SHORT: {
     string_append_char(descriptor, 'S', arena);
     break;
   }
-  case TYPE_JVM_BOOL: {
+  case TYPE_BOOLEAN: {
     string_append_char(descriptor, 'Z', arena);
     break;
   }
@@ -1358,7 +1344,6 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
 
     break;
   }
-  case TYPE_JVM_CONSTRUCTOR:
   case TYPE_METHOD: {
     const ty_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
@@ -3998,30 +3983,8 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_STRING";
   case TYPE_METHOD:
     return "TYPE_METHOD";
-  case TYPE_JVM_VOID:
-    return "TYPE_JVM_VOID";
-  case TYPE_JVM_BYTE:
-    return "TYPE_JVM_BYTE";
-  case TYPE_JVM_CHAR:
-    return "TYPE_JVM_CHAR";
-  case TYPE_JVM_SHORT:
-    return "TYPE_JVM_SHORT";
-  case TYPE_JVM_INT:
-    return "TYPE_JVM_INT";
-  case TYPE_JVM_STRING:
-    return "TYPE_JVM_STRING";
-  case TYPE_JVM_BOOL:
-    return "TYPE_JVM_BOOL";
-  case TYPE_JVM_FLOAT:
-    return "TYPE_JVM_FLOAT";
-  case TYPE_JVM_LONG:
-    return "TYPE_JVM_LONG";
-  case TYPE_JVM_DOUBLE:
-    return "TYPE_JVM_DOUBLE";
   case TYPE_ARRAY:
     return "TYPE_ARRAY";
-  case TYPE_JVM_CONSTRUCTOR:
-    return "TYPE_JVM_CONSTRUCTOR";
   default:
     pg_assert(0 && "unreachable");
   }
@@ -4055,26 +4018,6 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return string_make_from_c("kotlin.String", arena);
   case TYPE_UNIT:
     return string_make_from_c("kotlin.Unit", arena);
-  case TYPE_JVM_VOID:
-    return string_make_from_c("jvm.Void", arena);
-  case TYPE_JVM_INT:
-    return string_make_from_c("jvm.Int", arena);
-  case TYPE_JVM_BOOL:
-    return string_make_from_c("jvm.Boolean", arena);
-  case TYPE_JVM_BYTE:
-    return string_make_from_c("jvm.Byte", arena);
-  case TYPE_JVM_CHAR:
-    return string_make_from_c("jvm.Char", arena);
-  case TYPE_JVM_SHORT:
-    return string_make_from_c("jvm.Short", arena);
-  case TYPE_JVM_FLOAT:
-    return string_make_from_c("jvm.Float", arena);
-  case TYPE_JVM_LONG:
-    return string_make_from_c("jvm.Long", arena);
-  case TYPE_JVM_DOUBLE:
-    return string_make_from_c("jvm.Double", arena);
-  case TYPE_JVM_STRING:
-    return string_make_from_c("jvm.String", arena);
   case TYPE_ARRAY: {
     string_t result = string_make_from_c("Array<", arena);
     string_append_string(&result, type->this_class_name, arena);
@@ -4104,8 +4047,6 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return res;
   }
 
-  case TYPE_JVM_CONSTRUCTOR:
-    return string_make_from_c("Constructor<todo>", arena);
   default:
     pg_assert(0 && "unreachable");
   }
@@ -6014,7 +5955,7 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     return false;
   }
   if (pg_array_len(*candidate_functions_i) == 1) {
-    *picked_method_type_i=(*candidate_functions_i)[0];
+    *picked_method_type_i = (*candidate_functions_i)[0];
     return true;
   }
 
@@ -8129,7 +8070,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
     cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
-    if (type->kind == TYPE_JVM_LONG) {
+    if (type->kind == TYPE_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
     }
@@ -8742,10 +8683,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
                                &physical_local_index));
 
     switch (type->kind) {
-    case TYPE_JVM_INT:
+    case TYPE_INT:
       cg_emit_store_variable_int(gen, physical_local_index, arena);
       break;
-    case TYPE_JVM_LONG:
+    case TYPE_LONG:
       cg_emit_store_variable_long(gen, physical_local_index, arena);
       break;
     default:
@@ -8755,8 +8696,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
   case AST_KIND_RETURN:
     cg_emit_node(gen, class_file, node->lhs, arena);
-    type->kind == TYPE_JVM_VOID ? cg_emit_return_nothing(gen, arena)
-                                : cg_emit_return_value(gen, arena);
+    type->kind == TYPE_UNIT ? cg_emit_return_nothing(gen, arena)
+                            : cg_emit_return_value(gen, arena);
     break;
 
   case AST_KIND_MAX:
