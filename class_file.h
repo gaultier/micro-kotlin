@@ -2,7 +2,6 @@
 
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 500L
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -897,6 +896,59 @@ typedef struct {
   u32 current_function_i;
   pg_pad(4);
 } resolver_t;
+
+static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
+
+  pg_assert(types != NULL);
+  pg_assert(lhs_i < pg_array_len(types));
+  pg_assert(rhs_i < pg_array_len(types));
+
+  const ty_type_t *const lhs = &types[lhs_i];
+  const ty_type_t *const rhs = &types[rhs_i];
+
+  if (lhs->kind != rhs->kind)
+    return false;
+
+  if (lhs->flag & rhs->flag)
+    return true;
+
+  if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+      rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
+    return string_eq(lhs->this_class_name, rhs->this_class_name);
+  }
+
+  if ((lhs->kind == TYPE_JVM_VOID) && (rhs->kind == TYPE_JVM_VOID))
+    return true;
+
+  if ((lhs->flag & TYPE_FLAG_KOTLIN_UNIT) &&
+      (rhs->flag & TYPE_FLAG_KOTLIN_UNIT))
+    return true;
+
+  if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
+    const ty_type_method_t *const lhs_method = &lhs->v.method;
+    const ty_type_method_t *const rhs_method = &rhs->v.method;
+
+    if (!ty_types_equal(types, lhs_method->return_type_i,
+                        rhs_method->return_type_i))
+      return false;
+
+    if (pg_array_len(lhs_method->argument_types_i) !=
+        pg_array_len(rhs_method->argument_types_i))
+      return false;
+
+    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types_i); i++) {
+      const u32 lhs_arg_i = lhs_method->argument_types_i[i];
+      const u32 rhs_arg_i = rhs_method->argument_types_i[i];
+
+      if (!ty_types_equal(types, lhs_arg_i, rhs_arg_i))
+        return false;
+    }
+
+    return true;
+  }
+
+  return lhs->kind == rhs->kind;
+}
 
 static u32 resolver_add_type(resolver_t *resolver, const ty_type_t *new_type,
                              arena_t *arena);
@@ -5638,59 +5690,6 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
-static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
-
-  pg_assert(types != NULL);
-  pg_assert(lhs_i < pg_array_len(types));
-  pg_assert(rhs_i < pg_array_len(types));
-
-  const ty_type_t *const lhs = &types[lhs_i];
-  const ty_type_t *const rhs = &types[rhs_i];
-
-  if (lhs->kind != rhs->kind)
-    return false;
-
-  if (lhs->flag & rhs->flag)
-    return true;
-
-  if (lhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
-      rhs->kind == TYPE_KOTLIN_INSTANCE_REFERENCE) {
-    return string_eq(lhs->this_class_name, rhs->this_class_name);
-  }
-
-  if ((lhs->kind == TYPE_JVM_VOID) && (rhs->kind == TYPE_JVM_VOID))
-    return true;
-
-  if ((lhs->flag & TYPE_FLAG_KOTLIN_UNIT) &&
-      (rhs->flag & TYPE_FLAG_KOTLIN_UNIT))
-    return true;
-
-  if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
-    const ty_type_method_t *const lhs_method = &lhs->v.method;
-    const ty_type_method_t *const rhs_method = &rhs->v.method;
-
-    if (!ty_types_equal(types, lhs_method->return_type_i,
-                        rhs_method->return_type_i))
-      return false;
-
-    if (pg_array_len(lhs_method->argument_types_i) !=
-        pg_array_len(rhs_method->argument_types_i))
-      return false;
-
-    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types_i); i++) {
-      const u32 lhs_arg_i = lhs_method->argument_types_i[i];
-      const u32 rhs_arg_i = rhs_method->argument_types_i[i];
-
-      if (!ty_types_equal(types, lhs_arg_i, rhs_arg_i))
-        return false;
-    }
-
-    return true;
-  }
-
-  return lhs->kind == rhs->kind;
-}
-
 static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
                                                     string_t function_name,
                                                     u32 **candidate_functions_i,
@@ -5827,20 +5826,6 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
       if (ty_types_equal(resolver->types, declared_argument_type_i,
                          call_site_argument_type_i))
-        continue;
-
-      // TODO: Walk the whole super chain upwards.
-      // Right now we only do one level up.
-      // FIXME: This may pick a less specific candidate than the official
-      // resolution algorithm.
-      pg_assert(resolver_resolve_super_lazily(
-          resolver, call_site_argument_type_i, scratch_arena, arena));
-
-      const ty_type_t *const call_site_argument_type =
-          &resolver->types[call_site_argument_type_i];
-      // Try with super.
-      if (ty_types_equal(resolver->types, declared_argument_type_i,
-                         call_site_argument_type->super_type_i))
         continue;
 
       matching = false;
