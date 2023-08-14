@@ -1000,7 +1000,7 @@ cg_type_to_verification_info(const ty_type_t *type) {
   case TYPE_JVM_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = type->constant_pool_item_i,
+        .extra_data = 0 /* type->constant_pool_item_i */ // FIXME,
     };
 
   default:
