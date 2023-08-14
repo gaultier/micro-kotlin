@@ -58,7 +58,7 @@ Example: `var a: Int = 3; println(a)`, inferred as Int (integer literals have sp
   + Check constraints: no! Because: `kotlin.Int & kotlin.Short & kotlin.Byte & kotlin.Long` is not a subtype of `kotlin.Double`.
 - Candidate: `println(kotlin.Short)`:
   + Add constraint: Widen(Int) (i.e.: `kotlin.Int & kotlin.Short & kotlin.Byte & kotlin.Long`) subtype of Widen(Short) (i.e.: `kotlin.Short & kotlin.Byte`) 
-  + Check constraints: ok. Because: `kotlin.Int & kotlin.Short & kotlin.Byte & kotlin.Long` is a subtype of `kotlin.Short & kotlin.Byte`. (Why?)
+  + Check constraints: no! Because: `kotlin.Int & kotlin.Short & kotlin.Byte & kotlin.Long` is NOT a subtype of `kotlin.Short & kotlin.Byte`. 
 
 
 

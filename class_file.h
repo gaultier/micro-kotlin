@@ -985,7 +985,8 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
   if (!resolver_is_type_integer(b))
     return false;
 
-  return resolver_widen_integer_type(a) & resolver_widen_integer_type(b);
+  return (resolver_widen_integer_type(a) & resolver_widen_integer_type(b)) ==
+         resolver_widen_integer_type(a);
 }
 
 static bool resolver_is_type_subtype_of(const resolver_t *resolver,
@@ -5928,23 +5929,48 @@ static u32 resolver_select_most_specific_candidate_function(
     const resolver_t *resolver, u32 *candidates, arena_t *arena) {
 
   arena_t tmp_arena = *arena;
-  type_applicability_check_t *checks = NULL;
   const u64 candidates_count = pg_array_len(candidates);
   const u64 pairs_count = candidates_count * (candidates_count - 1) / 2;
 
+  type_applicability_check_t *checks = NULL;
   pg_array_init_reserve(checks, pairs_count, &tmp_arena);
+
+  bool *tombstones = NULL;
+  pg_array_init_reserve(tombstones, candidates_count, &tmp_arena);
+  pg_array_header(tombstones)->len = candidates_count;
+  memset(tombstones, false, pg_array_len(tombstones));
+  u64 tombstones_count = 0;
 
   for (u64 i = 0; i < candidates_count; i++) {
     for (u64 j = 0; j < i; j++) {
-      const ty_type_t *const a = &resolver->types[candidates[i]];
-      const ty_type_t *const b = &resolver->types[candidates[j]];
+      const u32 a_index = candidates[i];
+      const u32 b_index = candidates[j];
+
+      if (tombstones[a_index] || tombstones[b_index])
+        continue;
+
+      const ty_type_t *const a = &resolver->types[a_index];
+      const ty_type_t *const b = &resolver->types[b_index];
 
       type_applicability_check_t check = {
-          .a_type_i = candidates[i],
-          .b_type_i = candidates[j],
+          .a_type_i = a_index,
+          .b_type_i = b_index,
           .a_b = resolver_check_applicability_of_candidate_pair(resolver, a, b),
           .b_a = resolver_check_applicability_of_candidate_pair(resolver, b, a),
       };
+
+      const bool a_more_applicable_than_b = check.a_b & APPLICABILITY_MORE;
+      const bool b_more_applicable_than_a = check.b_a & APPLICABILITY_MORE;
+
+      if (a_more_applicable_than_b && !b_more_applicable_than_a) {
+        // A clearly more applicable than B.
+        tombstones[b_index] = true;
+        tombstones_count += 1;
+      } else if (b_more_applicable_than_a && !a_more_applicable_than_b) {
+        // B clearly more applicable than A.
+        tombstones[a_index] = true;
+        tombstones_count += 1;
+      }
 
       pg_array_append(checks, check, &tmp_arena);
 
@@ -5958,6 +5984,7 @@ static u32 resolver_select_most_specific_candidate_function(
           check.b_a);
     }
   }
+
   pg_assert(0 && "fixme");
   return 0; // FIXME
 }
@@ -5985,6 +6012,10 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
 
   if (pg_array_len(*candidate_functions_i) == 0) {
     return false;
+  }
+  if (pg_array_len(*candidate_functions_i) == 1) {
+    *picked_method_type_i=(*candidate_functions_i)[0];
+    return true;
   }
 
   resolver_select_most_specific_candidate_function(
