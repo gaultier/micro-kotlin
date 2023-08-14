@@ -668,21 +668,22 @@ typedef struct {
 } cf_stack_map_frame_t;
 
 enum __attribute__((packed)) ty_type_kind_t {
-  TYPE_KOTLIN_ANY,
-  TYPE_METHOD,
-  TYPE_KOTLIN_INSTANCE_REFERENCE,
-  TYPE_KOTLIN_UNIT,
-  TYPE_KOTLIN_BOOLEAN,
-  TYPE_KOTLIN_BYTE,
-  TYPE_KOTLIN_CHAR,
-  TYPE_KOTLIN_SHORT,
-  TYPE_KOTLIN_INT,
-  TYPE_KOTLIN_FLOAT,
-  TYPE_KOTLIN_LONG,
-  TYPE_KOTLIN_DOUBLE,
-  TYPE_KOTLIN_STRING,
+  TYPE_KOTLIN_ANY = 0,
+  TYPE_KOTLIN_UNIT = 1 << 0,
+  TYPE_KOTLIN_BOOLEAN = 1 << 1,
+  TYPE_KOTLIN_BYTE = 1 << 2,
+  TYPE_KOTLIN_CHAR = 1 << 3,
+  TYPE_KOTLIN_SHORT = 1 << 4,
+  TYPE_KOTLIN_INT = 1 << 5,
+  TYPE_KOTLIN_FLOAT = 1 << 6,
+  TYPE_KOTLIN_LONG = 1 << 7,
+  TYPE_KOTLIN_DOUBLE = 1 << 8,
+  TYPE_KOTLIN_STRING = 1 << 9,
+  TYPE_METHOD = 1 << 10,
+  TYPE_KOTLIN_INSTANCE_REFERENCE = 1 << 11,
 
   // After lowering
+  // TODO: Remove?
   TYPE_JVM_VOID,
   TYPE_JVM_BOOL,
   TYPE_JVM_BYTE,
@@ -898,6 +899,18 @@ typedef struct {
   u32 current_function_i;
   pg_pad(4);
 } resolver_t;
+
+static bool resolver_is_type_integer(const ty_type_t *type) {
+  switch (type->kind) {
+  case TYPE_KOTLIN_BYTE:
+  case TYPE_KOTLIN_SHORT:
+  case TYPE_KOTLIN_INT:
+  case TYPE_KOTLIN_LONG:
+    return true;
+  default:
+    return false;
+  }
+}
 
 static bool ty_types_equal(const ty_type_t *types, u32 lhs_i, u32 rhs_i) {
 
@@ -6207,8 +6220,9 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
     cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
 
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
-    const ty_type_t *const type = &resolver->types[i];
-      if (type->kind==TYPE_KOTLIN_INSTANCE_REFERENCE && string_eq(class_name, type->this_class_name)) {
+      const ty_type_t *const type = &resolver->types[i];
+      if (type->kind == TYPE_KOTLIN_INSTANCE_REFERENCE &&
+          string_eq(class_name, type->this_class_name)) {
         *type_i = i;
         return true;
       }
