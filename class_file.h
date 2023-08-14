@@ -5868,7 +5868,78 @@ static void resolver_remove_non_applicable_function_candidates(
   }
 }
 
-// TODO: Keep track of imported packages (including those imported by default).
+typedef enum __attribute__((packed)) {
+  APPLICABILITY_LESS = 1,
+  APPLICABILITY_SAME = 2,
+  APPLICABILITY_MORE = 4,
+} type_applicability_t;
+
+typedef struct {
+  u32 a_type_i;
+  u32 b_type_i;
+  type_applicability_t a_b;
+  type_applicability_t b_a;
+  pg_pad(2);
+} type_applicability_check_t;
+
+static type_applicability_t resolver_check_applicability_of_candidate_pair(
+    const resolver_t *resolver, const ty_type_t *a, const ty_type_t *b) {
+  pg_assert(a->kind == TYPE_METHOD);
+  pg_assert(a->v.method.argument_types_i != NULL);
+  pg_assert(a->this_class_name.value != NULL);
+  pg_assert(a->this_class_name.len > 0);
+  const u8 call_argument_count = pg_array_len(a->v.method.argument_types_i);
+
+  pg_assert(b->kind == TYPE_METHOD);
+  pg_assert(b->v.method.argument_types_i != NULL);
+  pg_assert(b->this_class_name.value != NULL);
+  pg_assert(b->this_class_name.len > 0);
+  pg_assert(pg_array_len(b->v.method.argument_types_i) == call_argument_count);
+
+  for (u64 k = 0; k < call_argument_count; k++) {
+    const ty_type_t *argument_a =
+        &resolver->types[a->v.method.argument_types_i[k]];
+    const ty_type_t *argument_b =
+        &resolver->types[b->v.method.argument_types_i[k]];
+
+    if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b)) {
+      return APPLICABILITY_LESS;
+    }
+  }
+
+  return APPLICABILITY_SAME | APPLICABILITY_MORE;
+}
+
+static u32 resolver_select_most_specific_candidate_function(
+    const resolver_t *resolver, u32 *candidates, arena_t *arena) {
+
+  arena_t tmp_arena = *arena;
+  type_applicability_check_t *checks = NULL;
+  const u64 candidates_count = pg_array_len(candidates);
+  const u64 pairs_count = candidates_count * (candidates_count - 1) / 2;
+
+  pg_array_init_reserve(checks, pairs_count, &tmp_arena);
+
+  for (u64 i = 0; i < candidates_count; i++) {
+    for (u64 j = 0; j < i; j++) {
+      const ty_type_t *const a = &resolver->types[candidates[i]];
+      const ty_type_t *const b = &resolver->types[candidates[j]];
+
+      type_applicability_check_t check = {
+          .a_type_i = candidates[i],
+          .b_type_i = candidates[j],
+          .a_b = resolver_check_applicability_of_candidate_pair(resolver, a, b),
+          .b_a = resolver_check_applicability_of_candidate_pair(resolver, b, a),
+      };
+      pg_array_append(checks, check, &tmp_arena);
+    }
+  }
+  pg_assert(0&&"fixme");
+  return 0; // FIXME
+}
+
+// TODO: Keep track of imported packages (including those imported by
+// default).
 static bool
 resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
                                u32 call_site_type_i, u32 *picked_method_type_i,
@@ -5892,54 +5963,8 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
     return false;
   }
 
-  const u8 call_argument_count =
-      pg_array_len(call_site_type->v.method.argument_types_i);
-
-  for (u64 i = 0; i < pg_array_len(*candidate_functions_i); i++) {
-    const u32 candidate_i = (*candidate_functions_i)[i];
-    const ty_type_t *const declared_function_type =
-        &resolver->types[candidate_i];
-
-    pg_assert(declared_function_type->kind == TYPE_METHOD);
-    pg_assert(declared_function_type->v.method.argument_types_i != NULL);
-    pg_assert(declared_function_type->this_class_name.value != NULL);
-    pg_assert(declared_function_type->this_class_name.len > 0);
-
-    const u8 function_argument_count =
-        pg_array_len(declared_function_type->v.method.argument_types_i);
-
-    if (call_argument_count != function_argument_count)
-      continue;
-
-    bool matching = true;
-    for (u8 j = 0; j < function_argument_count; j++) {
-      const u32 declared_argument_type_i =
-          declared_function_type->v.method.argument_types_i[j];
-
-      const u32 call_site_argument_type_i =
-          call_site_type->v.method.argument_types_i[j];
-
-      if (resolver_are_types_equal(resolver,
-                                   &resolver->types[declared_argument_type_i],
-                                   &resolver->types[call_site_argument_type_i]))
-        continue;
-
-      matching = false;
-      break;
-    }
-    if (!matching)
-      continue;
-
-    // Check return type
-    if (!resolver_are_types_equal(
-            resolver,
-            &resolver->types[declared_function_type->v.method.return_type_i],
-            &resolver->types[call_site_type->v.method.return_type_i]))
-      continue;
-
-    *picked_method_type_i = candidate_i;
-    return true;
-  }
+  resolver_select_most_specific_candidate_function(
+      resolver, *candidate_functions_i, arena);
 
   return false;
 }
