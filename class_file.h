@@ -5891,23 +5891,29 @@ static u32 resolver_select_most_specific_candidate_function(
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
         if (a_more_applicable_than_b && !b_more_applicable_than_a) {
-          // A clearly more applicable than B.
+          // A clearly more applicable than B, mark B as deleted so that it will
+          // be skipped for subsequent checks.
           tombstones[b_index] = true;
           tombstones_count += 1;
         } else if (b_more_applicable_than_a && !a_more_applicable_than_b) {
-          // B clearly more applicable than A.
+          // B clearly more applicable than A, mark A as deleted so that it will
+          // be skipped for subsequent checks.
           tombstones[a_index] = true;
           tombstones_count += 1;
+        } else {
+          // Need to do more checks.
+          pg_assert(0 && "todo");
         }
 
-        if (log_verbose){
-        const string_t a_human_type = resolver_function_to_human_string(
-            resolver, candidates[a_index], &tmp_arena);
-        const string_t b_human_type = resolver_function_to_human_string(
-            resolver, candidates[b_index], &tmp_arena);
+        if (log_verbose) {
+          const string_t a_human_type = resolver_function_to_human_string(
+              resolver, candidates[a_index], &tmp_arena);
+          const string_t b_human_type = resolver_function_to_human_string(
+              resolver, candidates[b_index], &tmp_arena);
 
-        LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
-            a_human_type.value, b_human_type.len, b_human_type.value, a_b, b_a);
+          LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
+              a_human_type.value, b_human_type.len, b_human_type.value, a_b,
+              b_a);
         }
       }
     }
