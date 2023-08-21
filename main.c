@@ -144,6 +144,7 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(resolver.types, 1 << 18, &arena);
     resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
+    LOG("After loading known types: arena=%lu", arena.current_offset);
 
     resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
     arena_clear(&scratch_arena);

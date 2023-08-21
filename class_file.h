@@ -287,17 +287,23 @@ static void string_append_char(string_t *s, char c, arena_t *arena);
 static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
-  pg_assert(s->len < s->cap);
 
-  if (s->value[s->len] != 0) {
-    string_append_char(s, 0, arena);
-    s->len -= 1;
+  if (s->len < s->cap) {
+    s->value[s->len] = 0;
+  } else {
+    if (s->value[s->len] != 0) {
+      string_append_char(s, 0, arena);
+      s->len -= 1;
+    }
   }
 }
 
 static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(arena != NULL);
+  pg_assert(cap < UINT32_MAX);
+
   cap = pg_max(8, cap + 1);
+  LOG("[D010] fn=string_reserve cap=%u", cap);
 
   return (string_t){
       .cap = cap,
@@ -330,7 +336,7 @@ static string_t string_make_from_c_no_alloc(char *s) {
       .len = strlen(s),
       .cap = strlen(s) + 1,
   };
-  string_ensure_null_terminated(&res, NULL);
+  pg_assert(s[res.len] == 0);
 
   return res;
 }
@@ -465,6 +471,10 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
   pg_assert(arena != NULL);
 
   if (s->len == s->cap - 1) {
+    LOG("[D011] fn=string_append_char old_cap=%u new_cap=%u len=%u", s->cap,
+        s->cap * 2, s->len);
+    pg_assert((u64)s->cap * 2 <= UINT32_MAX);
+
     s->cap *= 2;
     char *const new_s = arena_alloc(arena, s->cap, sizeof(u8));
     s->value = memcpy(new_s, s->value, s->len);
@@ -4057,7 +4067,8 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_UNIT:
     return string_make_from_c("kotlin.Unit", arena);
   case TYPE_ARRAY: {
-    string_t result = string_make_from_c("Array<", arena);
+    string_t result = string_reserve(type->this_class_name.len + 256, arena);
+    string_append_cstring(&result, "Array<", arena);
     string_append_string(&result, type->this_class_name, arena);
     string_append_char(&result, '>', arena);
     return result;
@@ -5801,7 +5812,8 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   const ty_type_t *const this_class_type =
       &resolver->types[method->this_class_type_i];
 
-  string_t result = string_reserve(128, arena);
+  string_t result = string_reserve(
+      method->name.len + this_class_type->this_class_name.len + 1024, arena);
 
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
     string_append_cstring(&result, "private ", arena);
