@@ -5506,7 +5506,7 @@ static u32 par_parse(par_parser_t *parser, arena_t *arena) {
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
   pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
 
-  pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 8,
+  pg_array_init_reserve(parser->nodes, pg_array_len(parser->lexer->tokens) * 2,
                         arena);
 
   parser->tokens_i = 1; // Skip the dummy token.
@@ -9292,7 +9292,7 @@ static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
 
   cg_generator_t gen = {.resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
-  pg_array_init_reserve(gen.locals, UINT16_MAX, arena);
+  pg_array_init_reserve(gen.locals, 1<<12, arena);
 
   cg_emit_synthetic_class(&gen, class_file, arena);
 
