@@ -7,7 +7,7 @@ WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 LDFLAGS := -lz
 
 main_debug: main.c class_file.h
-	$(CC) $(CFLAGS) -O0 -g3 $(WARNINGS) -std=c99 -fsanitize=address,undefined main.c -o $@  $(LDFLAGS)
+	$(CC) $(CFLAGS) -O0 -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -fsanitize=address,undefined main.c -o $@  $(LDFLAGS)
 
 clean:
 	rm *.class || true
@@ -22,5 +22,5 @@ test_release: clean main_release
 	for f in **/*.class; do echo $$f; (cd `dirname $$f`; java `basename -s .class $$f`);  done
 
 main_release: main.c class_file.h
-	$(CC) $(CFLAGS) -O2 -g3 $(WARNINGS) -std=c99 -march=native main.c -o $@ -Wl,--gc-sections $(LDFLAGS)
+	$(CC) $(CFLAGS) -O2 -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native main.c -o $@ -Wl,--gc-sections $(LDFLAGS)
 

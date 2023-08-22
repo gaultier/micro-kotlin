@@ -15,10 +15,15 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#ifdef __linux
+#if defined(__linux__) || defined(__FreeBSD__)
+#include <elf.h>
+#endif
+
+#ifdef __linux__
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS 0x20
+
 #endif
 
 #endif
@@ -126,6 +131,52 @@ static void arena_mark_as_dead(arena_t *arena, void *ptr) {
   *meta |= ALLOCATION_TOMBSTONE;
 }
 
+extern char _start;
+
+static u64 ut_get_pie_displacement() {
+#ifdef __linux__
+  FILE *file = fopen("/proc/self/exe", "r");
+  if (file == NULL)
+    return 0;
+
+  u64 res = 0;
+  Elf64_Ehdr header = {0};
+  const u64 read = fread(&header, 1, sizeof(header), file);
+  if (read != sizeof(header))
+    goto end;
+
+  if (memcmp(header.e_ident, ELFMAG, SELFMAG) == 0) {
+    const Elf64_Addr entry_point = header.e_entry;
+    res = (u64)(&_start - entry_point);
+  }
+
+end:
+  fclose(file);
+  return res;
+#endif
+  // TODO
+  return 0;
+}
+
+static u64 initial_rbp = 0;
+static u64 pie_offset = 0;
+
+static void ut_record_call_stack(u64 *dst, u64 len) {
+  uintptr_t *rbp = __builtin_frame_address(0);
+
+  u64 count = 0;
+
+  while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
+    const uintptr_t rip = *(rbp + 1);
+    rbp = (uintptr_t *)*rbp;
+
+    if (count >= len)
+      break;
+
+    dst[count++] = (rip-pie_offset);
+  }
+}
+
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
                          allocation_kind_t kind) {
   // clang-format off
@@ -171,6 +222,8 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   metadata->kind = kind;
   metadata->size =
       new_offset - arena->current_offset - sizeof(allocation_metadata_t);
+  ut_record_call_stack(metadata->call_stack,
+                       sizeof(metadata->call_stack) / sizeof(u64));
 
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
@@ -1899,7 +1952,7 @@ static u8 buf_read_u8(char *buf, u64 size, char **current) {
 static void arena_heap_dump(arena_t const *arena) {
   char *current = arena->base;
 
-  fprintf(stderr, "kind;size;len;cap;occupancy;deleted\n");
+  fprintf(stderr, "kind,size,len,cap,occupancy,deleted,call stack\n");
 
   while (current < arena->base + arena->current_offset) {
     allocation_metadata_t metadata = {0};
@@ -1934,8 +1987,16 @@ static void arena_heap_dump(arena_t const *arena) {
     const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
     const bool deleted = !!(metadata.kind & ALLOCATION_TOMBSTONE);
 
-    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, (u64)metadata.size,
+    fprintf(stderr, "%s,%lu,%lu,%lu,%.6f,%d,", kind_string, (u64)metadata.size,
             len, cap, occupancy, deleted);
+
+    for (u64 i = 0; i < sizeof(metadata.call_stack) / sizeof(u64); i++) {
+      if (metadata.call_stack[i] == 0)
+        break;
+      fprintf(stderr, "%#lx ", metadata.call_stack[i]);
+    }
+    fprintf(stderr, "\n");
+
     buf_read_n_u8(arena->base, arena->current_offset, NULL, metadata.size,
                   &current);
   }
