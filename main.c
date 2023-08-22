@@ -50,6 +50,8 @@ int main(int argc, char *argv[]) {
   arena_init(&arena, 1L << 26); // 64 MiB
 
   arena_t scratch_arena = {0};
+  // This size should be at least 22 MiB since that's the size of
+  // `java.base.jmod` which we read as one byte array.
   arena_init(&scratch_arena, 1L << 25); // 32 MiB
 
   const string_t java_home = find_java_home(&arena);
