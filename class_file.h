@@ -79,11 +79,12 @@ typedef struct {
 } arena_t;
 
 typedef enum __attribute__((packed)) {
-  ALLOCATION_OBJECT,
-  ALLOCATION_STRING,
-  ALLOCATION_ARRAY,
-  ALLOCATION_CONSTANT_POOL,
-  ALLOCATION_BLOB,
+  ALLOCATION_TOMBSTONE = 1 << 0,
+  ALLOCATION_OBJECT = 1 << 1,
+  ALLOCATION_STRING = 1 << 2,
+  ALLOCATION_ARRAY = 1 << 3,
+  ALLOCATION_CONSTANT_POOL = 1 << 4,
+  ALLOCATION_BLOB = 1 << 5,
 } allocation_kind_t;
 
 static void arena_init(arena_t *arena, u64 cap) {
@@ -109,6 +110,11 @@ static u64 ut_align_forward_16(u64 n) {
 static void arena_clear(arena_t *arena) {
   pg_assert(arena);
   arena->current_offset = 0;
+}
+
+static void arena_mark_as_dead(arena_t *arena, void *ptr) {
+  u8 *meta = ((u8 *)ptr) - 16;
+  *meta |= ALLOCATION_TOMBSTONE;
 }
 
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
@@ -155,8 +161,9 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 }
 
 static char *allocation_kind_to_string(allocation_kind_t kind) {
+  const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
 
-  switch (kind) {
+  switch (real_kind) {
   case ALLOCATION_OBJECT:
     return "ALLOCATION_OBJECT";
   case ALLOCATION_STRING:
@@ -222,6 +229,7 @@ typedef struct pg_array_header_t {
           sizeof(pg_array_header_t) + sizeof(*(x)) * pg_array_cap(x);          \
       const u64 new_physical_len =                                             \
           sizeof(pg_array_header_t) + sizeof(*(x)) * new_cap;                  \
+      arena_mark_as_dead(arena, x);                                            \
       pg_array_header_t *const pg__ah =                                        \
           arena_alloc(arena, 1, new_physical_len, ALLOCATION_ARRAY);           \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
@@ -337,7 +345,6 @@ static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(cap < UINT32_MAX);
 
   cap = pg_max(8, cap + 1);
-  LOG("[D010] fn=string_reserve cap=%u", cap);
 
   return (string_t){
       .cap = cap,
@@ -375,14 +382,34 @@ static string_t string_make_from_c_no_alloc(char *s) {
   return res;
 }
 
-static string_t string_make(string_t src, arena_t *arena) {
+static string_t string_clone_n(string_t src, u64 n, arena_t *arena) {
   pg_assert(src.value != NULL);
-  string_t result = string_reserve(src.len, arena);
-  memcpy(result.value, src.value, src.len);
-  result.len = src.len;
+  pg_assert(n <= src.len);
+
+  string_t result = string_reserve(n, arena);
+  memcpy(result.value, src.value, n);
+  result.len = n;
 
   string_ensure_null_terminated(&result, arena);
   return result;
+}
+
+static string_t string_clone_until_excl(string_t src, char c, arena_t *arena) {
+  const char *const needle = memchr(src.value, c, src.len);
+  pg_assert(needle != NULL);
+
+  const u64 real_len = needle - src.value;
+  const string_t res = string_clone_n(src, real_len, arena);
+
+  pg_assert(res.len > 0);
+  pg_assert(res.len < src.len);
+  pg_assert(res.value[res.len - 1] != c);
+
+  return res;
+}
+
+static string_t string_make(string_t src, arena_t *arena) {
+  return string_clone_n(src, src.len, arena);
 }
 
 static string_t string_find_last_path_component(string_t path) {
@@ -505,9 +532,9 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
   pg_assert(arena != NULL);
 
   if (s->len == s->cap - 1) {
-    LOG("[D011] fn=string_append_char old_cap=%u new_cap=%u len=%u", s->cap,
-        s->cap * 2, s->len);
     pg_assert((u64)s->cap * 2 <= UINT32_MAX);
+
+    arena_mark_as_dead(arena, s->value);
 
     s->cap *= 2;
     char *const new_s =
@@ -1297,6 +1324,8 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
+    arena_mark_as_dead(arena, array);
+
     const u64 new_cap = array->cap * 2;
     cf_constant_t *const new_array = arena_alloc(
         arena, new_cap, sizeof(cf_constant_t), ALLOCATION_CONSTANT_POOL);
@@ -1526,10 +1555,9 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'L': {
     string_drop_first_n(&remaining, 1);
-    type->this_class_name = remaining;
+    type->this_class_name = string_clone_until_excl(remaining, ';', arena);
 
     string_drop_until_incl(&remaining, ';');
-    type->this_class_name.len -= remaining.len;
     if (string_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_STRING;
       type->this_class_name = (string_t){0};
@@ -1550,7 +1578,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     };
     remaining =
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
-    type->this_class_name = item_type.this_class_name;
+    type->this_class_name = string_make(item_type.this_class_name, arena);
 
     type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
@@ -1580,7 +1608,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
     ty_type_t return_type = {0};
     remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
-    // FIXME: Check cache before adding the type.
+    // TODO: Check cache before adding the type.
 
     type->v.method.argument_types_i = argument_types_i;
     type->v.method.return_type_i =
@@ -1851,6 +1879,8 @@ static u8 buf_read_u8(char *buf, u64 size, char **current) {
 static void arena_heap_dump(arena_t const *arena) {
   char *current = arena->base;
 
+  fprintf(stderr, "kind;size;len;cap;occupancy;deleted\n");
+
   while (current < arena->base + arena->current_offset) {
     const u8 kind = buf_read_u8(arena->base, arena->current_offset, &current);
     const char *const kind_string = allocation_kind_to_string(kind);
@@ -1861,9 +1891,34 @@ static void arena_heap_dump(arena_t const *arena) {
         buf_read_le_u64(arena->base, arena->current_offset, &current);
     pg_assert(size > 0);
 
-    buf_read_n_u8(arena->base, arena->current_offset, NULL, size, &current);
+    const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
+    u64 len = 0;
+    u64 cap = 0;
 
-    fprintf(stderr, "fn=arena_heap_dump kind=%s size=%lu\n", kind_string, size);
+    switch (real_kind) {
+    case ALLOCATION_STRING:
+    case ALLOCATION_CONSTANT_POOL:
+    case ALLOCATION_OBJECT:
+    case ALLOCATION_BLOB:
+      len = cap = size;
+      break;
+    case ALLOCATION_ARRAY: {
+      pg_array_header_t *pg__ah = (pg_array_header_t *)current;
+      len = pg__ah->len;
+      cap = pg__ah->cap;
+      break;
+    }
+
+    default:
+      pg_assert(0 && "unreachable");
+    }
+
+    const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
+    const bool deleted = !!(kind & ALLOCATION_TOMBSTONE);
+
+    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, size, len, cap,
+            occupancy, deleted);
+    buf_read_n_u8(arena->base, arena->current_offset, NULL, size, &current);
   }
 }
 
@@ -5445,12 +5500,11 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
 
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, u32 this_class_type_i,
-    const cf_class_file_t *class_file, arena_t *arena) {
+    const cf_class_file_t *class_file, const string_t this_class_name,
+    arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
-
-  const string_t this_class_name = string_make(class_file->class_name, arena);
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5674,9 +5728,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
           compression_method == 0 &&
           string_ends_with_cstring(file_name, ".class")) {
         pg_assert(path != NULL);
+        arena_t tmp_arena = *scratch_arena;
+
         cf_buf_read_class_file(local_file_header,
                                uncompressed_size_according_to_directory_entry,
-                               &local_file_header, &class_file, arena);
+                               &local_file_header, &class_file, &tmp_arena);
 
         ty_type_t type = {
             .kind = TYPE_INSTANCE,
@@ -5692,7 +5748,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         }
 
         resolver_load_methods_from_class_file(resolver, this_class_type_i,
-                                              &class_file, arena);
+                                              &class_file, type.this_class_name,
+                                              arena);
 
         LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
             file_name.value, class_file.class_name.len,
@@ -5726,7 +5783,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
 
         char *dst_current = (char *)dst;
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
-                               arena);
+                               &tmp_arena);
 
         ty_type_t type = {
             .kind = TYPE_INSTANCE,
@@ -5749,7 +5806,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         }
 
         resolver_load_methods_from_class_file(resolver, this_class_type_i,
-                                              &class_file, arena);
+                                              &class_file, type.this_class_name,
+                                              arena);
 
         LOG("Loaded %.*s from %.*s (compressed)",
             class_file.class_file_path.len, class_file.class_file_path.value,
@@ -6074,10 +6132,15 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   pg_assert(call_site_type->kind == TYPE_METHOD);
   pg_assert(call_site_type->v.method.argument_types_i != NULL);
 
+  const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
+
   resolver_remove_non_applicable_function_candidates(
       resolver, *candidate_functions_i, call_site_type, scratch_arena, arena);
 
   if (pg_array_len(*candidate_functions_i) == 0) {
+    // Restore the original length to display the possible candidates in the
+    // error message.
+    pg_array_header(*candidate_functions_i)->len = original_candidates_len;
     return false;
   }
   if (pg_array_len(*candidate_functions_i) == 1) {
