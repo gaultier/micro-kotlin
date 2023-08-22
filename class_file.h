@@ -170,7 +170,8 @@ static void ut_record_call_stack(u64 *dst, u64 len) {
     const uintptr_t rip = *(rbp + 1);
     rbp = (uintptr_t *)*rbp;
 
-    if (rbp==initial_rbp) break;
+    if ((u64)rbp == initial_rbp)
+      break;
 
     if (count >= len)
       break;
