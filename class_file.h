@@ -158,6 +158,7 @@ end:
   return 0;
 }
 
+
 static u64 initial_rbp = 0;
 static u64 pie_offset = 0;
 
@@ -173,7 +174,7 @@ static void ut_record_call_stack(u64 *dst, u64 len) {
     if (count >= len)
       break;
 
-    dst[count++] = (rip-pie_offset);
+    dst[count++] = (rip - pie_offset);
   }
 }
 
