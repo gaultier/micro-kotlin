@@ -114,7 +114,7 @@ static void arena_clear(arena_t *arena) {
 
 static void arena_mark_as_dead(arena_t *arena, void *ptr) {
   pg_assert(arena->base <= (char *)ptr - 16);
-  pg_assert(arena->base + arena->current_offset <= (char*)ptr);
+  pg_assert(arena->base + arena->current_offset <= (char *)ptr);
 
   u8 *meta = ((u8 *)ptr) - 16;
   *meta |= ALLOCATION_TOMBSTONE;
@@ -134,7 +134,12 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->cap);
-  pg_assert(arena->current_offset + len < arena->cap);
+  if (arena->current_offset + len > arena->cap) {
+    fprintf(stderr,
+            "Out of memory: cap=%lu current_offset=%lu len=%lu\n",
+            arena->cap, arena->current_offset, len);
+    exit(ENOMEM);
+  }
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
   pg_assert(element_size > 0);
   const u64 physical_size = len * element_size; // TODO: check overflow.
@@ -153,7 +158,6 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert((u64)(new_allocation) + physical_size <=
             (u64)arena->base + new_offset);
 
-  pg_assert(arena->current_offset < arena->cap);
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
