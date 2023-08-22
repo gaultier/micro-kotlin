@@ -207,7 +207,8 @@ int main(int argc, char *argv[]) {
       pg_assert(st.st_size <= UINT32_MAX);
 
       const u32 buf_len = st.st_size;
-      char *const buf = arena_alloc(&tmp_arena, buf_len, sizeof(u8));
+      char *const buf =
+          arena_alloc(&tmp_arena, buf_len, sizeof(u8), ALLOCATION_BLOB);
 
       pg_assert(read(fd, buf, buf_len) == buf_len);
       close(fd);
@@ -220,4 +221,5 @@ int main(int argc, char *argv[]) {
     }
   }
   LOG("arena=%lu", arena.current_offset);
+  arena_heap_dump(&arena);
 }

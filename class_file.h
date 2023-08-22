@@ -78,6 +78,14 @@ typedef struct {
   u64 cap;
 } arena_t;
 
+typedef enum __attribute__((packed)) {
+  ALLOCATION_OBJECT,
+  ALLOCATION_STRING,
+  ALLOCATION_ARRAY,
+  ALLOCATION_CONSTANT_POOL,
+  ALLOCATION_BLOB,
+} allocation_kind_t;
+
 static void arena_init(arena_t *arena, u64 cap) {
   pg_assert(arena != NULL);
 
@@ -103,7 +111,8 @@ static void arena_clear(arena_t *arena) {
   arena->current_offset = 0;
 }
 
-static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
+static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
+                         allocation_kind_t kind) {
   // clang-format off
   // 
   // ....|--------------------|++++|
@@ -120,23 +129,47 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size) {
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
   pg_assert(element_size > 0);
   const u64 physical_size = len * element_size; // TODO: check overflow.
+  const u64 aligned_physical_size = ut_align_forward_16(physical_size);
 
   const u64 new_offset =
+      16 /* tag space */ +
       ut_align_forward_16(arena->current_offset + physical_size);
   pg_assert((new_offset % 16) == 0);
   pg_assert(arena->current_offset + physical_size <= new_offset);
-  pg_assert(new_offset < arena->current_offset + physical_size + 16);
+  pg_assert(new_offset < arena->current_offset + physical_size + 2 * 16);
 
-  void *const res = arena->base + arena->current_offset;
-  pg_assert((((u64)res) % 16) == 0);
-  pg_assert((u64)(arena->base + arena->current_offset) <= (u64)res);
-  pg_assert((u64)(res) + physical_size <= (u64)arena->base + new_offset);
+  char *const new_allocation = arena->base + arena->current_offset;
+  pg_assert((((u64)new_allocation) % 16) == 0);
+  pg_assert((u64)(arena->base + arena->current_offset) <= (u64)new_allocation);
+  pg_assert((u64)(new_allocation) + physical_size <=
+            (u64)arena->base + new_offset);
 
   pg_assert(arena->current_offset < arena->cap);
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
-  return res;
+  *new_allocation = kind;
+  *(((u64 *)new_allocation) + 1) = aligned_physical_size;
+
+  return new_allocation + 16;
+}
+
+static char *allocation_kind_to_string(allocation_kind_t kind) {
+
+  switch (kind) {
+  case ALLOCATION_OBJECT:
+    return "ALLOCATION_OBJECT";
+  case ALLOCATION_STRING:
+    return "ALLOCATION_STRING";
+  case ALLOCATION_ARRAY:
+    return "ALLOCATION_ARRAY";
+  case ALLOCATION_CONSTANT_POOL:
+    return "ALLOCATION_CONSTANT_POOL";
+  case ALLOCATION_BLOB:
+    return "ALLOCATION_BLOB";
+  default:
+    pg_assert(0 && "unreachable");
+  }
 }
 
 // --------------------------- Array
@@ -156,7 +189,8 @@ typedef struct pg_array_header_t {
     u64 capacity = pg_max((u64)(arg_capacity), 8);                             \
     pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
         arg_arena, 1,                                                          \
-        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)));         \
+        sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)),          \
+        ALLOCATION_ARRAY);                                                     \
     pg__ah->len = 0;                                                           \
     pg__ah->cap = capacity;                                                    \
     x = (void *)(pg__ah + 1);                                                  \
@@ -189,7 +223,7 @@ typedef struct pg_array_header_t {
       const u64 new_physical_len =                                             \
           sizeof(pg_array_header_t) + sizeof(*(x)) * new_cap;                  \
       pg_array_header_t *const pg__ah =                                        \
-          arena_alloc(arena, 1, new_physical_len);                             \
+          arena_alloc(arena, 1, new_physical_len, ALLOCATION_ARRAY);           \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
           "new_ptr=%p diff=%lu",                                               \
           old_physical_len, new_physical_len, pg_array_header(x), pg__ah,      \
@@ -307,7 +341,7 @@ static string_t string_reserve(u32 cap, arena_t *arena) {
 
   return (string_t){
       .cap = cap,
-      .value = arena_alloc(arena, cap, sizeof(u8)),
+      .value = arena_alloc(arena, cap, sizeof(u8), ALLOCATION_STRING),
   };
 }
 
@@ -476,7 +510,8 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
     pg_assert((u64)s->cap * 2 <= UINT32_MAX);
 
     s->cap *= 2;
-    char *const new_s = arena_alloc(arena, s->cap, sizeof(u8));
+    char *const new_s =
+        arena_alloc(arena, s->cap, sizeof(u8), ALLOCATION_STRING);
     s->value = memcpy(new_s, s->value, s->len);
   }
 
@@ -1247,7 +1282,8 @@ static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
   return (cf_constant_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_constant_t)),
+      .values = arena_alloc(arena, cap, sizeof(cf_constant_t),
+                            ALLOCATION_CONSTANT_POOL),
   };
 }
 
@@ -1262,8 +1298,8 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_constant_t *const new_array =
-        arena_alloc(arena, new_cap, sizeof(cf_constant_t));
+    cf_constant_t *const new_array = arena_alloc(
+        arena, new_cap, sizeof(cf_constant_t), ALLOCATION_CONSTANT_POOL);
     pg_assert(new_array != NULL);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
@@ -1295,7 +1331,8 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
   pg_assert(src->locals != NULL);
   pg_assert(arena != NULL);
 
-  cg_frame_t *dst = arena_alloc(arena, 1, sizeof(cg_frame_t));
+  cg_frame_t *dst =
+      arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
   cg_frame_init(dst, arena);
 
   dst->max_physical_stack = src->max_physical_stack;
@@ -1771,6 +1808,22 @@ static u32 buf_read_le_u32(char *buf, u64 size, char **current) {
   return x;
 }
 
+static u32 buf_read_le_u64(char *buf, u64 size, char **current) {
+  pg_assert(buf != NULL);
+  pg_assert(size > 0);
+  pg_assert(current != NULL);
+  pg_assert(*current + sizeof(u64) <= buf + size);
+
+  const char *const ptr = *current;
+  const u64 x = ((u64)(ptr[7] & 0xff) << 56) | (((u64)(ptr[6] & 0xff)) << 48) |
+                (((u64)(ptr[5] & 0xff)) << 40) |
+                (((u64)(ptr[4] & 0xff)) << 32) | ((u64)(ptr[3] & 0xff) << 24) |
+                (((u64)(ptr[2] & 0xff)) << 16) | (((u64)(ptr[1] & 0xff)) << 8) |
+                (((u64)(ptr[0] & 0xff)) << 0);
+  *current += sizeof(u64);
+  return x;
+}
+
 static void buf_read_n_u8(char *buf, u64 size, u8 *dst, u64 dst_len,
                           char **current) {
   pg_assert(buf != NULL);
@@ -1793,6 +1846,25 @@ static u8 buf_read_u8(char *buf, u64 size, char **current) {
   const u8 x = (*current)[0];
   *current += 1;
   return x;
+}
+
+static void arena_heap_dump(arena_t const *arena) {
+  char *current = arena->base;
+
+  while (current < arena->base + arena->current_offset) {
+    const u8 kind = buf_read_u8(arena->base, arena->current_offset, &current);
+    const char *const kind_string = allocation_kind_to_string(kind);
+
+    buf_read_n_u8(arena->base, arena->current_offset, NULL, 7, &current);
+
+    const u64 size =
+        buf_read_le_u64(arena->base, arena->current_offset, &current);
+    pg_assert(size > 0);
+
+    buf_read_n_u8(arena->base, arena->current_offset, NULL, size, &current);
+
+    fprintf(stderr, "fn=arena_heap_dump kind=%s size=%lu\n", kind_string, size);
+  }
 }
 
 static string_t
@@ -2211,7 +2283,7 @@ static void cf_buf_read_element_value(char *buf, u64 buf_len, char **current,
 
   case '@': {
     element_value->v.annotation_value =
-        arena_alloc(arena, 1, sizeof(cf_annotation_t));
+        arena_alloc(arena, 1, sizeof(cf_annotation_t), ALLOCATION_OBJECT);
 
     cf_buf_read_annotation(buf, buf_len, current, class_file,
                            element_value->v.annotation_value, arena);
@@ -5633,7 +5705,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         arena_t tmp_arena = *scratch_arena;
         u8 *dst = arena_alloc(&tmp_arena,
                               uncompressed_size_according_to_directory_entry,
-                              sizeof(u8));
+                              sizeof(u8), ALLOCATION_BLOB);
         u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
 
         z_stream stream = {
@@ -6341,7 +6413,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
 
       if (!S_ISREG(st.st_mode))
         continue;
-      char *buf = arena_alloc(arena, st.st_size, sizeof(u8));
+      char *buf = arena_alloc(arena, st.st_size, sizeof(u8), ALLOCATION_BLOB);
       const ssize_t read_bytes = read(fd, buf, st.st_size);
       pg_assert(read_bytes == st.st_size);
       close(fd);
@@ -6668,7 +6740,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       node->type_i = TYPE_INT_I;
     }
     node->extra_data_i = (u32)arena->current_offset;
-    u64 *extra_data_number = arena_alloc(arena, 1, sizeof(u64));
+    u64 *extra_data_number =
+        arena_alloc(arena, 1, sizeof(u64), ALLOCATION_OBJECT);
     *extra_data_number = number;
 
     return node->type_i;
@@ -8255,7 +8328,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cf_attribute_code_t code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
-    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
+    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
     cg_frame_init(gen->frame, arena);
 
     cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
@@ -8986,7 +9059,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     pg_array_init_reserve(code.code, 4, arena);
 
     gen->code = &code;
-    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t));
+    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
     cg_frame_init(gen->frame, arena);
 
     // Fill locals (method arguments).
