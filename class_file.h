@@ -113,6 +113,9 @@ static void arena_clear(arena_t *arena) {
 }
 
 static void arena_mark_as_dead(arena_t *arena, void *ptr) {
+  pg_assert(arena->base <= (char *)ptr - 16);
+  pg_assert(arena->base + arena->current_offset <= (char*)ptr);
+
   u8 *meta = ((u8 *)ptr) - 16;
   *meta |= ALLOCATION_TOMBSTONE;
 }

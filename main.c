@@ -5,18 +5,41 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static const char *usage = "./a.out [-h] (-c classpath) source.kt";
+static const char *usage =
+    // clang-format off
+"A small compiler for the Kotlin programming language."
+"\n"
+"\n  %s [OPTIONS] <path>"
+"\n"
+"\nEXAMPLES:"
+"\n  %s -c /usr/share/java/kotlin-stdlib.jar main.kt"
+"\n"
+"\nOPTIONS:"
+"\n  -v                Verbose."
+"\n  -m                Debug memory usage by printing a heap dump in CSV form."
+"\n  -h                Print this help message and exit."
+"\n  -c <classpath>    Load additional classpath entries, which are colon separated."
+"\n"
+"\nENVIRONMENT:"
+"\n  JAVA_HOME         This environment variable can be set to point to a local Java installation."
+"\n                    If it is not set, we will try to infer the system Java installation."
+"\n"
+    // clang-format on
+    ;
 
-static void print_usage_and_exit() {
-  puts(usage);
+static void print_usage_and_exit(const char *executable_name) {
+  printf(usage, executable_name, executable_name);
   exit(0);
 }
 
 int main(int argc, char *argv[]) {
+  pg_assert(argc > 0);
+
   int opt = 0;
   char *classpath = NULL;
+  bool mem_debug = false;
 
-  while ((opt = getopt(argc, argv, "vc:")) != -1) {
+  while ((opt = getopt(argc, argv, "hmvc:")) != -1) {
     switch (opt) {
     case 'v':
       log_verbose = true;
@@ -25,22 +48,25 @@ int main(int argc, char *argv[]) {
       classpath = optarg;
       break;
     case 'h':
-      print_usage_and_exit();
+      print_usage_and_exit(argv[0]);
+      break;
+    case 'm':
+      mem_debug = true;
       break;
 
     default:
       fprintf(stderr, "Unknown option: %c\n", opt);
-      print_usage_and_exit();
+      print_usage_and_exit(argv[0]);
     }
   }
 
   if (optind == argc) {
     fprintf(stderr, "Missing source file.\n");
-    print_usage_and_exit();
+    print_usage_and_exit(argv[0]);
   }
   if (optind != argc - 1) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
-    print_usage_and_exit();
+    print_usage_and_exit(argv[0]);
   }
   if (classpath == NULL) {
     classpath = ".";
@@ -223,5 +249,6 @@ int main(int argc, char *argv[]) {
     }
   }
   LOG("arena=%lu", arena.current_offset);
-  arena_heap_dump(&arena);
+  if (mem_debug)
+    arena_heap_dump(&arena);
 }
