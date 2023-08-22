@@ -135,9 +135,10 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->cap);
   if (arena->current_offset + len > arena->cap) {
-    fprintf(stderr,
-            "Out of memory: cap=%lu current_offset=%lu len=%lu\n",
+    fprintf(stderr, "Out of memory: cap=%lu current_offset=%lu len=%lu\n",
             arena->cap, arena->current_offset, len);
+
+    // TODO: Re-alloc a bigger arena?
     exit(ENOMEM);
   }
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
