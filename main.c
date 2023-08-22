@@ -47,10 +47,10 @@ int main(int argc, char *argv[]) {
   }
 
   arena_t arena = {0};
-  arena_init(&arena, 1L << 29);
+  arena_init(&arena, 1L << 26); // 64 MiB
 
   arena_t scratch_arena = {0};
-  arena_init(&scratch_arena, 1L << 26); // 64 MiB
+  arena_init(&scratch_arena, 1L << 25); // 32 MiB
 
   const string_t java_home = find_java_home(&arena);
   LOG("java_home=%.*s", java_home.len, java_home.value);

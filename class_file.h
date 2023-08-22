@@ -1578,7 +1578,9 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     };
     remaining =
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
-    type->this_class_name = string_make(item_type.this_class_name, arena);
+
+    if (!string_is_empty(item_type.this_class_name))
+      type->this_class_name = string_make(item_type.this_class_name, arena);
 
     type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
