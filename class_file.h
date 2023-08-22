@@ -87,6 +87,12 @@ typedef enum __attribute__((packed)) {
   ALLOCATION_BLOB = 1 << 5,
 } allocation_kind_t;
 
+typedef struct {
+  allocation_kind_t kind;
+  pg_pad(7);
+  u64 size;
+} allocation_metadata_t;
+
 static void arena_init(arena_t *arena, u64 cap) {
   pg_assert(arena != NULL);
 
@@ -123,13 +129,14 @@ static void arena_mark_as_dead(arena_t *arena, void *ptr) {
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
                          allocation_kind_t kind) {
   // clang-format off
-  // 
-  // ....|--------------------|++++|
-  //     ^                    ^    ^
-  //   base          old_offset    new_offset
-  //                          ^
-  //                        res
-  //                           ++++ == physical_size
+  //                           Metadata to be able to do heap dumps.
+  //                           v
+  //                           .....................
+  // ....|--------------------|allocation_metadata_t|+++++|*************************|
+  //     ^                    ^                     ^     ^                         ^
+  //   base          old_offset                     ^     new_offset                cap
+  //                                                ^
+  //                                                res
   // clang-format on
 
   pg_assert(arena != NULL);
@@ -144,11 +151,13 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
   pg_assert(element_size > 0);
   const u64 physical_size = len * element_size; // TODO: check overflow.
-  const u64 aligned_physical_size = ut_align_forward_16(physical_size);
+
+  pg_assert(sizeof(allocation_metadata_t) == 16);
 
   const u64 new_offset =
-      16 /* tag space */ +
+      sizeof(allocation_metadata_t) +
       ut_align_forward_16(arena->current_offset + physical_size);
+
   pg_assert((new_offset % 16) == 0);
   pg_assert(arena->current_offset + physical_size <= new_offset);
   pg_assert(new_offset < arena->current_offset + physical_size + 2 * 16);
@@ -159,13 +168,15 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert((u64)(new_allocation) + physical_size <=
             (u64)arena->base + new_offset);
 
+  allocation_metadata_t *metadata = (allocation_metadata_t *)new_allocation;
+  metadata->kind = kind;
+  metadata->size =
+      new_offset - arena->current_offset - sizeof(allocation_metadata_t);
+
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
-  *new_allocation = kind;
-  *(((u64 *)new_allocation) + 1) = aligned_physical_size;
-
-  return new_allocation + 16;
+  return new_allocation + sizeof(allocation_metadata_t);
 }
 
 static char *allocation_kind_to_string(allocation_kind_t kind) {
@@ -1892,16 +1903,14 @@ static void arena_heap_dump(arena_t const *arena) {
   fprintf(stderr, "kind;size;len;cap;occupancy;deleted\n");
 
   while (current < arena->base + arena->current_offset) {
-    const u8 kind = buf_read_u8(arena->base, arena->current_offset, &current);
-    const char *const kind_string = allocation_kind_to_string(kind);
+    allocation_metadata_t metadata = {0};
+    buf_read_n_u8(arena->base, arena->current_offset, (u8 *)&metadata,
+                  sizeof(allocation_metadata_t), &current);
+    pg_assert(metadata.size > 0);
 
-    buf_read_n_u8(arena->base, arena->current_offset, NULL, 7, &current);
+    const char *const kind_string = allocation_kind_to_string(metadata.kind);
 
-    const u64 size =
-        buf_read_le_u64(arena->base, arena->current_offset, &current);
-    pg_assert(size > 0);
-
-    const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
+    const u8 real_kind = metadata.kind & (~ALLOCATION_TOMBSTONE);
     u64 len = 0;
     u64 cap = 0;
 
@@ -1910,7 +1919,7 @@ static void arena_heap_dump(arena_t const *arena) {
     case ALLOCATION_CONSTANT_POOL:
     case ALLOCATION_OBJECT:
     case ALLOCATION_BLOB:
-      len = cap = size;
+      len = cap = metadata.size;
       break;
     case ALLOCATION_ARRAY: {
       pg_array_header_t *pg__ah = (pg_array_header_t *)current;
@@ -1924,11 +1933,12 @@ static void arena_heap_dump(arena_t const *arena) {
     }
 
     const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
-    const bool deleted = !!(kind & ALLOCATION_TOMBSTONE);
+    const bool deleted = !!(metadata.kind & ALLOCATION_TOMBSTONE);
 
-    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, size, len, cap,
-            occupancy, deleted);
-    buf_read_n_u8(arena->base, arena->current_offset, NULL, size, &current);
+    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, metadata.size, len,
+            cap, occupancy, deleted);
+    buf_read_n_u8(arena->base, arena->current_offset, NULL, metadata.size,
+                  &current);
   }
 }
 
