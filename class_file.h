@@ -88,9 +88,9 @@ typedef enum __attribute__((packed)) {
 } allocation_kind_t;
 
 typedef struct {
-  allocation_kind_t kind;
-  pg_pad(7);
-  u64 size;
+  allocation_kind_t kind : 8;
+  u64 size : 56;
+  u64 call_stack[15];
 } allocation_metadata_t;
 
 static void arena_init(arena_t *arena, u64 cap) {
@@ -152,7 +152,7 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert(element_size > 0);
   const u64 physical_size = len * element_size; // TODO: check overflow.
 
-  pg_assert(sizeof(allocation_metadata_t) == 16);
+  pg_assert(sizeof(allocation_metadata_t) % 16 == 0);
 
   const u64 new_offset =
       sizeof(allocation_metadata_t) +
@@ -160,7 +160,6 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 
   pg_assert((new_offset % 16) == 0);
   pg_assert(arena->current_offset + physical_size <= new_offset);
-  pg_assert(new_offset < arena->current_offset + physical_size + 2 * 16);
 
   char *const new_allocation = arena->base + arena->current_offset;
   pg_assert((((u64)new_allocation) % 16) == 0);
@@ -1935,8 +1934,8 @@ static void arena_heap_dump(arena_t const *arena) {
     const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
     const bool deleted = !!(metadata.kind & ALLOCATION_TOMBSTONE);
 
-    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, metadata.size, len,
-            cap, occupancy, deleted);
+    fprintf(stderr, "%s;%lu;%lu;%lu;%.6f;%d\n", kind_string, (u64)metadata.size,
+            len, cap, occupancy, deleted);
     buf_read_n_u8(arena->base, arena->current_offset, NULL, metadata.size,
                   &current);
   }

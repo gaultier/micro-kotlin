@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
   }
 
   arena_t arena = {0};
-  arena_init(&arena, 1L << 26); // 64 MiB
+  arena_init(&arena, 1L << 27); // 128 MiB
 
   arena_t scratch_arena = {0};
   // This size should be at least 22 MiB since that's the size of
