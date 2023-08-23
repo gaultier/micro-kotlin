@@ -7819,7 +7819,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
       cg_emit_load_variable_long(gen, locals_offset + 0, arena);
       break;
     case BYTECODE_RETURN:
-      // No-op.
+      // No-op by nature.
       break;
 
     case BYTECODE_LDC: {
