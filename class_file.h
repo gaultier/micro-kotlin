@@ -7713,6 +7713,28 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
                       arena);
 }
 
+static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
+                               arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(field_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(arena != NULL);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_GET_STATIC, arena);
+  cf_code_array_push_u16(&gen->code->code, field_i, arena);
+
+  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  const cf_verification_info_t verification_info = {
+      .kind = VERIFICATION_INFO_OBJECT,
+      .extra_data = class_i,
+  };
+  cg_frame_stack_push(gen->frame, verification_info, arena);
+}
+
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
                                         cf_class_file_t *class_file,
                                         const ty_type_t *method_type,
@@ -7739,8 +7761,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              field_ref_i, arena);
 
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      cf_code_array_push_u16(&gen->code->code, field_ref_gen_i, arena);
+      cg_emit_get_static(gen, field_ref_gen_i, 0, arena);
 
       break;
     }
@@ -8072,28 +8093,6 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
 
   for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
-}
-
-static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
-                               arena_t *arena) {
-  pg_assert(gen != NULL);
-  pg_assert(gen->code != NULL);
-  pg_assert(gen->code->code != NULL);
-  pg_assert(field_i > 0);
-  pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  pg_assert(arena != NULL);
-
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_GET_STATIC, arena);
-  cf_code_array_push_u16(&gen->code->code, field_i, arena);
-
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
-  const cf_verification_info_t verification_info = {
-      .kind = VERIFICATION_INFO_OBJECT,
-      .extra_data = class_i,
-  };
-  cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
 static void cg_emit_return_nothing(cg_generator_t *gen, arena_t *arena) {
