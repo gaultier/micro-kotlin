@@ -874,9 +874,13 @@ struct cg_frame_t {
 
 struct ty_type_t;
 
+struct cf_constant_array_t;
+typedef struct cf_constant_array_t cf_constant_array_t;
+
 typedef struct {
   string_t name;
-  u32 *code; // In case of InlineOnly.
+  u8 *code;                           // In case of InlineOnly.
+  cf_constant_array_t *constant_pool; // In case of InlineOnly.
   u32 *argument_types_i;
   u32 return_type_i;
   u32 this_class_type_i;
@@ -1396,11 +1400,11 @@ typedef struct cf_constant_field_ref_t cf_constant_field_ref_t;
 
 typedef enum cp_info_kind_t cp_info_kind_t;
 
-typedef struct {
+struct cf_constant_array_t {
   u64 len;
   u64 cap;
   cf_constant_t *values;
-} cf_constant_array_t;
+};
 
 static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
   pg_assert(arena != NULL);
@@ -1479,6 +1483,27 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
   pg_assert(pg_array_len(dst->stack) == pg_array_len(src->stack));
 
   return dst;
+}
+
+static cf_constant_array_t *
+cf_constant_array_clone(const cf_constant_array_t *constant_pool,
+                        arena_t *arena) {
+  cf_constant_array_t *res =
+      arena_alloc(arena, 1, sizeof(cf_constant_array_t), ALLOCATION_OBJECT);
+  res->cap = res->len = constant_pool->len;
+  res->values = arena_alloc(arena, constant_pool->len, sizeof(cf_constant_t),
+                            ALLOCATION_CONSTANT_POOL);
+
+  for (u64 i = 0; i < res->len; i++) {
+    const cf_constant_t constant = constant_pool->values[i];
+    res->values[i] = constant;
+
+    if (constant.kind == CONSTANT_POOL_KIND_UTF8) {
+      res->values[i].v.s = string_make(constant.v.s, arena);
+    }
+  }
+
+  return res;
 }
 
 static const cf_constant_t *
@@ -5635,6 +5660,9 @@ static void resolver_load_methods_from_class_file(
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
+  bool has_at_least_one_inline_only_method = false;
+  const u64 initial_types_count = pg_array_len(resolver->types);
+
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
     const string_t descriptor = cf_constant_array_get_as_string(
@@ -5655,6 +5683,8 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flags |= TYPE_FLAG_INLINE_ONLY;
+
+      has_at_least_one_inline_only_method = true;
 
       // Clone code.
       // TODO: Clone exceptions, stack map frames, etc?
@@ -5682,6 +5712,18 @@ static void resolver_load_methods_from_class_file(
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
       LOG("Loaded method: access_flags=%u type=%.*s", method->access_flags,
           human_type.len, human_type.value);
+    }
+  }
+
+  if (has_at_least_one_inline_only_method) {
+    // Need each inline-only method to point to a clone of the constant pool to
+    // be able to fix-up the referred to constants.
+    cf_constant_array_t *constant_pool_clone =
+        cf_constant_array_clone(&class_file->constant_pool, arena);
+    for (u64 i = initial_types_count; i < pg_array_len(resolver->types); i++) {
+      ty_type_t *const type = &resolver->types[i];
+      if (type->kind == TYPE_METHOD && (type->flags & TYPE_FLAG_INLINE_ONLY))
+        type->v.method.constant_pool = constant_pool_clone;
     }
   }
 }
@@ -7415,6 +7457,46 @@ static void cg_frame_locals_push(cg_generator_t *gen,
   cg_scope_variable_t scope_variable = {.variable = *variable,
                                         .scope_id = gen->scope_id};
   pg_array_append(gen->locals, scope_variable, arena);
+}
+
+static void cg_inline_method_call(cg_generator_t *gen, ty_type_t *method_type,
+                                  arena_t *arena) {
+  pg_assert(method_type->kind == TYPE_METHOD);
+  pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
+
+  ty_type_method_t *method = &method_type->v.method;
+  pg_assert(method->code != NULL);
+  pg_assert(pg_array_len(method->code) > 0);
+  pg_assert(method->constant_pool != NULL);
+
+  const u32 code_size = pg_array_len(method->code);
+  char *code = (char *)method->code;
+  char *current = code;
+
+  while (current < code + code_size) {
+    const u8 opcode = buf_read_u8(code, code_size, &current);
+
+    switch (opcode) {
+    case BYTECODE_GET_STATIC: {
+      u8 *initial = current;
+
+      const u16 field_ref_i = buf_read_be_u16(code, code_size, &current);
+      const cf_constant_t *const field_ref_constant =
+          cf_constant_array_get(method->constant_pool, field_ref_i);
+      pg_assert(field_ref_constant->kind == CONSTANT_POOL_KIND_FIELD_REF);
+
+      cf_constant_field_ref_t field_ref = field_ref_constant->v.field_ref;
+
+      const string_t descriptor = cf_constant_array_get_as_string(
+          method->constant_pool, field_ref.descriptor);
+      const string_t name = cf_constant_array_get_as_string(
+          method->constant_pool, field_ref.name);
+
+
+      break;
+    }
+    }
+  }
 }
 
 static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
