@@ -5651,6 +5651,7 @@ static void resolver_load_methods_from_class_file(
     type.v.method.this_class_type_i = this_class_type_i;
 
     if (cf_method_has_inline_only_annotation(class_file, method)) {
+      // Do as if the method was public, not private.
       type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flags |= TYPE_FLAG_INLINE_ONLY;
