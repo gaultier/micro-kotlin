@@ -1797,6 +1797,8 @@ struct cf_attribute_t {
     cf_stack_map_frame_t *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
     cf_annotation_t *
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
+
+    u16 *exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
   } v;
   u16 name;
   enum __attribute__((packed)) cf_attribute_kind_t {
@@ -1805,6 +1807,7 @@ struct cf_attribute_t {
     ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
     ATTRIBUTE_KIND_STACK_MAP_TABLE,
     ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
+    ATTRIBUTE_KIND_EXCEPTIONS,
   } kind;
   pg_pad(5);
 };
@@ -2376,11 +2379,17 @@ cf_buf_read_exceptions_attribute(char *buf, u64 buf_len, char **current,
   const u16 entry_size = sizeof(u16);
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
 
+  cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_EXCEPTIONS};
+  pg_array_init_reserve(attribute.v.exception_index_table, table_len, arena);
+
   for (u16 i = 0; i < table_len; i++) {
     const u16 exception_i = buf_read_be_u16(buf, buf_len, current);
     pg_assert(exception_i > 0);
     pg_assert(exception_i <= class_file->constant_pool.len);
   }
+
+  pg_array_append(*attributes, attribute, arena);
+
   const char *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
@@ -3295,6 +3304,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
 
     return size;
   }
+  case ATTRIBUTE_KIND_EXCEPTIONS:
+                                       return sizeof(u16) /* count */ + pg_array_len(attribute->v.exception_index_table)*sizeof(u16) ;
   case ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS: {
     pg_assert(0 && "todo");
   }
@@ -5643,12 +5654,16 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flags |= TYPE_FLAG_INLINE_ONLY;
 
+      // Clone code.
+      // TODO: Clone exceptions, stack map frames, etc?
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
         const cf_attribute_t *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
           break;
         }
+        if (attribute->kind == ATTRIBUTE_KIND_STACK_MAP_TABLE)
+          pg_assert(0 && "todo");
       }
       pg_assert(pg_array_len(type.v.method.code) > 0);
     }
