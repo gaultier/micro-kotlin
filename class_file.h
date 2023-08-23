@@ -758,6 +758,13 @@ typedef enum __attribute__((packed)) {
   BYTECODE_LDC2_W = 0x14,
   BYTECODE_ILOAD = 0x15,
   BYTECODE_LLOAD = 0x16,
+  BYTECODE_LLOAD_0 = 0x1e,
+  BYTECODE_LLOAD_1 = 0x1f,
+  BYTECODE_LLOAD_2 = 0x20,
+  BYTECODE_LLOAD_3 = 0x21,
+  BYTECODE_ILOAD_0 = 0x1a,
+  BYTECODE_ILOAD_1 = 0x1b,
+  BYTECODE_ILOAD_3 = 0x1c,
   BYTECODE_ISTORE = 0x36,
   BYTECODE_LSTORE = 0x37,
   BYTECODE_POP = 0x57,
@@ -7459,8 +7466,53 @@ static void cg_frame_locals_push(cg_generator_t *gen,
   pg_array_append(gen->locals, scope_variable, arena);
 }
 
-static void cg_inline_method_call(cg_generator_t *gen, ty_type_t *method_type,
-                                  arena_t *arena) {
+static u16 cg_import_constant(cf_constant_array_t *dst,
+                              const cf_constant_array_t *src, u16 constant_i,
+                              arena_t *arena) {
+  const cf_constant_t *const constant = cf_constant_array_get(src, constant_i);
+
+  switch (constant->kind) {
+  case CONSTANT_POOL_KIND_FIELD_REF: {
+    cf_constant_field_ref_t field_ref = constant->v.field_ref;
+
+    const cf_constant_t *const descriptor =
+        cf_constant_array_get(src, field_ref.descriptor);
+    const cf_constant_t *const name =
+        cf_constant_array_get(src, field_ref.name);
+
+    cf_constant_t field_ref_constant_gen = {
+        .kind = CONSTANT_POOL_KIND_FIELD_REF,
+        .v = {.field_ref = {
+                  .descriptor = cf_constant_array_push(dst, descriptor, arena),
+                  .name = cf_constant_array_push(dst, name, arena),
+              }}};
+    return cf_constant_array_push(dst, &field_ref_constant_gen, arena);
+  }
+  case CONSTANT_POOL_KIND_METHOD_REF: {
+    cf_constant_method_ref_t method_ref = constant->v.method_ref;
+
+    const cf_constant_t *const class =
+        cf_constant_array_get(src, method_ref.class);
+    const cf_constant_t *const name_and_type =
+        cf_constant_array_get(src, method_ref.name_and_type);
+
+    cf_constant_t method_ref_constant_gen = {
+        .kind = CONSTANT_POOL_KIND_METHOD_REF,
+        .v = {.method_ref = {
+                  .class = cf_constant_array_push(dst, class, arena),
+                  .name_and_type =
+                      cf_constant_array_push(dst, name_and_type, arena),
+              }}};
+    return cf_constant_array_push(dst, &method_ref_constant_gen, arena);
+  }
+  default:
+    pg_assert(0 && "unimplemented");
+  }
+}
+
+static void cg_inline_method_call(cg_generator_t *gen,
+                                  cf_class_file_t *class_file,
+                                  ty_type_t *method_type, arena_t *arena) {
   pg_assert(method_type->kind == TYPE_METHOD);
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
 
@@ -7478,23 +7530,34 @@ static void cg_inline_method_call(cg_generator_t *gen, ty_type_t *method_type,
 
     switch (opcode) {
     case BYTECODE_GET_STATIC: {
-      u8 *initial = current;
-
       const u16 field_ref_i = buf_read_be_u16(code, code_size, &current);
-      const cf_constant_t *const field_ref_constant =
-          cf_constant_array_get(method->constant_pool, field_ref_i);
-      pg_assert(field_ref_constant->kind == CONSTANT_POOL_KIND_FIELD_REF);
+      const u16 field_ref_gen_i =
+          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+                             field_ref_i, arena);
 
-      cf_constant_field_ref_t field_ref = field_ref_constant->v.field_ref;
-
-      const string_t descriptor = cf_constant_array_get_as_string(
-          method->constant_pool, field_ref.descriptor);
-      const string_t name = cf_constant_array_get_as_string(
-          method->constant_pool, field_ref.name);
-
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      cf_code_array_push_u16(&gen->code->code, field_ref_gen_i, arena);
 
       break;
     }
+    case BYTECODE_INVOKE_VIRTUAL: {
+      const u16 method_ref_i = buf_read_be_u16(code, code_size, &current);
+      const u16 method_ref_gen_i =
+          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+                             method_ref_i, arena);
+
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      cf_code_array_push_u16(&gen->code->code, method_ref_gen_i, arena);
+
+      break;
+    }
+    case BYTECODE_ILOAD_0:
+    case BYTECODE_LLOAD_0:
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+
+    default:
+      pg_assert(0 && "unimplemented");
     }
   }
 }
