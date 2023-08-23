@@ -7414,8 +7414,6 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   __builtin_unreachable();
 }
 
-// --------------------------------- Inlining
-
 // --------------------------------- Code generation
 
 typedef struct {
@@ -7444,17 +7442,12 @@ static void cg_frame_locals_push(cg_generator_t *gen,
   pg_assert(gen->frame != NULL);
   pg_assert(variable != NULL);
   pg_assert(arena != NULL);
-  pg_assert(variable->type_i > 0);
   pg_assert(logical_local_index != NULL);
   pg_assert(physical_local_index != NULL);
 
   pg_assert(gen->frame->locals_physical_count + 1 < UINT16_MAX);
 
   pg_array_append(gen->frame->locals, *variable, arena);
-
-  if (variable->verification_info.kind == VERIFICATION_INFO_LONG ||
-      variable->verification_info.kind == VERIFICATION_INFO_DOUBLE) {
-  }
 
   const u64 word_count =
       cf_verification_info_kind_word_count(variable->verification_info.kind);
@@ -7477,40 +7470,75 @@ static u16 cg_import_constant(cf_constant_array_t *dst,
 
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_FIELD_REF: {
-    cf_constant_field_ref_t field_ref = constant->v.field_ref;
+    const cf_constant_field_ref_t field_ref = constant->v.field_ref;
 
-    const cf_constant_t *const descriptor =
-        cf_constant_array_get(src, field_ref.descriptor);
-    const cf_constant_t *const name =
-        cf_constant_array_get(src, field_ref.name);
-
-    cf_constant_t field_ref_constant_gen = {
-        .kind = CONSTANT_POOL_KIND_FIELD_REF,
-        .v = {.field_ref = {
-                  .descriptor = cf_constant_array_push(dst, descriptor, arena),
-                  .name = cf_constant_array_push(dst, name, arena),
-              }}};
-    return cf_constant_array_push(dst, &field_ref_constant_gen, arena);
+    cf_constant_t constant_gen = {
+        .kind = constant->kind,
+        .v =
+            {
+                .field_ref =
+                    {
+                        .descriptor = cg_import_constant(
+                            dst, src, field_ref.descriptor, arena),
+                        .name =
+                            cg_import_constant(dst, src, field_ref.name, arena),
+                    },
+            },
+    };
+    return cf_constant_array_push(dst, &constant_gen, arena);
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
-    cf_constant_method_ref_t method_ref = constant->v.method_ref;
+    const cf_constant_method_ref_t method_ref = constant->v.method_ref;
 
-    const cf_constant_t *const class =
-        cf_constant_array_get(src, method_ref.class);
-    const cf_constant_t *const name_and_type =
-        cf_constant_array_get(src, method_ref.name_and_type);
-
-    cf_constant_t method_ref_constant_gen = {
-        .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {
-                  .class = cf_constant_array_push(dst, class, arena),
-                  .name_and_type =
-                      cf_constant_array_push(dst, name_and_type, arena),
-              }}};
-    return cf_constant_array_push(dst, &method_ref_constant_gen, arena);
+    cf_constant_t constant_gen = {
+        .kind = constant->kind,
+        .v =
+            {
+                .method_ref =
+                    {
+                        .class = cg_import_constant(dst, src, method_ref.class,
+                                                    arena),
+                        .name_and_type = cg_import_constant(
+                            dst, src, method_ref.name_and_type, arena),
+                    },
+            },
+    };
+    return cf_constant_array_push(dst, &constant_gen, arena);
   }
-  case CONSTANT_POOL_KIND_INT: {
+
+  case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
+    const cf_constant_name_and_type_t name_and_type = constant->v.name_and_type;
+    cf_constant_t constant_gen = {
+        .kind = constant->kind,
+        .v =
+            {
+                .name_and_type =
+                    {
+                        .name = cg_import_constant(dst, src, name_and_type.name,
+                                                   arena),
+                        .descriptor = cg_import_constant(
+                            dst, src, name_and_type.descriptor, arena),
+                    },
+            },
+    };
+    return cf_constant_array_push(dst, &constant_gen, arena);
+  }
+
+  case CONSTANT_POOL_KIND_INT:
+  case CONSTANT_POOL_KIND_UTF8: {
     return cf_constant_array_push(dst, constant, arena);
+  }
+
+  case CONSTANT_POOL_KIND_CLASS_INFO: {
+    cf_constant_t constant_gen = {
+        .kind = constant->kind,
+        .v =
+            {
+                .java_class_name = cg_import_constant(
+                    dst, src, constant->v.java_class_name, arena),
+            },
+    };
+    return cf_constant_array_push(dst, &constant_gen, arena);
   }
   default:
 
@@ -7645,6 +7673,26 @@ static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
                       arena);
 }
 
+static void cg_emit_ldc(cg_generator_t *gen,
+                        const cf_constant_array_t *constant_pool,
+                        u16 constant_i, arena_t *arena) {
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_LDC_W, arena);
+
+  const cf_constant_t *const constant =
+      cf_constant_array_get(constant_pool, constant_i);
+  switch (constant->kind) {
+  case CONSTANT_POOL_KIND_INT:
+    cf_code_array_push_u16(&gen->code->code, constant_i, arena);
+    cg_frame_stack_push(gen->frame,
+                        (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                        arena);
+    break;
+  default:
+    pg_assert(0 && "unimplemented");
+  }
+}
+
 static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
                                        arena_t *arena) {
   pg_assert(gen != NULL);
@@ -7707,33 +7755,32 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
 
       break;
     }
-    case BYTECODE_ISTORE_0:
-      cg_emit_store_variable_int(gen, locals_offset + 0, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+
+    case BYTECODE_ISTORE_1: {
+      const cf_variable_t variable = {
+          .node_i = 0,
+          .type_i = 0,
+          .scope_depth = gen->frame->scope_depth,
+          .verification_info = {.kind = VERIFICATION_INFO_INT},
+      };
+
+      u16 logical_local_index = 0;
+      u16 physical_local_index = 0;
+      cg_frame_locals_push(gen, &variable, &logical_local_index,
+                           &physical_local_index, arena);
+      cg_emit_store_variable_int(gen, physical_local_index, arena);
+
       break;
-    case BYTECODE_ISTORE_1:
-      cg_emit_store_variable_int(gen, locals_offset + 1, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      break;
-    case BYTECODE_ISTORE_2:
-      cg_emit_store_variable_int(gen, locals_offset + 2, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      break;
-    case BYTECODE_ISTORE_3:
-      cg_emit_store_variable_int(gen, locals_offset + 3, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      break;
+    }
     case BYTECODE_ILOAD_0:
       cg_emit_load_variable_int(gen, locals_offset + 0, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
       break;
 
     case BYTECODE_LLOAD_0:
       cg_emit_load_variable_long(gen, locals_offset + 0, arena);
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
       break;
     case BYTECODE_RETURN:
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      // No-op.
       break;
 
     case BYTECODE_LDC: {
@@ -7741,8 +7788,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
       const u16 constant_gen_i = cg_import_constant(
           &class_file->constant_pool, method->constant_pool, constant_i, arena);
 
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      cf_code_array_push_u16(&gen->code->code, constant_gen_i, arena);
+      cg_emit_ldc(gen, &class_file->constant_pool, constant_gen_i, arena);
 
       break;
     }
@@ -8677,7 +8723,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cg_emit_inlined_method_call(gen, class_file, type, physical_local_index,
                                 arena);
 
-    pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
