@@ -767,6 +767,10 @@ typedef enum __attribute__((packed)) {
   BYTECODE_ILOAD_3 = 0x1c,
   BYTECODE_ISTORE = 0x36,
   BYTECODE_LSTORE = 0x37,
+  BYTECODE_ISTORE_0 = 0x3b,
+  BYTECODE_ISTORE_1 = 0x3c,
+  BYTECODE_ISTORE_2 = 0x3d,
+  BYTECODE_ISTORE_3 = 0x3e,
   BYTECODE_POP = 0x57,
   BYTECODE_IADD = 0x60,
   BYTECODE_LADD = 0x61,
@@ -2924,12 +2928,14 @@ static void cf_buf_read_method(char *buf, u64 buf_len, char **current,
   cf_method_t method = {0};
   method.access_flags = buf_read_be_u16(buf, buf_len, current);
   method.name = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(method.name > 0);
-  pg_assert(method.name <= class_file->constant_pool.len);
+  pg_assert(
+      cf_constant_array_get(&class_file->constant_pool, method.name)->kind ==
+      CONSTANT_POOL_KIND_UTF8);
 
   method.descriptor = buf_read_be_u16(buf, buf_len, current);
-  pg_assert(method.descriptor > 0);
-  pg_assert(method.descriptor <= class_file->constant_pool.len);
+  pg_assert(
+      cf_constant_array_get(&class_file->constant_pool, method.name)->kind ==
+      CONSTANT_POOL_KIND_UTF8);
 
   cf_buf_read_attributes(buf, buf_len, current, class_file, &method.attributes,
                          arena);
@@ -3049,6 +3055,11 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
   class_file->this_class = buf_read_be_u16(buf, buf_len, current);
   pg_assert(class_file->this_class > 0);
   pg_assert(class_file->this_class <= constant_pool_count);
+  const cf_constant_t *const this_class =
+      cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
+  pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
+  class_file->class_name = cf_constant_array_get_as_string(
+      &class_file->constant_pool, this_class->v.string_utf8_i);
 
   class_file->super_class = buf_read_be_u16(buf, buf_len, current);
   pg_assert(class_file->super_class <= constant_pool_count);
@@ -3064,12 +3075,6 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
 
   const u64 remaining = buf + buf_len - *current;
   pg_assert(remaining == 0);
-
-  const cf_constant_t *const this_class =
-      cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
-  pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-  class_file->class_name = cf_constant_array_get_as_string(
-      &class_file->constant_pool, this_class->v.string_utf8_i);
 }
 
 // Returns the number of incoming slots to skip:
@@ -5699,7 +5704,6 @@ static void resolver_load_methods_from_class_file(
         const cf_attribute_t *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
-          break;
         }
 
         if (attribute->kind == ATTRIBUTE_KIND_STACK_MAP_TABLE)
@@ -7505,60 +7509,12 @@ static u16 cg_import_constant(cf_constant_array_t *dst,
               }}};
     return cf_constant_array_push(dst, &method_ref_constant_gen, arena);
   }
-  default:
-    pg_assert(0 && "unimplemented");
+  case CONSTANT_POOL_KIND_INT: {
+    return cf_constant_array_push(dst, constant, arena);
   }
-}
+  default:
 
-static void cg_inline_method_call(cg_generator_t *gen,
-                                  cf_class_file_t *class_file,
-                                  ty_type_t *method_type, arena_t *arena) {
-  pg_assert(method_type->kind == TYPE_METHOD);
-  pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
-
-  ty_type_method_t *method = &method_type->v.method;
-  pg_assert(method->code != NULL);
-  pg_assert(pg_array_len(method->code) > 0);
-  pg_assert(method->constant_pool != NULL);
-
-  const u32 code_size = pg_array_len(method->code);
-  char *code = (char *)method->code;
-  char *current = code;
-
-  while (current < code + code_size) {
-    const u8 opcode = buf_read_u8(code, code_size, &current);
-
-    switch (opcode) {
-    case BYTECODE_GET_STATIC: {
-      const u16 field_ref_i = buf_read_be_u16(code, code_size, &current);
-      const u16 field_ref_gen_i =
-          cg_import_constant(&class_file->constant_pool, method->constant_pool,
-                             field_ref_i, arena);
-
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      cf_code_array_push_u16(&gen->code->code, field_ref_gen_i, arena);
-
-      break;
-    }
-    case BYTECODE_INVOKE_VIRTUAL: {
-      const u16 method_ref_i = buf_read_be_u16(code, code_size, &current);
-      const u16 method_ref_gen_i =
-          cg_import_constant(&class_file->constant_pool, method->constant_pool,
-                             method_ref_i, arena);
-
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      cf_code_array_push_u16(&gen->code->code, method_ref_gen_i, arena);
-
-      break;
-    }
-    case BYTECODE_ILOAD_0:
-    case BYTECODE_LLOAD_0:
-      cf_code_array_push_u8(&gen->code->code, opcode, arena);
-      break;
-
-    default:
-      pg_assert(0 && "unimplemented");
-    }
+    pg_assert(0 && "unimplemented");
   }
 }
 
@@ -7707,6 +7663,94 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
   cg_frame_stack_push(gen->frame,
                       (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG},
                       arena);
+}
+
+static void cg_emit_inlined_method_call(cg_generator_t *gen,
+                                        cf_class_file_t *class_file,
+                                        const ty_type_t *method_type,
+                                        u16 locals_offset, arena_t *arena) {
+  pg_assert(method_type->kind == TYPE_METHOD);
+  pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
+
+  const ty_type_method_t *const method = &method_type->v.method;
+  pg_assert(method->code != NULL);
+  pg_assert(pg_array_len(method->code) > 0);
+  pg_assert(method->constant_pool != NULL);
+
+  const u32 code_size = pg_array_len(method->code);
+  char *code = (char *)method->code;
+  char *current = code;
+
+  while (current < code + code_size) {
+    const u8 opcode = buf_read_u8(code, code_size, &current);
+
+    switch (opcode) {
+    case BYTECODE_GET_STATIC: {
+      const u16 field_ref_i = buf_read_be_u16(code, code_size, &current);
+      const u16 field_ref_gen_i =
+          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+                             field_ref_i, arena);
+
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      cf_code_array_push_u16(&gen->code->code, field_ref_gen_i, arena);
+
+      break;
+    }
+    case BYTECODE_INVOKE_VIRTUAL: {
+      const u16 method_ref_i = buf_read_be_u16(code, code_size, &current);
+      const u16 method_ref_gen_i =
+          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+                             method_ref_i, arena);
+
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      cf_code_array_push_u16(&gen->code->code, method_ref_gen_i, arena);
+
+      break;
+    }
+    case BYTECODE_ISTORE_0:
+      cg_emit_store_variable_int(gen, locals_offset + 0, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+    case BYTECODE_ISTORE_1:
+      cg_emit_store_variable_int(gen, locals_offset + 1, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+    case BYTECODE_ISTORE_2:
+      cg_emit_store_variable_int(gen, locals_offset + 2, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+    case BYTECODE_ISTORE_3:
+      cg_emit_store_variable_int(gen, locals_offset + 3, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+    case BYTECODE_ILOAD_0:
+      cg_emit_load_variable_int(gen, locals_offset + 0, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+
+    case BYTECODE_LLOAD_0:
+      cg_emit_load_variable_long(gen, locals_offset + 0, arena);
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+    case BYTECODE_RETURN:
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      break;
+
+    case BYTECODE_LDC: {
+      const u16 constant_i = (u16)buf_read_u8(code, code_size, &current);
+      const u16 constant_gen_i = cg_import_constant(
+          &class_file->constant_pool, method->constant_pool, constant_i, arena);
+
+      cf_code_array_push_u8(&gen->code->code, opcode, arena);
+      cf_code_array_push_u16(&gen->code->code, constant_gen_i, arena);
+
+      break;
+    }
+
+    default:
+      pg_assert(0 && "unimplemented");
+    }
+  }
 }
 
 static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
@@ -8603,46 +8647,36 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
 
-    // FIXME
-    //    cg_emit_get_static(gen, gen->out_field_ref_i,
-    //    gen->out_field_ref_class_i,
-    //                       arena);
-
     cg_emit_node(gen, class_file, node->lhs, arena);
 
-    pg_assert(type->kind == TYPE_METHOD);
+    const par_ast_node_t *const lhs = &gen->resolver->parser->nodes[node->lhs];
+    const ty_type_t *const lhs_type = &gen->resolver->types[lhs->type_i];
 
-    const ty_type_method_t *const method = &type->v.method;
+    const cf_verification_info_t verification_info =
+        cg_type_to_verification_info(lhs_type);
+    const cf_variable_t variable = {
+        .node_i = node->lhs,
+        .type_i = lhs->type_i,
+        .scope_depth = gen->frame->scope_depth,
+        .verification_info = verification_info,
+    };
 
-    string_t descriptor = string_reserve(256, arena);
-    cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
-                              arena);
-    const u16 descriptor_i =
-        cf_add_constant_string(&class_file->constant_pool, descriptor, arena);
-    const u16 name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "println", arena);
+    u16 logical_local_index = 0;
+    u16 physical_local_index = 0;
+    cg_frame_locals_push(gen, &variable, &logical_local_index,
+                         &physical_local_index, arena);
 
-    const cf_constant_t name_and_type = {
-        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
-    const u16 name_and_type_i = cf_constant_array_push(
-        &class_file->constant_pool, &name_and_type, arena);
+    if (verification_info.kind == VERIFICATION_INFO_INT) {
+      cg_emit_store_variable_int(gen, physical_local_index, arena);
+    } else if (verification_info.kind == VERIFICATION_INFO_LONG) {
+      cg_emit_store_variable_long(gen, physical_local_index, arena);
+    } else {
+      pg_assert(0 && "todo");
+    }
 
-    const u16 class_name_i = cf_add_constant_string(
-        &class_file->constant_pool, type->this_class_name, arena);
+    cg_emit_inlined_method_call(gen, class_file, type, physical_local_index,
+                                arena);
 
-    const cf_constant_t class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
-                                 .v = {.java_class_name = class_name_i}};
-    const u16 class_i =
-        cf_constant_array_push(&class_file->constant_pool, &class, arena);
-    const cf_constant_t method_ref = {
-        .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.class = class_i,
-                             .name_and_type = name_and_type_i}}};
-    const u16 method_ref_i =
-        cf_constant_array_push(&class_file->constant_pool, &method_ref, arena);
-
-    cg_emit_invoke_static(gen, method_ref_i, method, arena);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     break;
   }
