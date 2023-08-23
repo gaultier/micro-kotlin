@@ -59,7 +59,8 @@
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
-- [ ] Hashes/Hashtables in judicious places in the compiler
+- [ ] Hashes/Hashtables in judicious places in the compiler (strings, types?)
+- [x] Heap dump, tracking of call stack during allocations.
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
