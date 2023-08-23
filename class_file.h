@@ -880,6 +880,7 @@ typedef struct {
   u32 *argument_types_i;
   u32 return_type_i;
   u32 this_class_type_i;
+  // TODO: Move to `type.flags` to reduce size?
   u16 access_flags;
   pg_pad(6);
 } ty_type_method_t;
