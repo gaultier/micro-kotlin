@@ -3305,7 +3305,8 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     return size;
   }
   case ATTRIBUTE_KIND_EXCEPTIONS:
-                                       return sizeof(u16) /* count */ + pg_array_len(attribute->v.exception_index_table)*sizeof(u16) ;
+    return sizeof(u16) /* count */ +
+           pg_array_len(attribute->v.exception_index_table) * sizeof(u16);
   case ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS: {
     pg_assert(0 && "todo");
   }
@@ -5662,7 +5663,11 @@ static void resolver_load_methods_from_class_file(
           pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
           break;
         }
+
         if (attribute->kind == ATTRIBUTE_KIND_STACK_MAP_TABLE)
+          pg_assert(0 && "todo");
+
+        if (attribute->kind == ATTRIBUTE_KIND_EXCEPTIONS)
           pg_assert(0 && "todo");
       }
       pg_assert(pg_array_len(type.v.method.code) > 0);
