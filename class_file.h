@@ -94,8 +94,8 @@ typedef enum __attribute__((packed)) {
 
 typedef struct {
   allocation_kind_t kind : 8;
-  u64 size : 56;
-  u64 call_stack[15];
+  u64 user_allocation_size : 48;
+  u8 call_stack_count : 8;
 } allocation_metadata_t;
 
 static void arena_init(arena_t *arena, u64 cap) {
@@ -161,10 +161,10 @@ end:
 static u64 initial_rbp = 0;
 static u64 pie_offset = 0;
 
-static void ut_record_call_stack(u64 *dst, u64 len) {
+static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
-  u64 count = 0;
+  u64 len = 0;
 
   while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
     const uintptr_t rip = *(rbp + 1);
@@ -173,11 +173,12 @@ static void ut_record_call_stack(u64 *dst, u64 len) {
     if ((u64)rbp == initial_rbp)
       break;
 
-    if (count >= len)
+    if (len >= cap)
       break;
 
-    dst[count++] = (rip - pie_offset);
+    dst[len++] = (rip - pie_offset);
   }
+  return len;
 }
 
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
@@ -195,43 +196,53 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 
   pg_assert(arena != NULL);
   pg_assert(arena->current_offset < arena->cap);
-  if (arena->current_offset + len > arena->cap) {
-    fprintf(stderr, "Out of memory: cap=%lu current_offset=%lu len=%lu\n",
-            arena->cap, arena->current_offset, len);
+  pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
+  pg_assert(element_size > 0);
+
+  u64 call_stack[256] = {0};
+  const u8 call_stack_count = ut_record_call_stack(
+      call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+
+  const u64 user_allocation_size = len * element_size; // TODO: check overflow.
+  pg_assert(user_allocation_size > 0);
+
+  const u64 metadata_size =
+      sizeof(allocation_metadata_t) + call_stack_count * sizeof(u64);
+  const u64 total_allocation_size = metadata_size + user_allocation_size;
+
+  if (arena->current_offset + total_allocation_size > arena->cap) {
+    fprintf(stderr,
+            "Out of memory: cap=%lu current_offset=%lu "
+            "user_allocation_size=%lu total_allocation_size=%lu\n",
+            arena->cap, arena->current_offset, user_allocation_size,
+            total_allocation_size);
 
     // TODO: Re-alloc a bigger arena?
     exit(ENOMEM);
   }
-  pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
-  pg_assert(element_size > 0);
-  const u64 physical_size = len * element_size; // TODO: check overflow.
-
-  pg_assert(sizeof(allocation_metadata_t) % 16 == 0);
 
   const u64 new_offset =
-      sizeof(allocation_metadata_t) +
-      ut_align_forward_16(arena->current_offset + physical_size);
+      ut_align_forward_16(arena->current_offset + total_allocation_size);
 
   pg_assert((new_offset % 16) == 0);
-  pg_assert(arena->current_offset + physical_size <= new_offset);
+  pg_assert(arena->current_offset + user_allocation_size <= new_offset);
 
   char *const new_allocation = arena->base + arena->current_offset;
   pg_assert((((u64)new_allocation) % 16) == 0);
   pg_assert((u64)(arena->base + arena->current_offset) <= (u64)new_allocation);
-  pg_assert((u64)(new_allocation) + physical_size <=
+  pg_assert((u64)(new_allocation) + user_allocation_size <=
             (u64)arena->base + new_offset);
 
   allocation_metadata_t *metadata = (allocation_metadata_t *)new_allocation;
   metadata->kind = kind;
-  metadata->size =
-      new_offset - arena->current_offset - sizeof(allocation_metadata_t);
-  ut_record_call_stack(metadata->call_stack,
-                       sizeof(metadata->call_stack) / sizeof(u64));
+  metadata->user_allocation_size = user_allocation_size;
+  metadata->call_stack_count = call_stack_count;
+  memcpy(metadata + 1, call_stack, sizeof(call_stack[0]) * call_stack_count);
 
   arena->current_offset = new_offset;
   pg_assert((((u64)arena->current_offset) % 16) == 0);
 
-  return new_allocation + sizeof(allocation_metadata_t);
+  return new_allocation + metadata_size;
 }
 
 static char *allocation_kind_to_string(allocation_kind_t kind) {
@@ -1394,7 +1405,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
   pg_assert(array->values != NULL);
-  pg_assert(((u64)(array->values)) % 16 == 0);
+  pg_assert(((u64)(array->values)) % 8 == 0);
   pg_assert(array->cap != 0);
 
   if (array->len == array->cap) {
@@ -1462,7 +1473,7 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
   pg_assert(constant_pool->values != NULL);
-  pg_assert(((u64)(constant_pool->values)) % 16 == 0);
+  pg_assert(((u64)(constant_pool->values)) % 8 == 0);
 
   return &constant_pool->values[i - 1];
 }
@@ -1959,9 +1970,11 @@ static void arena_heap_dump(arena_t const *arena) {
 
   while (current < arena->base + arena->current_offset) {
     allocation_metadata_t metadata = {0};
+    const char *metadata_start = current;
+
     buf_read_n_u8(arena->base, arena->current_offset, (u8 *)&metadata,
                   sizeof(allocation_metadata_t), &current);
-    pg_assert(metadata.size > 0);
+    pg_assert(metadata.user_allocation_size > 0);
 
     const char *const kind_string = allocation_kind_to_string(metadata.kind);
 
@@ -1974,7 +1987,7 @@ static void arena_heap_dump(arena_t const *arena) {
     case ALLOCATION_CONSTANT_POOL:
     case ALLOCATION_OBJECT:
     case ALLOCATION_BLOB:
-      len = cap = metadata.size;
+      len = cap = metadata.user_allocation_size;
       break;
     case ALLOCATION_ARRAY: {
       pg_array_header_t *pg__ah = (pg_array_header_t *)current;
@@ -1990,18 +2003,25 @@ static void arena_heap_dump(arena_t const *arena) {
     const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
     const bool deleted = !!(metadata.kind & ALLOCATION_TOMBSTONE);
 
-    fprintf(stderr, "%s,%lu,%lu,%lu,%.6f,%d,", kind_string, (u64)metadata.size,
-            len, cap, occupancy, deleted);
+    fprintf(stderr, "%s,%lu,%lu,%lu,%.6f,%d,", kind_string,
+            (u64)metadata.user_allocation_size, len, cap, occupancy, deleted);
 
-    for (u64 i = 0; i < sizeof(metadata.call_stack) / sizeof(u64); i++) {
-      if (metadata.call_stack[i] == 0)
-        break;
-      fprintf(stderr, "%#lx ", metadata.call_stack[i]);
+    for (u64 i = 0; i < metadata.call_stack_count; i++) {
+      fprintf(stderr, "%#x ",
+              buf_read_le_u64(arena->base, arena->current_offset, &current));
     }
     fprintf(stderr, "\n");
 
-    buf_read_n_u8(arena->base, arena->current_offset, NULL, metadata.size,
-                  &current);
+    const u64 metadata_size =
+        sizeof(allocation_metadata_t) + sizeof(u64) * metadata.call_stack_count;
+    pg_assert((u64)(current - metadata_start) == metadata_size);
+
+    // We need to 16 byte align the size to skip enough.
+    const u64 total_allocation_size =
+        ut_align_forward_16(metadata_size + metadata.user_allocation_size);
+
+    buf_read_n_u8(arena->base, arena->current_offset, NULL,
+                  total_allocation_size - metadata_size, &current);
   }
 }
 
@@ -2964,7 +2984,7 @@ static void cf_buf_read_class_file(char *buf, u64 buf_len, char **current,
       constant_pool_count * 2,
       arena); // Worst case: only LONG or DOUBLE entries which take 2 slots.
   pg_assert(class_file->constant_pool.values != NULL);
-  pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
+  pg_assert(((u64)class_file->constant_pool.values) % 8 == 0);
 
   cf_buf_read_constants(buf, buf_len, current, class_file, constant_pool_count,
                         arena);
@@ -3073,7 +3093,7 @@ static void cf_write_constant_pool(const cf_class_file_t *class_file,
 
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
     pg_assert(class_file->constant_pool.values != NULL);
-    pg_assert(((u64)class_file->constant_pool.values) % 16 == 0);
+    pg_assert(((u64)class_file->constant_pool.values) % 8 == 0);
 
     const cf_constant_t *const constant = &class_file->constant_pool.values[i];
     i += cf_write_constant(class_file, file, constant);
@@ -9292,7 +9312,7 @@ static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
 
   cg_generator_t gen = {.resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
-  pg_array_init_reserve(gen.locals, 1<<12, arena);
+  pg_array_init_reserve(gen.locals, 1 << 12, arena);
 
   cg_emit_synthetic_class(&gen, class_file, arena);
 
