@@ -7779,7 +7779,10 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              field_ref_i, arena);
 
-      cg_emit_get_static(gen, field_ref_gen_i, 0 /* FIXME */, arena);
+      const cf_constant_t* const field_ref_gen = cf_constant_array_get(&class_file->constant_pool,field_ref_gen_i);
+      pg_assert(field_ref_gen->kind==CONSTANT_POOL_KIND_FIELD_REF);
+
+      cg_emit_get_static(gen, field_ref_gen_i, field_ref_gen->v.field_ref.name, arena);
 
       break;
     }
