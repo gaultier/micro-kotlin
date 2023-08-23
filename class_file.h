@@ -7426,11 +7426,9 @@ typedef struct {
   cf_attribute_code_t *code;
   cg_frame_t *frame;
   cg_scope_variable_t *locals;
-
   cf_stack_map_frame_t *stack_map_frames;
-  u16 out_field_ref_i;
-  u16 out_field_ref_class_i;
   u32 scope_id;
+  pg_pad(4);
 } cg_generator_t;
 
 // FIXME: Probably should not behave like a FIFO and rather like an array.
@@ -7779,10 +7777,12 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              field_ref_i, arena);
 
-      const cf_constant_t* const field_ref_gen = cf_constant_array_get(&class_file->constant_pool,field_ref_gen_i);
-      pg_assert(field_ref_gen->kind==CONSTANT_POOL_KIND_FIELD_REF);
+      const cf_constant_t *const field_ref_gen =
+          cf_constant_array_get(&class_file->constant_pool, field_ref_gen_i);
+      pg_assert(field_ref_gen->kind == CONSTANT_POOL_KIND_FIELD_REF);
 
-      cg_emit_get_static(gen, field_ref_gen_i, field_ref_gen->v.field_ref.name, arena);
+      cg_emit_get_static(gen, field_ref_gen_i, field_ref_gen->v.field_ref.name,
+                         arena);
 
       break;
     }
@@ -8689,8 +8689,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     break;
   }
   case AST_KIND_BUILTIN_PRINTLN: {
-    pg_assert(gen->out_field_ref_i > 0);
-    pg_assert(gen->out_field_ref_class_i > 0);
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
@@ -9317,47 +9315,6 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
   pg_assert(pg_array_len(gen->resolver->parser->nodes) > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
-
-  // FIXME: System.out for println.
-  {
-    const u16 out_name_i =
-        cf_add_constant_cstring(&class_file->constant_pool, "out", arena);
-    const u16 out_descriptor_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "Ljava/io/PrintStream;", arena);
-
-    const cf_constant_t out_name_and_type = {
-        .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = out_name_i,
-                                .descriptor = out_descriptor_i}}};
-    const u16 out_name_and_type_i = cf_constant_array_push(
-        &class_file->constant_pool, &out_name_and_type, arena);
-
-    const u16 system_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/lang/System", arena);
-    const cf_constant_t system_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.java_class_name = system_name_i}};
-    const u16 system_class_i = cf_constant_array_push(
-        &class_file->constant_pool, &system_class, arena);
-
-    const cf_constant_t out_field_ref = {
-        .kind = CONSTANT_POOL_KIND_FIELD_REF,
-        .v = {.field_ref = {.name = system_class_i,
-                            .descriptor = out_name_and_type_i}}};
-    const u16 out_field_ref_i = cf_constant_array_push(
-        &class_file->constant_pool, &out_field_ref, arena);
-
-    gen->out_field_ref_i = out_field_ref_i;
-
-    const u16 out_class_name_i = cf_add_constant_cstring(
-        &class_file->constant_pool, "java/io/PrintStream", arena);
-    const cf_constant_t out_class = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.java_class_name = out_class_name_i}};
-    const u16 out_class_i =
-        cf_constant_array_push(&class_file->constant_pool, &out_class, arena);
-    gen->out_field_ref_class_i = out_class_i;
-  }
 
   { // This class
     const string_t class_name =
