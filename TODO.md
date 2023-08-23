@@ -59,7 +59,10 @@
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
 - [ ] Hashes/Hashtables in judicious places in the compiler (strings, types?)
-- [x] Heap dump, tracking of call stack during allocations.
+- [x] Heap dump on Linux, tracking of call stack during allocations.
+- [ ] Heap dump on other OSes
+- [ ] Heap dump on Linux with function names (instead of addresses)
+- [ ] Heap dump on other OSes with function names (instead of addresses)
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
