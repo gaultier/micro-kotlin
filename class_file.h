@@ -896,7 +896,7 @@ struct ty_type_t {
     u32 array_type_i;        // TYPE_ARRAY_REFERENCE
   } v;
   ty_type_kind_t kind;
-  u16 flag;
+  u16 flags;
   u32 super_type_i;
 };
 
@@ -5640,7 +5640,7 @@ static void resolver_load_methods_from_class_file(
     if (cf_method_has_inline_only_annotation(class_file, method)) {
       type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
-      type.flag |= TYPE_FLAG_INLINE_ONLY;
+      type.flags |= TYPE_FLAG_INLINE_ONLY;
 
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
         const cf_attribute_t *const attribute = &method->attributes[i];
