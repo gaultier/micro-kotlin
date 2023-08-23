@@ -161,6 +161,7 @@ end:
 static u64 initial_rbp = 0;
 static u64 pie_offset = 0;
 
+// TODO: Maybe use varints to reduce the size.
 static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
@@ -181,6 +182,7 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
+static bool mem_debug = false;
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
                          allocation_kind_t kind) {
   // clang-format off
@@ -200,8 +202,10 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   pg_assert(element_size > 0);
 
   u64 call_stack[256] = {0};
-  const u8 call_stack_count = ut_record_call_stack(
-      call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+  const u8 call_stack_count =
+      mem_debug ? ut_record_call_stack(call_stack, sizeof(call_stack) /
+                                                       sizeof(call_stack[0]))
+                : 0;
 
   const u64 user_allocation_size = len * element_size; // TODO: check overflow.
   pg_assert(user_allocation_size > 0);

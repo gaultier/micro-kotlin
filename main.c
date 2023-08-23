@@ -40,7 +40,6 @@ int main(int argc, char *argv[]) {
 
   int opt = 0;
   char *classpath = NULL;
-  bool mem_debug = false;
 
   while ((opt = getopt(argc, argv, "hmvc:")) != -1) {
     switch (opt) {
