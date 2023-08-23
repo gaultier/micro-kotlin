@@ -306,6 +306,14 @@ typedef struct pg_array_header_t {
 
 #define pg_array_clear(x) pg_array_header(x)->len = 0
 
+#define pg_array_clone(dst, src, arena)                                        \
+  do {                                                                         \
+    pg_array_init_reserve(dst, pg_array_len(src), arena);                      \
+    pg_array_header(dst)->len = pg_array_len(src);                             \
+    if (pg_array_len(src) > 0)                                                 \
+      memcpy(dst, src, pg_array_len(src) * sizeof(src[0]));                    \
+  } while (0)
+
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
     pg_assert(pg_array_len(x) <= pg_array_cap(x));                             \
@@ -868,6 +876,7 @@ struct ty_type_t;
 
 typedef struct {
   string_t name;
+  u32 *code; // In case of InlineOnly.
   u32 *argument_types_i;
   u32 return_type_i;
   u32 this_class_type_i;
@@ -5633,7 +5642,14 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flag |= TYPE_FLAG_INLINE_ONLY;
 
-      // TODO: Save the bytecode somewhere.
+      for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
+        const cf_attribute_t *const attribute = &method->attributes[i];
+        if (attribute->kind == ATTRIBUTE_KIND_CODE) {
+          pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
+          break;
+        }
+      }
+      pg_assert(pg_array_len(type.v.method.code) > 0);
     }
 
     const u32 type_i = resolver_add_type(resolver, &type, arena);
