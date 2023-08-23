@@ -47,7 +47,6 @@
 - [x] Move types to the resolver
 - [ ] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
-- [ ] Packages
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
 - [x] Read .jmod files
 - [x] Add class path CLI option
@@ -68,7 +67,6 @@
 - [x] Resolve free functions by building candidate sets
 - [ ] **Trivial inline** (no jumps, no exceptions, etc)
 - [ ] Remove builtin println
-- [ ] Read kotlin metadata in class files
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
@@ -90,6 +88,7 @@
 
 **Later:**
 
+- [ ] Read kotlin metadata in class files (protobuf)
 - [ ] Full-fledged type inference
 - [ ] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] High level APIs for the driver
