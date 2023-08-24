@@ -941,7 +941,6 @@ typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
   AST_KIND_NUMBER,
   AST_KIND_BOOL,
-  AST_KIND_BUILTIN_PRINTLN,
   AST_KIND_FUNCTION_DEFINITION,
   AST_KIND_FUNCTION_PARAMETER,
   AST_KIND_TYPE,
@@ -967,7 +966,6 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = "NONE",
     [AST_KIND_NUMBER] = "NUMBER",
     [AST_KIND_BOOL] = "BOOL",
-    [AST_KIND_BUILTIN_PRINTLN] = "BUILTIN_PRINTLN",
     [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
     [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
     [AST_KIND_TYPE] = "TYPE",
@@ -1025,7 +1023,6 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_RIGHT_PAREN,
   TOKEN_KIND_LEFT_BRACE,
   TOKEN_KIND_RIGHT_BRACE,
-  TOKEN_KIND_BUILTIN_PRINTLN,
   TOKEN_KIND_KEYWORD_FUN,
   TOKEN_KIND_KEYWORD_RETURN,
   TOKEN_KIND_KEYWORD_FALSE,
@@ -3821,12 +3818,6 @@ static void lex_identifier(lex_lexer_t *lexer, const char *buf, u32 buf_len,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
-  } else if (mem_eq_c(identifier, identifier_len, "println")) {
-    const lex_token_t token = {
-        .kind = TOKEN_KIND_BUILTIN_PRINTLN,
-        .source_offset = start_offset,
-    };
-    pg_array_append(lexer->tokens, token, arena);
   } else if (mem_eq_c(identifier, identifier_len, "true")) {
     const lex_token_t token = {
         .kind = TOKEN_KIND_KEYWORD_TRUE,
@@ -4240,8 +4231,6 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
     return 5;
   case TOKEN_KIND_KEYWORD_RETURN:
     return 6;
-  case TOKEN_KIND_BUILTIN_PRINTLN:
-    return 7;
 
   case TOKEN_KIND_NUMBER:
     return lex_number_length(buf, buf_len, token.source_offset);
@@ -4590,27 +4579,6 @@ static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_statement(par_parser_t *parser, arena_t *arena);
 static u32 par_parse_type(par_parser_t *parser, arena_t *arena);
 
-static u32 par_parse_builtin_println(par_parser_t *parser, arena_t *arena) {
-  pg_assert(parser != NULL);
-  pg_assert(parser->lexer != NULL);
-  pg_assert(parser->lexer->tokens != NULL);
-  pg_assert(parser->nodes != NULL);
-  pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
-
-  par_expect_token(parser, TOKEN_KIND_LEFT_PAREN, "expected left parenthesis");
-
-  par_ast_node_t node = {
-      .kind = AST_KIND_BUILTIN_PRINTLN,
-      .main_token_i = parser->tokens_i - 2,
-      .lhs = par_parse_expression(parser, arena),
-  };
-  const u32 node_i = par_add_node(parser, &node, arena);
-
-  par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
-                   "expected right parenthesis");
-  return node_i;
-}
-
 // block:
 //     '{'
 //     {NL}
@@ -4768,8 +4736,6 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
         .lhs = is_true,
     };
     return par_add_node(parser, &node, arena);
-  } else if (par_match_token(parser, TOKEN_KIND_BUILTIN_PRINTLN)) {
-    return par_parse_builtin_println(parser, arena);
   } else if (par_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
     const u32 node_i = par_parse_expression(parser, arena);
     // TODO: Locate left parenthesis for the error message.
@@ -5020,6 +4986,7 @@ static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
       .kind = AST_KIND_CALL,
       .main_token_i = *main_token_i,
   };
+  pg_array_init_reserve(node.nodes,256,arena);
   par_parse_value_arguments(parser, &node.nodes, arena);
 
   return par_add_node(parser, &node, arena);
@@ -5541,7 +5508,6 @@ static void par_sync_if_panicked(par_parser_t *parser) {
     // TODO: sync at newlines?
 
     switch (par_peek_token(parser).kind) {
-    case TOKEN_KIND_BUILTIN_PRINTLN:
     case TOKEN_KIND_KEYWORD_FUN:
       return;
     default:; // Do nothing.
@@ -6499,20 +6465,9 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         resolver->parser->lexer->file_path.value, line, column,
         token.source_offset);
     break;
-  case AST_KIND_BUILTIN_PRINTLN: {
-    if (node->type_i != 0)
-      human_type =
-          resolver_function_to_human_string(resolver, node->type_i, arena);
-
-    LOG("[%ld] %s  %.*s %s (at %.*s:%u:%u:%u)", node - resolver->parser->nodes,
-        kind_string, human_type.len, human_type.value, type_kind,
-        resolver->parser->lexer->file_path.len,
-        resolver->parser->lexer->file_path.value, line, column,
-        token.source_offset);
-    break;
-  }
 
   case AST_KIND_LIST:
+  case AST_KIND_CALL:
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
@@ -6972,23 +6927,29 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     return node->type_i = TYPE_BOOLEAN_I;
   }
   case AST_KIND_CALL: {
-    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    arena_t tmp_arena = *scratch_arena;
 
+    // Resolve arguments.
     u32 *call_site_argument_types_i = NULL;
-    pg_array_init_reserve(call_site_argument_types_i, 1, arena);
+    pg_array_init_reserve(call_site_argument_types_i, pg_array_len(node->nodes),
+                          &tmp_arena);
 
-    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    pg_array_append(call_site_argument_types_i, lhs->type_i, arena);
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      const u32 node_i = node->nodes[i];
+      const u32 type_i =
+          resolver_resolve_node(resolver, node_i, &tmp_arena, arena);
+      pg_array_append(call_site_argument_types_i, type_i, arena);
+    }
 
     u32 picked_method_type_i = 0;
     {
       u32 *candidate_functions_i = NULL;
-      pg_array_init_reserve(candidate_functions_i, 128, scratch_arena);
+      pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
               resolver, string_make_from_c_no_alloc("println"),
               call_site_argument_types_i, &picked_method_type_i,
-              &candidate_functions_i, scratch_arena, arena)) {
+              &candidate_functions_i, &tmp_arena, arena)) {
 
         string_t error = string_reserve(256, arena);
         string_append_cstring(&error, "failed to find matching function",
@@ -7016,10 +6977,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     pg_assert(picked_method_type_i > 0);
+    const ty_type_t *picked_method_type =
+        &resolver->types[picked_method_type_i];
+    pg_assert(picked_method_type->kind == TYPE_METHOD);
 
     node->type_i = picked_method_type_i;
 
-    return TYPE_UNIT_I;
+    return picked_method_type->v.method.return_type_i;
   }
   case AST_KIND_NUMBER: {
     u8 flag = 0;
@@ -8863,9 +8827,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   switch (node->kind) {
   case AST_KIND_NONE:
     return;
-  case AST_KIND_CALL: {
-    break;
-  }
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
@@ -8914,34 +8875,45 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
     break;
   }
-  case AST_KIND_BUILTIN_PRINTLN: {
+  case AST_KIND_CALL: {
     pg_assert(pg_array_len(gen->frame->stack) == 0);
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
 
-    cg_emit_node(gen, class_file, node->lhs, arena);
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      cg_emit_node(gen, class_file, node->nodes[i], arena);
+    }
 
-    const par_ast_node_t *const lhs = &gen->resolver->parser->nodes[node->lhs];
-    const ty_type_t *const lhs_type = &gen->resolver->types[lhs->type_i];
+    if (type->flags & TYPE_FLAG_INLINE_ONLY) {
+      for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+        const u32 argument_i = node->nodes[i];
+        const par_ast_node_t *const argument =
+            &gen->resolver->parser->nodes[argument_i];
+        const ty_type_t *const argument_type =
+            &gen->resolver->types[argument->type_i];
 
-    const cf_verification_info_t verification_info =
-        cg_type_to_verification_info(lhs_type);
-    const cf_variable_t variable = {
-        .node_i = node->lhs,
-        .type_i = lhs->type_i,
-        .scope_depth = gen->frame->scope_depth,
-        .verification_info = verification_info,
-    };
+        const cf_verification_info_t verification_info =
+            cg_type_to_verification_info(argument_type);
+        const cf_variable_t variable = {
+            .node_i = argument_i,
+            .type_i = argument->type_i,
+            .scope_depth = gen->frame->scope_depth,
+            .verification_info = verification_info,
+        };
 
-    u16 logical_local_index = 0;
-    u16 physical_local_index = 0;
-    cg_frame_locals_push(gen, &variable, &logical_local_index,
-                         &physical_local_index, arena);
+        u16 logical_local_index = 0;
+        u16 physical_local_index = 0;
+        cg_frame_locals_push(gen, &variable, &logical_local_index,
+                             &physical_local_index, arena);
 
-    cg_emit_store_variable(gen, physical_local_index, arena);
+        cg_emit_store_variable(gen, physical_local_index, arena);
+      }
+      cg_emit_inlined_method_call(gen, class_file, type,
+                                  gen->frame->locals_physical_count, arena);
 
-    cg_emit_inlined_method_call(gen, class_file, type, physical_local_index,
-                                arena);
+    } else {
+      pg_assert(0 && "unimplemented");
+    }
 
     break;
   }
