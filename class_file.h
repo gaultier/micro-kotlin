@@ -5028,7 +5028,8 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
   // TODO: multiple suffixes.
   const u32 rhs_i =
       par_parse_postfix_unary_suffix(parser, &main_token_i, arena);
-  if (rhs_i==0) return lhs_i;
+  if (rhs_i == 0)
+    return lhs_i;
 
   parser->nodes[rhs_i].lhs = lhs_i;
 
@@ -8883,6 +8884,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
 
     if (type->flags & TYPE_FLAG_INLINE_ONLY) {
+      const u16 initial_locals_physical_count = gen->frame->locals_physical_count;
+
       for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
         const u32 argument_i = node->nodes[i];
         const par_ast_node_t *const argument =
@@ -8907,7 +8910,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         cg_emit_store_variable(gen, physical_local_index, arena);
       }
       cg_emit_inlined_method_call(gen, class_file, type,
-                                  gen->frame->locals_physical_count, arena);
+                                  initial_locals_physical_count, arena);
 
     } else {
       pg_assert(0 && "unimplemented");
