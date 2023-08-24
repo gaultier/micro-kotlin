@@ -124,8 +124,8 @@ static void arena_clear(arena_t *arena) {
 }
 
 static void arena_mark_as_dead(arena_t *arena, void *ptr) {
-  pg_assert(arena->base <= (char *)ptr - 16);
-  pg_assert(arena->base + arena->current_offset <= (char *)ptr);
+  pg_assert(arena->base <= (char *)ptr - sizeof(allocation_metadata_t));
+  pg_assert((char *)ptr <= arena->base + arena->current_offset);
 
   u8 *meta = ((u8 *)ptr) - 16;
   *meta |= ALLOCATION_TOMBSTONE;
@@ -5034,6 +5034,13 @@ static void par_parse_value_arguments(par_parser_t *parser, u32 **nodes,
 
   while (!par_is_at_end(parser)) {
     u32 argument_i = par_parse_expression(parser, arena);
+    if (argument_i == 0) {
+      const lex_token_t main_token = parser->lexer->tokens[parser->tokens_i];
+      par_error(parser, main_token,
+                "Expected expression or closing right parenthesis for function "
+                "arguments");
+      return;
+    }
     pg_array_append(*nodes, argument_i, arena);
 
     if (par_match_token(parser, TOKEN_KIND_COMMA)) {

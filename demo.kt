@@ -6,6 +6,13 @@ fun return_multiply_ints(a: Int, b: Int) : Int {
   return a*b
 }
 
+fun fibonacci_rec(n: Int) : Int {
+  if (n == 1) {
+    return 1
+  } 
+  return n + fibonacci_rec(n-1
+}
+
 fun main() {
   println("Hello, world!")
   log_multiply_ints(3, 4)
