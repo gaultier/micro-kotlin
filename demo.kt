@@ -1,5 +1,10 @@
+fun log_multiply_ints(a: Int, b: Int) {
+  println(a*b)
+}
+
 fun main() {
   println("Hello, world!")
+  log_multiply_ints(3, 4)
 }
 
 fun print_arguments(a: Int, b: Int){

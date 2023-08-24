@@ -6258,11 +6258,10 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
     string_append_string(&result, method->source_file_name, arena);
   }
 
-    if (method->source_line > 0) {
-      string_append_cstring(&result, ":", arena);
-      string_append_u64(&result, (u64)method->source_line, arena);
-    }
-  
+  if (method->source_line > 0) {
+    string_append_cstring(&result, ":", arena);
+    string_append_u64(&result, (u64)method->source_line, arena);
+  }
 
   return result;
 }
@@ -7200,13 +7199,23 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     }
     resolver->current_function_i = node_i;
 
+    const lex_token_t name_token =
+        resolver->parser->lexer->tokens[node->main_token_i];
     ty_type_t type = {
         .kind = TYPE_METHOD,
         .v = {.method =
                   {
                       .return_type_i = return_type_i,
+                      .source_file_name = resolver->parser->lexer->file_path,
+                      .access_flags=ACCESS_FLAGS_PUBLIC|ACCESS_FLAGS_STATIC,
                   }},
     };
+    u32 column = 0;
+    u32 line = 0;
+    par_find_token_position(resolver->parser, name_token, &line, &column,
+                            &type.v.method.name);
+    pg_assert(line <= UINT16_MAX);
+    type.v.method.source_line = (u16)line;
 
     if (node->lhs > 0) {
       const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
