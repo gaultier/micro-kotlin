@@ -959,7 +959,6 @@ typedef enum __attribute__((packed)) {
   AST_KIND_UNRESOLVED_NAME,
   AST_KIND_RETURN,
   AST_KIND_CALL,
-  AST_KIND_CALL_ARGUMENTS,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -985,7 +984,6 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
     [AST_KIND_RETURN] = "RETURN",
     [AST_KIND_CALL] = "CALL",
-    [AST_KIND_CALL_ARGUMENTS] = "CALL_ARGUMENTS",
 };
 
 // TODO: compact fields.
@@ -4980,18 +4978,12 @@ static void par_parse_value_arguments(par_parser_t *parser, u32 **nodes,
 // callSuffix:
 //     [typeArguments] (([valueArguments] annotatedLambda) | valueArguments)
 static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
-                                 par_ast_node_kind_t *parent_kind,
                                  arena_t *arena) {
   if (!par_match_token(parser, TOKEN_KIND_LEFT_PAREN))
     return 0;
 
   *main_token_i = parser->tokens_i - 1;
-  *parent_kind = AST_KIND_CALL;
-
-  par_ast_node_t node = {
-      .kind = AST_KIND_CALL_ARGUMENTS,
-      .main_token_i = *main_token_i,
-  };
+  par_ast_node_t node = {.kind = AST_KIND_CALL};
   pg_array_init_reserve(node.nodes, 256, arena);
   par_parse_value_arguments(parser, &node.nodes, arena);
 
@@ -5005,9 +4997,7 @@ static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
 //     | indexingSuffix
 //     | navigationSuffix
 static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
-                                          u32 *main_token_i,
-                                          par_ast_node_kind_t *kind,
-                                          arena_t *arena) {
+                                          u32 *main_token_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5016,12 +5006,10 @@ static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
   pg_assert(main_token_i != NULL);
   pg_assert(arena != NULL);
 
-  u32 node_i = 0;
-  if ((node_i =
-           par_parse_navigation_suffix(parser, main_token_i, kind, arena)) != 0)
-    return node_i;
+  if (par_peek_token(parser).kind == TOKEN_KIND_DOT)
+    pg_assert(0 && "unimplemented");
 
-  return par_parse_call_suffix(parser, main_token_i, kind, arena);
+  return par_parse_call_suffix(parser, main_token_i, arena);
 }
 
 // postfixUnaryExpression:
@@ -5036,21 +5024,14 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
 
   u32 lhs_i = par_parse_primary_expression(parser, arena);
 
-  u32 rhs_i = 0;
   u32 main_token_i = 0;
-  par_ast_node_kind_t kind = 0;
-  while ((rhs_i = par_parse_postfix_unary_suffix(parser, &main_token_i, &kind,
-                                                 arena)) != 0) {
-    const par_ast_node_t node = {
-        .kind = kind,
-        .main_token_i = main_token_i,
-        .lhs = lhs_i,
-        .rhs = rhs_i,
-    };
-    lhs_i = par_add_node(parser, &node, arena);
-  }
+  // TODO: multiple suffixes.
+  const u32 rhs_i =
+      par_parse_postfix_unary_suffix(parser, &main_token_i, arena);
 
-  return lhs_i;
+  parser->nodes[rhs_i].lhs = lhs_i;
+
+  return rhs_i;
 }
 
 // prefixUnaryExpression:
@@ -6477,7 +6458,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     break;
 
   case AST_KIND_LIST:
-  case AST_KIND_CALL_ARGUMENTS:
+  case AST_KIND_CALL:
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
@@ -6938,6 +6919,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   }
   case AST_KIND_CALL: {
     arena_t tmp_arena = *scratch_arena;
+
+      const u32 lhs_type_i =
+          resolver_resolve_node(resolver, node->lhs, &tmp_arena, arena);
 
     // Resolve arguments.
     u32 *call_site_argument_types_i = NULL;
