@@ -249,6 +249,16 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   return new_allocation + metadata_size;
 }
 
+static u32
+arena_get_user_allocation_offset(const arena_t *arena,
+                                 const allocation_metadata_t *metadata) {
+  pg_assert(arena->base <= (char *)metadata &&
+            (char *)metadata <= arena->base + arena->current_offset);
+
+  return (char *)metadata - arena->base + sizeof(allocation_metadata_t) +
+         metadata->call_stack_count * sizeof(u64);
+}
+
 static char *allocation_kind_to_string(allocation_kind_t kind) {
   const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
 
@@ -7002,10 +7012,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
       node->type_i = TYPE_INT_I;
     }
-    node->extra_data_i = (u32)arena->current_offset;
+
+    const allocation_metadata_t *const metadata =
+        (allocation_metadata_t *)(arena->base + arena->current_offset);
     u64 *extra_data_number =
         arena_alloc(arena, 1, sizeof(u64), ALLOCATION_OBJECT);
     *extra_data_number = number;
+    node->extra_data_i = arena_get_user_allocation_offset(arena, metadata);
 
     return node->type_i;
   }
@@ -7846,7 +7859,8 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   const ty_type_t *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
-  if (return_type->kind== TYPE_UNIT) return;
+  if (return_type->kind == TYPE_UNIT)
+    return;
 
   const cf_verification_info_t verification_info =
       cg_type_to_verification_info(return_type);
@@ -7874,12 +7888,33 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   const ty_type_t *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
-  if (return_type->kind== TYPE_UNIT) return;
+  if (return_type->kind == TYPE_UNIT)
+    return;
 
   const cf_verification_info_t verification_info =
       cg_type_to_verification_info(return_type);
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
+}
+
+static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
+                                               cf_class_file_t *class_file,
+                                               u16 constant_i, arena_t *arena) {
+  const cf_constant_t *const constant =
+      cf_constant_array_get(&class_file->constant_pool, constant_i);
+  pg_assert(constant->kind == CONSTANT_POOL_KIND_METHOD_REF);
+
+  const cf_constant_t *const name_and_type = cf_constant_array_get(
+      &class_file->constant_pool, constant->v.method_ref.name_and_type);
+  pg_assert(name_and_type->kind == CONSTANT_POOL_KIND_NAME_AND_TYPE);
+
+  const string_t descriptor = cf_constant_array_get_as_string(
+      &class_file->constant_pool, name_and_type->v.name_and_type.descriptor);
+
+  ty_type_t new_type = {0};
+  cf_parse_descriptor(gen->resolver, descriptor, &new_type, arena);
+
+  return resolver_add_type(gen->resolver, &new_type, arena);
 }
 
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
@@ -7923,7 +7958,13 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              method_ref_i, arena);
 
-      cg_emit_invoke_virtual(gen, method_ref_gen_i, &method_type->v.method,
+      const u32 invoked_type_i = cg_make_type_from_method_descriptor(
+          gen, class_file, method_ref_gen_i, arena);
+      const ty_type_t *const invoked_type =
+          &gen->resolver->types[invoked_type_i];
+      pg_assert(invoked_type->kind == TYPE_METHOD);
+
+      cg_emit_invoke_virtual(gen, method_ref_gen_i, &invoked_type->v.method,
                              arena);
 
       break;
@@ -7996,7 +8037,13 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              method_ref_i, arena);
 
-      cg_emit_invoke_static(gen, method_ref_gen_i, &method_type->v.method,
+      const u32 invoked_type_i = cg_make_type_from_method_descriptor(
+          gen, class_file, method_ref_gen_i, arena);
+      const ty_type_t *const invoked_type =
+          &gen->resolver->types[invoked_type_i];
+      pg_assert(invoked_type->kind == TYPE_METHOD);
+
+      cg_emit_invoke_static(gen, method_ref_gen_i, &invoked_type->v.method,
                             arena);
 
       break;
