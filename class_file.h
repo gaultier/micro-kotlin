@@ -5046,7 +5046,10 @@ static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
     return 0;
 
   *main_token_i = parser->tokens_i - 1;
-  par_ast_node_t node = {.kind = AST_KIND_CALL};
+  par_ast_node_t node = {
+      .kind = AST_KIND_CALL,
+      .main_token_i = parser->tokens_i - 1,
+  };
   pg_array_init_reserve(node.nodes, 256, arena);
   par_parse_value_arguments(parser, &node.nodes, arena);
 
@@ -7044,7 +7047,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
         if (pg_array_len(candidate_functions_i) == 0) {
           string_append_cstring(
-              &error, ", could not find any function with this name", arena);
+              &error, ", could not find any function with this name: ", arena);
+          string_append_string(&error, name, arena);
         } else {
           string_append_cstring(&error, ", possible candidates: ", arena);
 
@@ -7207,7 +7211,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                   {
                       .return_type_i = return_type_i,
                       .source_file_name = resolver->parser->lexer->file_path,
-                      .access_flags=ACCESS_FLAGS_PUBLIC|ACCESS_FLAGS_STATIC,
+                      .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   }},
     };
     u32 column = 0;
