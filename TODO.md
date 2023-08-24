@@ -6,7 +6,7 @@
 - [x] Semantic opcode generation functions
 - [x] Keep track of the stack & locals => Might need to do that at a higher level e.g. while working on the AST/IR
 - [ ] Call functions generically (no builtin) from the same class file
-- [ ] Call functions generically (no builtin) from other class files
+- [x] Call functions generically (no builtin) from other class files
 - [x] Define functions
 - [x] Generate stack map tables
 - [x] Use latest jvm version
@@ -66,10 +66,10 @@
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
-- [ ] Arena dump to see how/where memory is utilized
+- [x] Log the file/line of the function that was resolved
 - [x] Resolve free functions by building candidate sets
 - [x] Trivial inline (no jumps, no exceptions, etc)
-- [ ] Remove builtin println
+- [x] Remove builtin println
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor

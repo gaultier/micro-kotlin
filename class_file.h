@@ -712,6 +712,12 @@ static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   string_ensure_null_terminated(a, arena);
 }
 
+static void string_append_u64(string_t *s, u64 n, arena_t *arena) {
+  char tmp[25] = "";
+  snprintf(tmp, sizeof(tmp) - 1, "%lu", n);
+  string_append_cstring(s, tmp, arena);
+}
+
 static void string_drop_last_component(string_t *path, arena_t *arena) {
   pg_assert(path != NULL);
   pg_assert(path->value != NULL);
@@ -902,6 +908,7 @@ typedef struct cf_constant_array_t cf_constant_array_t;
 
 typedef struct {
   string_t name;
+  string_t source_file_name;
   u8 *code;                           // In case of InlineOnly.
   cf_constant_array_t *constant_pool; // In case of InlineOnly.
   u32 *argument_types_i;
@@ -909,7 +916,8 @@ typedef struct {
   u32 this_class_type_i;
   // TODO: Move to `type.flags` to reduce size?
   u16 access_flags;
-  pg_pad(6);
+  u16 source_line;
+  pg_pad(4);
 } ty_type_method_t;
 
 typedef enum {
@@ -1858,6 +1866,8 @@ struct cf_attribute_t {
   pg_pad(5);
 };
 
+typedef enum cf_attribute_kind_t cf_attribute_kind_t;
+
 typedef struct cf_attribute_line_number_table_t
     cf_attribute_line_number_table_t;
 
@@ -2298,11 +2308,9 @@ static void cf_buf_read_stack_map_table_attribute(char *buf, u64 buf_len,
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_line_number_table_attribute(char *buf, u64 buf_len,
-                                                    char **current,
-                                                    cf_class_file_t *class_file,
-                                                    u32 attribute_len,
-                                                    arena_t *arena) {
+static void cf_buf_read_line_number_table_attribute(
+    char *buf, u64 buf_len, char **current, cf_class_file_t *class_file,
+    u32 attribute_len, cf_attribute_t **attributes, arena_t *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
@@ -2312,14 +2320,19 @@ static void cf_buf_read_line_number_table_attribute(char *buf, u64 buf_len,
   pg_assert(sizeof(table_len) + table_len * (sizeof(u16) + sizeof(u16)) ==
             attribute_len);
 
-  for (u16 i = 0; i < table_len; i++) {
-    const u16 start_pc = buf_read_be_u16(buf, buf_len, current);
-    pg_unused(start_pc);
-    const u16 line_number = buf_read_be_u16(buf, buf_len, current);
-    pg_unused(line_number);
+  cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
+  pg_array_init_reserve(attribute.v.line_number_table_entries, table_len,
+                        arena);
 
-    // TODO store.
+  for (u16 i = 0; i < table_len; i++) {
+    cf_line_number_table_entry_t entry = {
+        .start_pc = buf_read_be_u16(buf, buf_len, current),
+        .line_number = buf_read_be_u16(buf, buf_len, current),
+    };
+    pg_array_append(attribute.v.line_number_table_entries, entry, arena);
   }
+
+  pg_array_append(*attributes, attribute, arena);
 
   const char *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
@@ -2633,7 +2646,7 @@ static void cf_buf_read_attribute(char *buf, u64 buf_len, char **current,
     *current += size; // TODO
   } else if (string_eq_c(attribute_name, "LineNumberTable")) {
     cf_buf_read_line_number_table_attribute(buf, buf_len, current, class_file,
-                                            size, arena);
+                                            size, attributes, arena);
   } else if (string_eq_c(attribute_name, "LocalVariableTable")) {
     cf_buf_read_local_variable_table_attribute(buf, buf_len, current,
                                                class_file, size, arena);
@@ -3649,6 +3662,56 @@ cf_get_this_class_name(const cf_class_file_t *class_file) {
   const u16 this_class_i = this_class->v.java_class_name;
   return cf_constant_array_get_as_string(&class_file->constant_pool,
                                          this_class_i);
+}
+
+static const cf_attribute_t *
+cf_method_find_code_attribute(const cf_method_t *method) {
+  for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
+    const cf_attribute_t *const attribute = &method->attributes[i];
+
+    if (attribute->kind == ATTRIBUTE_KIND_CODE)
+      return attribute;
+  }
+  return NULL;
+}
+
+static const cf_attribute_t *
+cf_attribute_by_kind(const cf_attribute_t *attributes,
+                     cf_attribute_kind_t kind) {
+  for (u64 i = 0; i < pg_array_len(attributes); i++) {
+    const cf_attribute_t *const attribute = &attributes[i];
+
+    if (attribute->kind == kind)
+      return attribute;
+  }
+  return NULL;
+}
+
+static void cf_get_source_location_of_function(
+    const cf_class_file_t *class_file, const cf_method_t *method,
+    string_t *filename, u16 *line, arena_t *arena) {
+  const cf_attribute_t *const code = cf_method_find_code_attribute(method);
+  if (code == NULL)
+    return;
+
+  const cf_attribute_t *const source_file =
+      cf_attribute_by_kind(code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
+  if (source_file != NULL) {
+    *filename = string_make(
+        cf_constant_array_get_as_string(&class_file->constant_pool,
+                                        source_file->v.source_file.source_file),
+        arena);
+  }
+
+  const cf_attribute_t *const line_number_table = cf_attribute_by_kind(
+      code->v.code.attributes, ATTRIBUTE_KIND_LINE_NUMBER_TABLE);
+  if (line_number_table != NULL) {
+    const cf_line_number_table_entry_t *const entries =
+        line_number_table->v.line_number_table_entries;
+
+    if (pg_array_len(entries) > 0)
+      *line = entries[0].line_number;
+  }
 }
 
 // ---------------------------------- Lexer
@@ -5706,6 +5769,9 @@ static void resolver_load_methods_from_class_file(
     type.v.method.name = string_make(name, arena);
     type.v.method.access_flags = method->access_flags;
     type.v.method.this_class_type_i = this_class_type_i;
+    cf_get_source_location_of_function(class_file, method,
+                                       &type.v.method.source_file_name,
+                                       &type.v.method.source_line, arena);
 
     if (cf_method_has_inline_only_annotation(class_file, method)) {
       // Do as if the method was public, not private.
@@ -6168,12 +6234,10 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   string_append_string(&result, method->name, arena);
   string_append_cstring(&result, "(", arena);
 
-  const u8 argument_count =
-      pg_array_len(declared_function_type->v.method.argument_types_i);
+  const u8 argument_count = pg_array_len(method->argument_types_i);
   for (u8 i = 0; i < argument_count; i++) {
     const string_t argument_type_string = ty_type_to_human_string(
-        resolver->types, declared_function_type->v.method.argument_types_i[i],
-        arena);
+        resolver->types, method->argument_types_i[i], arena);
 
     string_append_string(&result, argument_type_string, arena);
 
@@ -6182,13 +6246,23 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   }
 
   string_append_cstring(&result, ") : ", arena);
-  const string_t return_type_string = ty_type_to_human_string(
-      resolver->types, declared_function_type->v.method.return_type_i, arena);
+  const string_t return_type_string =
+      ty_type_to_human_string(resolver->types, method->return_type_i, arena);
   string_append_string(&result, return_type_string, arena);
 
   string_append_cstring(&result, " from ", arena);
 
-  string_append_string(&result, this_class_type->this_class_name, arena);
+  if (string_is_empty(method->source_file_name)) {
+    string_append_string(&result, this_class_type->this_class_name, arena);
+  } else {
+    string_append_string(&result, method->source_file_name, arena);
+  }
+
+    if (method->source_line > 0) {
+      string_append_cstring(&result, ":", arena);
+      string_append_u64(&result, (u64)method->source_line, arena);
+    }
+  
 
   return result;
 }
@@ -6460,7 +6534,6 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     break;
 
   case AST_KIND_LIST:
-  case AST_KIND_CALL:
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
@@ -6472,6 +6545,22 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
       resolver_ast_fprint_node(resolver, node->nodes[i], file, indent + 2,
                                arena);
     break;
+  case AST_KIND_CALL: {
+
+    human_type =
+        resolver_function_to_human_string(resolver, node->type_i, arena);
+    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
+        node - resolver->parser->nodes, kind_string, token_string.len,
+        token_string.value, human_type.len, human_type.value, type_kind,
+        resolver->parser->lexer->file_path.len,
+        resolver->parser->lexer->file_path.value, line, column,
+        token.source_offset, pg_array_len(node->nodes));
+
+    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
+      resolver_ast_fprint_node(resolver, node->nodes[i], file, indent + 2,
+                               arena);
+    break;
+  }
   default:
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
@@ -8884,7 +8973,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
 
     if (type->flags & TYPE_FLAG_INLINE_ONLY) {
-      const u16 initial_locals_physical_count = gen->frame->locals_physical_count;
+      const u16 initial_locals_physical_count =
+          gen->frame->locals_physical_count;
 
       for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
         const u32 argument_i = node->nodes[i];
