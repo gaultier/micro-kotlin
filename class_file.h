@@ -6920,8 +6920,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_CALL: {
     arena_t tmp_arena = *scratch_arena;
 
-      const u32 lhs_type_i =
-          resolver_resolve_node(resolver, node->lhs, &tmp_arena, arena);
+    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    pg_assert(lhs->kind == AST_KIND_UNRESOLVED_NAME);
+    const string_t name =
+        par_token_to_string(resolver->parser, lhs->main_token_i);
 
     // Resolve arguments.
     u32 *call_site_argument_types_i = NULL;
@@ -6941,8 +6943,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
-              resolver, string_make_from_c_no_alloc("println"),
-              call_site_argument_types_i, &picked_method_type_i,
+              resolver, name, call_site_argument_types_i, &picked_method_type_i,
               &candidate_functions_i, &tmp_arena, arena)) {
 
         string_t error = string_reserve(256, arena);
