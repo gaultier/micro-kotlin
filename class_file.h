@@ -1095,6 +1095,16 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
+static const ty_type_t *resolver_eval_type(resolver_t *resolver,
+                                           const ty_type_t *in) {
+  if (in->kind != TYPE_METHOD)
+    return in;
+
+  ty_type_t *const return_type = &resolver->types[in->v.method.return_type_i];
+
+  return resolver_eval_type(resolver, return_type);
+}
+
 static bool resolver_is_type_integer(const ty_type_t *type) {
   switch (type->kind) {
   case TYPE_BYTE:
@@ -7956,8 +7966,8 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const cf_verification_info_t verification_info =
-      cg_type_to_verification_info(return_type);
+  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+      resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
@@ -7985,8 +7995,8 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const cf_verification_info_t verification_info =
-      cg_type_to_verification_info(return_type);
+  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+      resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
@@ -8999,7 +9009,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
             &gen->resolver->types[argument->type_i];
 
         const cf_verification_info_t verification_info =
-            cg_type_to_verification_info(argument_type);
+            cg_type_to_verification_info(
+                resolver_eval_type(gen->resolver, argument_type));
         const cf_variable_t variable = {
             .node_i = argument_i,
             .type_i = argument->type_i,
@@ -9451,7 +9462,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cg_emit_node(gen, class_file, node->rhs, arena);
 
     const cf_verification_info_t verification_info =
-        cg_type_to_verification_info(type);
+        cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
     const cf_variable_t variable = {
         .node_i = node_i,
         .type_i = node->type_i,
@@ -9560,7 +9571,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   }
   case AST_KIND_FUNCTION_PARAMETER: {
     const cf_verification_info_t verification_info =
-        cg_type_to_verification_info(type);
+        cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
     const cf_variable_t argument = {
         .node_i = node_i,
         .type_i = node->type_i,
