@@ -959,6 +959,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_FIELD_ACCESS,
   AST_KIND_UNRESOLVED_NAME,
   AST_KIND_RETURN,
+  AST_KIND_CALL,
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
@@ -984,6 +985,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
     [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
     [AST_KIND_RETURN] = "RETURN",
+    [AST_KIND_CALL] = "CALL",
 };
 
 // TODO: compact fields.
@@ -4983,6 +4985,47 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, u32 *main_token_i,
   pg_assert(0 && "todo"); // TODO: `class`
 }
 
+// valueArguments:
+//     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
+//     ')'
+static void par_parse_value_arguments(par_parser_t *parser, u32 **nodes,
+                                      arena_t *arena) {
+
+  while (!par_is_at_end(parser)) {
+    u32 argument_i = par_parse_expression(parser, arena);
+    pg_array_append(*nodes, argument_i, arena);
+
+    if (par_match_token(parser, TOKEN_KIND_COMMA)) {
+    }
+
+    if (par_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
+      break;
+  }
+
+  if (par_is_at_end(parser)) {
+    par_error(parser, *pg_array_last(parser->lexer->tokens),
+              "Expect matching right parenthesis after function call");
+  }
+}
+
+// callSuffix:
+//     [typeArguments] (([valueArguments] annotatedLambda) | valueArguments)
+static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
+                                 arena_t *arena) {
+  if (!par_match_token(parser, TOKEN_KIND_LEFT_PAREN))
+    return 0;
+
+  *main_token_i = parser->tokens_i - 1;
+
+  par_ast_node_t node = {
+      .kind = AST_KIND_CALL,
+      .main_token_i = *main_token_i,
+  };
+  par_parse_value_arguments(parser, &node.nodes, arena);
+
+  return par_add_node(parser, &node, arena);
+}
+
 // postfixUnarySuffix:
 //     postfixUnaryOperator
 //     | typeArguments
@@ -4999,7 +5042,11 @@ static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
   pg_assert(main_token_i != NULL);
   pg_assert(arena != NULL);
 
-  return par_parse_navigation_suffix(parser, main_token_i, arena);
+  u32 node_i = 0;
+  if ((node_i = par_parse_navigation_suffix(parser, main_token_i, arena)) != 0)
+    return node_i;
+
+  return par_parse_call_suffix(parser, main_token_i, arena);
 }
 
 // postfixUnaryExpression:

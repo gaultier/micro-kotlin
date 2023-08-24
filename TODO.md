@@ -68,7 +68,7 @@
 - [ ] Imports
 - [ ] Arena dump to see how/where memory is utilized
 - [x] Resolve free functions by building candidate sets
-- [ ] **Trivial inline** (no jumps, no exceptions, etc)
+- [x] Trivial inline (no jumps, no exceptions, etc)
 - [ ] Remove builtin println
 - [ ] Class definition (BIG!)
   * Fields
