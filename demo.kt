@@ -10,7 +10,7 @@ fun fibonacci_rec(n: Int) : Int {
   if (n == 1) {
     return 1
   } 
-  return n + fibonacci_rec(n-1
+  return n + fibonacci_rec(n-1)
 }
 
 fun main() {
@@ -18,6 +18,7 @@ fun main() {
   log_multiply_ints(3, 4)
   println(return_multiply_ints(8,9))
   println(return_multiply_ints(return_multiply_ints(8,9), 2))
+  println(fibonacci_rec(10))
 }
 
 fun print_arguments(a: Int, b: Int){

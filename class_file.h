@@ -8996,7 +8996,6 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     break;
   }
   case AST_KIND_CALL: {
-    pg_assert(pg_array_len(gen->frame->stack) == 0);
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
 
