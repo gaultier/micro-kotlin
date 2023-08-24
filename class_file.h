@@ -1228,16 +1228,14 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    resolver_t *resolver, const ty_type_t *function_call_type,
+    resolver_t *resolver, const u32 *call_site_argument_types_i,
     const ty_type_t *function_definition_type, arena_t *scratch_arena,
     arena_t *arena) {
-  pg_assert(function_call_type->kind == TYPE_METHOD);
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
-  const ty_type_method_t *call = &function_call_type->v.method;
   const ty_type_method_t *definition = &function_definition_type->v.method;
 
-  const u8 call_argument_count = pg_array_len(call->argument_types_i);
+  const u8 call_argument_count = pg_array_len(call_site_argument_types_i);
   const u8 definition_argument_count =
       pg_array_len(definition->argument_types_i);
 
@@ -1247,7 +1245,8 @@ static bool resolver_is_function_candidate_applicable(
     return false;
 
   for (u8 i = 0; i < call_argument_count; i++) {
-    ty_type_t *call_argument = &resolver->types[call->argument_types_i[i]];
+    const u32 call_site_argument_type_i = call_site_argument_types_i[i];
+    ty_type_t *call_argument = &resolver->types[call_site_argument_type_i];
     const ty_type_t *definition_argument =
         &resolver->types[definition->argument_types_i[i]];
 
@@ -6237,14 +6236,16 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
 static void resolver_remove_non_applicable_function_candidates(
     resolver_t *resolver, u32 *candidate_functions_i,
-    const ty_type_t *call_site_type, arena_t *scratch_arena, arena_t *arena) {
+    const u32 *call_site_argument_types_i, arena_t *scratch_arena,
+    arena_t *arena) {
 
   u64 i = 0;
   while (i < pg_array_len(candidate_functions_i)) {
     const ty_type_t *const candidate_type =
         &resolver->types[candidate_functions_i[i]];
     if (!resolver_is_function_candidate_applicable(
-            resolver, call_site_type, candidate_type, scratch_arena, arena)) {
+            resolver, call_site_argument_types_i, candidate_type, scratch_arena,
+            arena)) {
       pg_array_swap_remove_at(candidate_functions_i, i);
     } else {
       i++;
@@ -6368,11 +6369,10 @@ static u32 resolver_select_most_specific_candidate_function(
 
 // TODO: Keep track of imported packages (including those imported by
 // default).
-static bool
-resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
-                               u32 call_site_type_i, u32 *picked_method_type_i,
-                               u32 **candidate_functions_i,
-                               arena_t *scratch_arena, arena_t *arena) {
+static bool resolver_resolve_free_function(
+    resolver_t *resolver, string_t method_name,
+    const u32 *call_site_argument_types_i, u32 *picked_method_type_i,
+    u32 **candidate_functions_i, arena_t *scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
@@ -6380,14 +6380,11 @@ resolver_resolve_free_function(resolver_t *resolver, string_t method_name,
   resolver_collect_free_functions_of_name(resolver, method_name,
                                           candidate_functions_i, arena);
 
-  const ty_type_t *const call_site_type = &resolver->types[call_site_type_i];
-  pg_assert(call_site_type->kind == TYPE_METHOD);
-  pg_assert(call_site_type->v.method.argument_types_i != NULL);
-
   const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
 
   resolver_remove_non_applicable_function_candidates(
-      resolver, *candidate_functions_i, call_site_type, scratch_arena, arena);
+      resolver, *candidate_functions_i, call_site_argument_types_i,
+      scratch_arena, arena);
 
   if (pg_array_len(*candidate_functions_i) == 0) {
     // Restore the original length to display the possible candidates in the
@@ -6974,21 +6971,14 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_BOOL: {
     return node->type_i = TYPE_BOOLEAN_I;
   }
-  case AST_KIND_BUILTIN_PRINTLN: {
+  case AST_KIND_CALL: {
     resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
-    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-    ty_type_t println_type_exact = {.kind = TYPE_METHOD,
-                                    .v = {.method = {
-                                              .return_type_i = TYPE_UNIT_I,
-                                          }}};
-    pg_array_init_reserve(println_type_exact.v.method.argument_types_i, 1,
-                          arena);
-    pg_array_append(println_type_exact.v.method.argument_types_i, lhs->type_i,
-                    arena);
+    u32 *call_site_argument_types_i = NULL;
+    pg_array_init_reserve(call_site_argument_types_i, 1, arena);
 
-    const u32 println_type_exact_i =
-        resolver_add_type(resolver, &println_type_exact, arena);
+    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    pg_array_append(call_site_argument_types_i, lhs->type_i, arena);
 
     u32 picked_method_type_i = 0;
     {
@@ -6997,16 +6987,12 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
       if (!resolver_resolve_free_function(
               resolver, string_make_from_c_no_alloc("println"),
-              println_type_exact_i, &picked_method_type_i,
+              call_site_argument_types_i, &picked_method_type_i,
               &candidate_functions_i, scratch_arena, arena)) {
 
         string_t error = string_reserve(256, arena);
-        string_append_cstring(&error,
-                              "failed to find matching function: ", arena);
-        string_append_string(&error,
-                             ty_type_to_human_string(
-                                 resolver->types, println_type_exact_i, arena),
-                             arena);
+        string_append_cstring(&error, "failed to find matching function",
+                              arena);
 
         if (pg_array_len(candidate_functions_i) == 0) {
           string_append_cstring(
@@ -7465,10 +7451,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   }
 
   case AST_KIND_MAX:
-  default:
     pg_assert(0 && "unreachable");
   }
-  __builtin_unreachable();
+  pg_assert(0 && "unreachable");
 }
 
 // --------------------------------- Code generation
@@ -8878,6 +8863,9 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   switch (node->kind) {
   case AST_KIND_NONE:
     return;
+  case AST_KIND_CALL: {
+    break;
+  }
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
