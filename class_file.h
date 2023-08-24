@@ -1365,7 +1365,7 @@ static void cf_code_array_push_u8(u8 **array, u8 x, arena_t *arena) {
 }
 
 static void cf_code_array_push_u16(u8 **array, u16 x, arena_t *arena) {
-  cf_code_array_push_u8(array, (u8)(x & 0xff00), arena);
+  cf_code_array_push_u8(array, (u8)((x & 0xff00) >> 8), arena);
   cf_code_array_push_u8(array, (u8)(x & 0x00ff), arena);
 }
 
@@ -9776,8 +9776,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    ty_type_method_t target_method_type = {0};
-    target_method_type.return_type_i = TYPE_UNIT_I;
+    const ty_type_method_t target_method_type = {.return_type_i = TYPE_UNIT_I};
 
     cf_attribute_code_t code = {0};
     pg_array_init_reserve(code.code, 4, arena);

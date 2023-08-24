@@ -10,6 +10,7 @@ fun main() {
   println("Hello, world!")
   log_multiply_ints(3, 4)
   println(return_multiply_ints(8,9))
+  println(return_multiply_ints(return_multiply_ints(8,9), 2))
 }
 
 fun print_arguments(a: Int, b: Int){
