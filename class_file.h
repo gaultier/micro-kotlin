@@ -1085,6 +1085,7 @@ typedef struct {
 } par_parser_t;
 typedef struct {
   par_parser_t *parser;
+  string_t this_class_name;
   string_t *class_path_entries;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -7207,6 +7208,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver->parser->lexer->tokens[node->main_token_i];
     ty_type_t type = {
         .kind = TYPE_METHOD,
+        .this_class_name = resolver->this_class_name,
         .v = {.method =
                   {
                       .return_type_i = return_type_i,
@@ -9016,7 +9018,47 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
                                   initial_locals_physical_count, arena);
 
     } else {
-      pg_assert(0 && "unimplemented");
+      // TODO: Support non static calls.
+      pg_assert(type->v.method.access_flags & ACCESS_FLAGS_STATIC);
+
+      const cf_constant_t class_name = {
+          .kind = CONSTANT_POOL_KIND_UTF8,
+          .v = {.s = gen->resolver->this_class_name}};
+      const u16 class_name_i = cf_constant_array_push(
+          &class_file->constant_pool, &class_name, arena);
+
+      const cf_constant_t class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+                                   .v = {.java_class_name = class_name_i}};
+      const u16 class_i =
+          cf_constant_array_push(&class_file->constant_pool, &class, arena);
+
+      const cf_constant_t name = {.kind = CONSTANT_POOL_KIND_UTF8,
+                                  .v = {.s = type->v.method.name}};
+      const u16 name_i =
+          cf_constant_array_push(&class_file->constant_pool, &name, arena);
+
+      string_t descriptor_s = string_reserve(256, arena);
+      cf_fill_descriptor_string(gen->resolver->types, node->type_i,
+                                &descriptor_s, arena);
+      const cf_constant_t descriptor = {.kind = CONSTANT_POOL_KIND_UTF8,
+                                        .v = {.s = descriptor_s}};
+      const u16 descriptor_i = cf_constant_array_push(
+          &class_file->constant_pool, &descriptor, arena);
+
+      const cf_constant_t name_and_type = {
+          .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
+          .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
+      const u16 name_and_type_i = cf_constant_array_push(
+          &class_file->constant_pool, &name_and_type, arena);
+
+      cf_constant_t method_ref = {
+          .kind = CONSTANT_POOL_KIND_METHOD_REF,
+          .v = {.method_ref = {.class = class_i,
+                               .name_and_type = name_and_type_i}}};
+      const u16 method_ref_i = cf_constant_array_push(
+          &class_file->constant_pool, &method_ref, arena);
+
+      cg_emit_invoke_static(gen, method_ref_i, &type->v.method, arena);
     }
 
     break;
@@ -9596,12 +9638,11 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
   pg_assert(pg_array_len(gen->resolver->parser->nodes) > 0);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
+  pg_assert(!string_is_empty(gen->resolver->this_class_name));
 
   { // This class
-    const string_t class_name =
-        cg_make_class_name_from_path(class_file->class_file_path, arena);
-    const u16 this_class_name_i =
-        cf_add_constant_string(&class_file->constant_pool, class_name, arena);
+    const u16 this_class_name_i = cf_add_constant_string(
+        &class_file->constant_pool, gen->resolver->this_class_name, arena);
 
     const cf_constant_t this_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,

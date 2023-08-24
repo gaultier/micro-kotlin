@@ -166,9 +166,13 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
+    const string_t class_file_path =
+        cf_make_class_file_path_kt(source_file_name, &arena);
     resolver_t resolver = {
         .parser = &parser,
         .class_path_entries = class_path_entries,
+        .this_class_name =
+            cg_make_class_name_from_path(class_file_path, &arena),
     };
     pg_array_init_reserve(resolver.variables, 512, &arena);
     pg_array_init_reserve(resolver.types, 1 << 18, &arena);
@@ -191,7 +195,7 @@ int main(int argc, char *argv[]) {
 
     // Emit bytecode.
     cf_class_file_t class_file = {
-        .class_file_path = cf_make_class_file_path_kt(source_file_name, &arena),
+        .class_file_path = class_file_path,
         .minor_version = 0,
         .major_version =
             17, // TODO: Add a CLI option to choose the jdk/jre version
