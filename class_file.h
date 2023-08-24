@@ -5028,6 +5028,7 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
   // TODO: multiple suffixes.
   const u32 rhs_i =
       par_parse_postfix_unary_suffix(parser, &main_token_i, arena);
+  if (rhs_i==0) return lhs_i;
 
   parser->nodes[rhs_i].lhs = lhs_i;
 
@@ -6932,6 +6933,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       const u32 node_i = node->nodes[i];
+      pg_assert(node_i > 0);
+
       const u32 type_i =
           resolver_resolve_node(resolver, node_i, &tmp_arena, arena);
       pg_array_append(call_site_argument_types_i, type_i, &tmp_arena);
