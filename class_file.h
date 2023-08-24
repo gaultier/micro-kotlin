@@ -7842,6 +7842,44 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
 
   for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
+
+  const ty_type_t *const return_type =
+      &gen->resolver->types[method_type->return_type_i];
+
+  if (return_type->kind== TYPE_UNIT) return;
+
+  const cf_verification_info_t verification_info =
+      cg_type_to_verification_info(return_type);
+
+  cg_frame_stack_push(gen->frame, verification_info, arena);
+}
+
+static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
+                                  const ty_type_method_t *method_type,
+                                  arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_STATIC, arena);
+  cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
+
+  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+    cg_frame_stack_pop(gen->frame);
+
+  const ty_type_t *const return_type =
+      &gen->resolver->types[method_type->return_type_i];
+
+  if (return_type->kind== TYPE_UNIT) return;
+
+  const cf_verification_info_t verification_info =
+      cg_type_to_verification_info(return_type);
+
+  cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
@@ -7892,21 +7930,41 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
     }
 
     case BYTECODE_ISTORE_1: {
-      const cf_variable_t variable = {
-          .node_i = 0,
-          .type_i = 0,
-          .scope_depth = gen->frame->scope_depth,
-          .verification_info = {.kind = VERIFICATION_INFO_INT},
-      };
+      u16 physical_local_index = locals_offset + 1;
+      if (physical_local_index >=
+          gen->frame->locals_physical_count) { // Need to add the variable.
+        const cf_variable_t variable = {
+            .scope_depth = gen->frame->scope_depth,
+            .verification_info = {.kind = VERIFICATION_INFO_INT},
+        };
 
-      u16 logical_local_index = 0;
-      u16 physical_local_index = 0;
-      cg_frame_locals_push(gen, &variable, &logical_local_index,
-                           &physical_local_index, arena);
+        u16 logical_local_index = 0;
+        cg_frame_locals_push(gen, &variable, &logical_local_index,
+                             &physical_local_index, arena);
+      }
       cg_emit_store_variable_int(gen, physical_local_index, arena);
 
       break;
     }
+
+    case BYTECODE_ISTORE_2: {
+      u16 physical_local_index = locals_offset + 2;
+      if (physical_local_index >=
+          gen->frame->locals_physical_count) { // Need to add the variable.
+        const cf_variable_t variable = {
+            .scope_depth = gen->frame->scope_depth,
+            .verification_info = {.kind = VERIFICATION_INFO_INT},
+        };
+
+        u16 logical_local_index = 0;
+        cg_frame_locals_push(gen, &variable, &logical_local_index,
+                             &physical_local_index, arena);
+      }
+      cg_emit_store_variable_int(gen, physical_local_index, arena);
+
+      break;
+    }
+
     case BYTECODE_ILOAD_0:
       cg_emit_load_variable_int(gen, locals_offset + 0, arena);
       break;
@@ -7924,6 +7982,22 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           &class_file->constant_pool, method->constant_pool, constant_i, arena);
 
       cg_emit_ldc(gen, &class_file->constant_pool, constant_gen_i, arena);
+
+      break;
+    }
+
+    case BYTECODE_ALOAD_0: {
+      cg_emit_load_variable_object(gen, locals_offset + 0, arena);
+      break;
+    }
+    case BYTECODE_INVOKE_STATIC: {
+      const u16 method_ref_i = buf_read_be_u16(code, code_size, &current);
+      const u16 method_ref_gen_i =
+          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+                             method_ref_i, arena);
+
+      cg_emit_invoke_static(gen, method_ref_gen_i, &method_type->v.method,
+                            arena);
 
       break;
     }
@@ -8171,24 +8245,6 @@ cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
-}
-
-static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
-                                  const ty_type_method_t *method_type,
-                                  arena_t *arena) {
-  pg_assert(gen != NULL);
-  pg_assert(gen->code != NULL);
-  pg_assert(gen->code->code != NULL);
-  pg_assert(method_ref_i > 0);
-  pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-
-  cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_STATIC, arena);
-  cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
-
-  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
-    cg_frame_stack_pop(gen->frame);
 }
 
 static void cg_emit_return_nothing(cg_generator_t *gen, arena_t *arena) {
