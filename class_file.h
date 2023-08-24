@@ -4448,7 +4448,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
       if (i < pg_array_len(method_type->argument_types_i) - 1)
         string_append_cstring(&res, ", ", arena);
     }
-    string_append_cstring(&res, ") -> ", arena);
+    string_append_cstring(&res, ") : ", arena);
     string_append_string(
         &res, ty_type_to_human_string(types, method_type->return_type_i, arena),
         arena);
