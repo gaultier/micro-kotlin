@@ -9115,9 +9115,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cf_attribute_code_t code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
-    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
-    cg_frame_init(gen->frame, arena);
+    cg_frame_t frame = {0};
+    cg_frame_init(&frame, arena);
 
+    gen->frame = &frame;
     cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
@@ -9438,19 +9439,20 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
+      const u32 child_i = node->nodes[i];
+
       if (gen->frame != NULL) {
         pg_assert(pg_array_len(gen->frame->stack) == 0);
       }
-      cg_emit_node(gen, class_file, node->nodes[i], arena);
+      cg_emit_node(gen, class_file, child_i, arena);
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames
       // don't have to be a full_frame but can be something smaller e.g.
       // append_frame.
-      const par_ast_node_t *const last_node =
-          &gen->resolver->parser->nodes[node->nodes[i]];
-      if (last_node->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
+      const par_ast_node_t *const child = &gen->resolver->parser->nodes[child_i];
+      if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
         while (pg_array_len(gen->frame->stack) > 0)
           cg_emit_pop(gen, arena);

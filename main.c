@@ -215,7 +215,7 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("nodes=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(parser.nodes),
+    LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu", pg_array_len(parser.nodes),
         sizeof(par_ast_node_t),
         pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
     LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
