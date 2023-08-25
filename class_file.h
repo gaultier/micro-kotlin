@@ -9119,12 +9119,15 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     cg_frame_init(&frame, arena);
 
     gen->frame = &frame;
-    cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
 
     // `lhs` is the arguments, `rhs` is the body.
 
     cg_begin_scope(gen);
+    // Emit parameters i.e. locals.
     cg_emit_node(gen, class_file, node->lhs, arena);
+    // The firt frame implicitly encompasses arguments as locals.
+    cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
+    // Emit the body.
     cg_emit_node(gen, class_file, node->rhs, arena);
 
     { // Add return if there is none e.g. the function body is empty or the
@@ -9451,7 +9454,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames
       // don't have to be a full_frame but can be something smaller e.g.
       // append_frame.
-      const par_ast_node_t *const child = &gen->resolver->parser->nodes[child_i];
+      const par_ast_node_t *const child =
+          &gen->resolver->parser->nodes[child_i];
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
         while (pg_array_len(gen->frame->stack) > 0)
