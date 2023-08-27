@@ -8797,7 +8797,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_node(gen, class_file, rhs->lhs, arena);
-  const u16 jump_from_i = cg_emit_jump(gen, arena);
+    const u16 jump_from_i =(rhs->rhs > 0)? cg_emit_jump(gen, arena):0;
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we
@@ -8826,9 +8826,12 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
   }
   // Patch second, unconditional, jump.
   {
-    cg_patch_jump_at(gen, jump_from_i, unconditional_jump_target_absolute);
-    stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
-                                 unconditional_jump_target_absolute, arena);
+    if (rhs->rhs > 0) {
+      cg_patch_jump_at(gen, jump_from_i, unconditional_jump_target_absolute);
+
+      stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
+                                   unconditional_jump_target_absolute, arena);
+    }
   }
 }
 
