@@ -180,6 +180,8 @@ int main(int argc, char *argv[]) {
     arena_clear(&scratch_arena);
     LOG("After loading known types: arena=%lu", arena.current_offset);
 
+    resolver_collect_user_defined_function_signatures(&resolver, &scratch_arena,
+                                                      &arena);
     resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
 
@@ -215,8 +217,8 @@ int main(int argc, char *argv[]) {
     cf_write(&class_file, file);
     fclose(file);
 
-    LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu", pg_array_len(parser.nodes),
-        sizeof(par_ast_node_t),
+    LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu",
+        pg_array_len(parser.nodes), sizeof(par_ast_node_t),
         pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
     LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
         sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));

@@ -45,7 +45,7 @@
 - [x] Control flow: Return
 - [x] Checks around return
 - [x] Move types to the resolver
-- [ ] Recursion (mutual recursion?)
+- [x] Recursion (mutual recursion?)
 - [ ] Multiple files - what about ordering and type hole filling?
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
 - [x] Read .jmod files

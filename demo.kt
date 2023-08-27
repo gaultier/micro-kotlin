@@ -19,6 +19,8 @@ fun main() {
   println(return_multiply_ints(8,9))
   println(return_multiply_ints(return_multiply_ints(8,9), 2))
   println(fibonacci_rec(10))
+
+  print_arguments(1, 2)
 }
 
 fun print_arguments(a: Int, b: Int){

@@ -1077,11 +1077,10 @@ typedef struct {
   lex_lexer_t *lexer;
   par_ast_node_t *nodes;
   u32 current_function_i;
-  pg_pad(4);
   u32 buf_len;
   u32 tokens_i;
   par_parser_state_t state;
-  pg_pad(7);
+  pg_pad(3);
 } par_parser_t;
 typedef struct {
   par_parser_t *parser;
@@ -6233,7 +6232,6 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
   const ty_type_t *const declared_function_type = &resolver->types[function_i];
 
   pg_assert(declared_function_type->kind == TYPE_METHOD);
-  pg_assert(declared_function_type->v.method.argument_types_i != NULL);
   const ty_type_method_t *const method = &declared_function_type->v.method;
 
   const ty_type_t *const this_class_type =
@@ -7210,52 +7208,14 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     return node->type_i = TYPE_UNIT_I;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
+    // Already resolved by resolver_collect_user_defined_function_signatures().
+    pg_assert(node->type_i > 0);
+
     ty_begin_scope(resolver);
     // Arguments (lhs).
     resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
-    // Return type, if present.
-    u32 return_type_i = TYPE_UNIT_I;
-    if (node->extra_data_i > 0) {
-      return_type_i = resolver_resolve_node(resolver, node->extra_data_i,
-                                            scratch_arena, arena);
-    }
+
     resolver->current_function_i = node_i;
-
-    const lex_token_t name_token =
-        resolver->parser->lexer->tokens[node->main_token_i];
-    ty_type_t type = {
-        .kind = TYPE_METHOD,
-        .this_class_name = resolver->this_class_name,
-        .v = {.method =
-                  {
-                      .return_type_i = return_type_i,
-                      .source_file_name = resolver->parser->lexer->file_path,
-                      .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
-                  }},
-    };
-    u32 column = 0;
-    u32 line = 0;
-    par_find_token_position(resolver->parser, name_token, &line, &column,
-                            &type.v.method.name);
-    pg_assert(line <= UINT16_MAX);
-    type.v.method.source_line = (u16)line;
-
-    if (node->lhs > 0) {
-      const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-      pg_assert(lhs->kind == AST_KIND_LIST);
-
-      pg_array_init_reserve(type.v.method.argument_types_i,
-                            pg_array_len(lhs->nodes), arena);
-      for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
-        const u32 node_i = lhs->nodes[i];
-        const u32 type_i = resolver->parser->nodes[node_i].type_i;
-        pg_array_append(type.v.method.argument_types_i, type_i, arena);
-      }
-    }
-
-    // TODO: Check that if the return type is not Unit, there was a return.
-    // Ideally we would have a CFG to check that every path returns a value.
-    node->type_i = resolver_add_type(resolver, &type, arena);
 
     // Inspect body (rhs).
     resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
@@ -7538,6 +7498,68 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(0 && "unreachable");
   }
   pg_assert(0 && "unreachable");
+}
+
+static void resolver_collect_user_defined_function_signatures(
+    resolver_t *resolver, arena_t *scratch_arena, arena_t *arena) {
+  for (u64 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
+    par_ast_node_t *const node = &resolver->parser->nodes[i];
+    if (node->kind != AST_KIND_FUNCTION_DEFINITION)
+      continue;
+
+    ty_begin_scope(resolver);
+    resolver->current_function_i = i;
+
+    // Arguments (lhs).
+    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    // Return type, if present.
+    u32 return_type_i = TYPE_UNIT_I;
+    if (node->extra_data_i > 0) {
+      return_type_i = resolver_resolve_node(resolver, node->extra_data_i,
+                                            scratch_arena, arena);
+    }
+
+    const lex_token_t name_token =
+        resolver->parser->lexer->tokens[node->main_token_i];
+    ty_type_t type = {
+        .kind = TYPE_METHOD,
+        .this_class_name = resolver->this_class_name,
+        .v = {.method =
+                  {
+                      .return_type_i = return_type_i,
+                      .source_file_name = resolver->parser->lexer->file_path,
+                      .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+                  }},
+    };
+    u32 column = 0;
+    u32 line = 0;
+    par_find_token_position(resolver->parser, name_token, &line, &column,
+                            &type.v.method.name);
+    pg_assert(line <= UINT16_MAX);
+    type.v.method.source_line = (u16)line;
+
+    if (node->lhs > 0) {
+      const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+      pg_assert(lhs->kind == AST_KIND_LIST);
+
+      pg_array_init_reserve(type.v.method.argument_types_i,
+                            pg_array_len(lhs->nodes), arena);
+      for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
+        const u32 node_i = lhs->nodes[i];
+        const u32 type_i = resolver->parser->nodes[node_i].type_i;
+        pg_array_append(type.v.method.argument_types_i, type_i, arena);
+      }
+    }
+
+    node->type_i = resolver_add_type(resolver, &type, arena);
+
+    // NOTE: Skip function body by nature.
+    // But: Once we allow return type inference based on body, we need to also
+    // inspect the body.
+
+    resolver->current_function_i = 0;
+    ty_end_scope(resolver);
+  }
 }
 
 // --------------------------------- Code generation
@@ -8797,7 +8819,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_node(gen, class_file, rhs->lhs, arena);
-    const u16 jump_from_i =(rhs->rhs > 0)? cg_emit_jump(gen, arena):0;
+  const u16 jump_from_i = (rhs->rhs > 0) ? cg_emit_jump(gen, arena) : 0;
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we
