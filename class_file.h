@@ -1198,8 +1198,6 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
   if (a->kind == TYPE_INTEGER_LITERAL || b->kind == TYPE_INTEGER_LITERAL)
     return true;
 
-
-
   return (resolver_widen_integer_type(a) & resolver_widen_integer_type(b)) ==
          resolver_widen_integer_type(b);
 }
@@ -1225,11 +1223,13 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
     return resolver_is_integer_type_subtype_of(a, b);
 
   switch (a->kind) {
-    // Those types are not a subtype of anything (expect Any).
+    // Those types are not a subtype of anything (expect Any but we handled that
+    // case already).
   case TYPE_METHOD:
   case TYPE_DOUBLE:
   case TYPE_FLOAT:
   case TYPE_CHAR:
+  case TYPE_ANY:
     return false;
 
   case TYPE_INSTANCE: {
@@ -4416,10 +4416,12 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_METHOD";
   case TYPE_ARRAY:
     return "TYPE_ARRAY";
-  default:
-    pg_assert(0 && "unreachable");
+  case TYPE_INSTANCE:
+    return "TYPE_INSTANCE";
+  case TYPE_INTEGER_LITERAL:
+    return "TYPE_INTEGER_LITERAL";
   }
-  __builtin_unreachable();
+  pg_assert(0&&"unreachable");
 }
 
 static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
@@ -7612,12 +7614,21 @@ static void resolver_collect_user_defined_function_signatures(
 }
 
 void resolver_err_on_remaining_integer_literals(const resolver_t *resolver,
-                                                u32 types_offset) {
-
-  for (u32 i = types_offset; i < pg_array_len(resolver->types); i++) {
-    const ty_type_t *const type = &resolver->types[i];
+                                                arena_t *arena) {
+  for (u32 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
+    const par_ast_node_t *const node = &resolver->parser->nodes[i];
+    const ty_type_t *const type = &resolver->types[node->type_i];
     if (type->kind == TYPE_INTEGER_LITERAL) {
-      pg_assert(0 && "todo");
+      const lex_token_t token =
+          resolver->parser->lexer->tokens[node->main_token_i];
+
+      string_t err = string_reserve(64, arena);
+      string_append_cstring(&err, "Ambiguous integer literal: ", arena);
+      string_append_string(
+          &err, ty_type_to_human_string(resolver->types, node->type_i, arena),
+          arena);
+
+      par_error(resolver->parser, token, err.value);
     }
   }
 }

@@ -180,14 +180,10 @@ int main(int argc, char *argv[]) {
     arena_clear(&scratch_arena);
     LOG("After loading known types: arena=%lu", arena.current_offset);
 
-    const u32 types_offset = pg_array_len(resolver.types);
-
     resolver_collect_user_defined_function_signatures(&resolver, &scratch_arena,
                                                       &arena);
     resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
-
-    resolver_err_on_remaining_integer_literals(&resolver, types_offset);
 
     // Debug types.
     {
@@ -195,6 +191,7 @@ int main(int argc, char *argv[]) {
       arena_t tmp_arena = arena;
       resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
+    resolver_err_on_remaining_integer_literals(&resolver, &arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1;
