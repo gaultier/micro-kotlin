@@ -4421,7 +4421,7 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   case TYPE_INTEGER_LITERAL:
     return "TYPE_INTEGER_LITERAL";
   }
-  pg_assert(0&&"unreachable");
+  pg_assert(0 && "unreachable");
 }
 
 static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
@@ -4499,10 +4499,8 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     return res;
   }
 
-  default:
-    pg_assert(0 && "unreachable");
   }
-  __builtin_unreachable();
+    pg_assert(0 && "unreachable");
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
