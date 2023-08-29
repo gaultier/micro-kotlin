@@ -63,6 +63,7 @@
 - [ ] Heap dump on other OSes
 - [ ] Heap dump on Linux with function names (instead of addresses)
 - [ ] Heap dump on other OSes with function names (instead of addresses)
+- [ ] Union/intersection of integer types for integer literals
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
