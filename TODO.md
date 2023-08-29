@@ -71,6 +71,10 @@
 - [x] Resolve free functions by building candidate sets
 - [x] Trivial inline (no jumps, no exceptions, etc)
 - [x] Remove builtin println
+- [ ] Replace all `pg_assert` (i.e. `__builtin_trap()`) by either:
+  * A user-friendly assert that prints the file, line, backtrace, error message, bug report link, and expression that failed (maybe even a core dump?)
+  * A compile error (e.g. for syntax that is not yet supported or invalid jar/jmod/class files)
+- [ ] Fuzz (especially jar/jmod/class files)
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
