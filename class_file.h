@@ -887,6 +887,7 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_METHOD = 1 << 10,
   TYPE_INSTANCE = 1 << 11,
   TYPE_ARRAY = 1 << 12,
+  TYPE_INTEGER_LITERAL = 1 << 13,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
 
@@ -928,8 +929,9 @@ struct ty_type_t {
   string_t this_class_name;
   string_t super_class_name;
   union {
-    ty_type_method_t method; // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;        // TYPE_ARRAY_REFERENCE
+    ty_type_method_t method;  // TYPE_METHOD, TYPE_CONSTRUCTOR
+    u32 array_type_i;         // TYPE_ARRAY_REFERENCE
+    u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   ty_type_kind_t kind;
   u16 flags;
@@ -7104,7 +7106,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     } else {
       // FIXME: In this case, the type should potentially be: `Byte | Short |
       // Int | Long`.
-      
+
       // >  it has an integer literal type containing all the
       // built-in integer types guaranteed to be able to represent this value.
       node->type_i = TYPE_INT_I;
