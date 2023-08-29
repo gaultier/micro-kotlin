@@ -191,7 +191,7 @@ int main(int argc, char *argv[]) {
       arena_t tmp_arena = arena;
       resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
-    resolver_err_on_remaining_integer_literals(&resolver, &arena);
+    resolver_err_on_remaining_problematic_types(&resolver, &arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1;

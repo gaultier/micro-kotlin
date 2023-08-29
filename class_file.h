@@ -4498,9 +4498,8 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
     return res;
   }
-
   }
-    pg_assert(0 && "unreachable");
+  pg_assert(0 && "unreachable");
 }
 
 static bool par_is_at_end(const par_parser_t *parser) {
@@ -6258,13 +6257,14 @@ static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
 
 // TODO: Add to string: file:line
 static string_t resolver_function_to_human_string(const resolver_t *resolver,
-                                                  u32 function_i,
-                                                  arena_t *arena) {
+                                                  u32 type_i, arena_t *arena) {
 
-  const ty_type_t *const declared_function_type = &resolver->types[function_i];
+  const ty_type_t *const type = &resolver->types[type_i];
 
-  pg_assert(declared_function_type->kind == TYPE_METHOD);
-  const ty_type_method_t *const method = &declared_function_type->v.method;
+  if (type->kind != TYPE_METHOD)
+    return ty_type_to_human_string(resolver->types, type_i, arena);
+
+  const ty_type_method_t *const method = &type->v.method;
 
   const ty_type_t *const this_class_type =
       &resolver->types[method->this_class_type_i];
@@ -7611,8 +7611,8 @@ static void resolver_collect_user_defined_function_signatures(
   }
 }
 
-void resolver_err_on_remaining_integer_literals(const resolver_t *resolver,
-                                                arena_t *arena) {
+void resolver_err_on_remaining_problematic_types(const resolver_t *resolver,
+                                                 arena_t *arena) {
   for (u32 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
     const par_ast_node_t *const node = &resolver->parser->nodes[i];
     const ty_type_t *const type = &resolver->types[node->type_i];
@@ -7622,6 +7622,17 @@ void resolver_err_on_remaining_integer_literals(const resolver_t *resolver,
 
       string_t err = string_reserve(64, arena);
       string_append_cstring(&err, "Ambiguous integer literal: ", arena);
+      string_append_string(
+          &err, ty_type_to_human_string(resolver->types, node->type_i, arena),
+          arena);
+
+      par_error(resolver->parser, token, err.value);
+    } else if (type->kind == TYPE_ANY) {
+      const lex_token_t token =
+          resolver->parser->lexer->tokens[node->main_token_i];
+
+      string_t err = string_reserve(64, arena);
+      string_append_cstring(&err, "Ambiguous type: ", arena);
       string_append_string(
           &err, ty_type_to_human_string(resolver->types, node->type_i, arena),
           arena);

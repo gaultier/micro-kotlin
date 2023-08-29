@@ -63,7 +63,7 @@
 - [ ] Heap dump on other OSes
 - [ ] Heap dump on Linux with function names (instead of addresses)
 - [ ] Heap dump on other OSes with function names (instead of addresses)
-- [ ] **Union/intersection of integer types for integer literals**
+- [ ] **Union/intersection of integer types for integer literals** => constraint solver for type inference inside a function body!
 - [ ] Package name
 - [ ] Default imports
 - [ ] Imports
