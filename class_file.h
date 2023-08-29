@@ -929,8 +929,8 @@ struct ty_type_t {
   string_t this_class_name;
   string_t super_class_name;
   union {
-    ty_type_method_t method;  // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;         // TYPE_ARRAY_REFERENCE
+    ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
+    u32 array_type_i;          // TYPE_ARRAY_REFERENCE
     u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   ty_type_kind_t kind;
@@ -1084,6 +1084,7 @@ typedef struct {
   par_parser_state_t state;
   pg_pad(3);
 } par_parser_t;
+
 typedef struct {
   par_parser_t *parser;
   string_t this_class_name;
