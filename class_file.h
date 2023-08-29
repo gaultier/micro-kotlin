@@ -7566,6 +7566,17 @@ static void resolver_collect_user_defined_function_signatures(
   }
 }
 
+void resolver_err_on_remaining_integer_literals(const resolver_t *resolver,
+                                             u32 types_offset) {
+
+  for (u32 i = types_offset; i < pg_array_len(resolver->types); i++) {
+    const ty_type_t *const type = &resolver->types[i];
+    if (type->kind == TYPE_INTEGER_LITERAL) {
+      pg_assert(0&&"todo");
+    }
+  }
+}
+
 // --------------------------------- Code generation
 
 typedef struct {
