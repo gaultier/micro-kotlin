@@ -205,7 +205,7 @@ int main(int argc, char *argv[]) {
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     cf_init(&class_file, &arena);
-    cg_emit(&resolver, &class_file, root_i, &scratch_arena, &arena);
+    cg_emit(&resolver, &class_file, root_i,  &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 

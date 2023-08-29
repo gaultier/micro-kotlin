@@ -9814,7 +9814,6 @@ static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
 
 static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
                                                cf_class_file_t *class_file,
-                                               arena_t *scratch_arena,
                                                arena_t *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
@@ -9978,7 +9977,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 }
 
 static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
-                    u32 root_i, arena_t *scratch_arena, arena_t *arena) {
+                    u32 root_i,  arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);
@@ -9995,5 +9994,5 @@ static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
 
   cg_emit_node(&gen, class_file, root_i, arena);
 
-  cg_supplement_entrypoint_if_exists(&gen, class_file, scratch_arena, arena);
+  cg_supplement_entrypoint_if_exists(&gen, class_file, arena);
 }
