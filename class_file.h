@@ -7214,6 +7214,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     ty_begin_scope(resolver);
     // Arguments (lhs).
+    // Need to re-process them to have the right variables (the function
+    // arguments) in the current scope.
+    // TODO: We could optimize it by not creating new types at this point.
     resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
 
     resolver->current_function_i = node_i;
