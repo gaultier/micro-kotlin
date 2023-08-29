@@ -4466,6 +4466,24 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
         arena);
     return res;
   }
+  case TYPE_INTEGER_LITERAL: {
+    const u32 possible_types = type->v.integer_literal_types;
+    string_t res = string_reserve(128, arena);
+    string_append_cstring(&res, "Integer literal: ", arena);
+
+    if (possible_types & TYPE_BYTE)
+      string_append_cstring(&res, "kotlin.Byte | ", arena);
+    if (possible_types & TYPE_SHORT)
+      string_append_cstring(&res, "kotlin.Short | ", arena);
+    if (possible_types & TYPE_INT)
+      string_append_cstring(&res, "kotlin.Int | ", arena);
+    if (possible_types & TYPE_LONG)
+      string_append_cstring(&res, "kotlin.Long | ", arena);
+
+    string_drop_after_last_incl(&res, '|');
+
+    return res;
+  }
 
   default:
     pg_assert(0 && "unreachable");
@@ -7105,12 +7123,27 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     } else if (flag & NODE_NUMBER_FLAGS_LONG) {
       node->type_i = TYPE_LONG_I;
     } else {
-      // FIXME: In this case, the type should potentially be: `Byte | Short |
-      // Int | Long`.
-
       // >  it has an integer literal type containing all the
       // built-in integer types guaranteed to be able to represent this value.
-      node->type_i = TYPE_INT_I;
+      if (number <= INT8_MAX) {
+        ty_type_t type = {.kind = TYPE_INTEGER_LITERAL,
+                          .v = {.integer_literal_types = TYPE_BYTE |
+                                                         TYPE_SHORT | TYPE_INT |
+                                                         TYPE_LONG}};
+        node->type_i = resolver_add_type(resolver, &type, arena);
+      } else if (number <= INT16_MAX) {
+        ty_type_t type = {
+            .kind = TYPE_INTEGER_LITERAL,
+            .v = {.integer_literal_types = TYPE_SHORT | TYPE_INT | TYPE_LONG}};
+        node->type_i = resolver_add_type(resolver, &type, arena);
+      } else if (number <= INT32_MAX) {
+        ty_type_t type = {.kind = TYPE_INTEGER_LITERAL,
+                          .v = {.integer_literal_types = TYPE_INT | TYPE_LONG}};
+        node->type_i = resolver_add_type(resolver, &type, arena);
+      } else {
+        // Easy case: Must be TYPE_LONG.
+        node->type_i = TYPE_LONG_I;
+      }
     }
 
     const allocation_metadata_t *const metadata =
@@ -7567,12 +7600,12 @@ static void resolver_collect_user_defined_function_signatures(
 }
 
 void resolver_err_on_remaining_integer_literals(const resolver_t *resolver,
-                                             u32 types_offset) {
+                                                u32 types_offset) {
 
   for (u32 i = types_offset; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
     if (type->kind == TYPE_INTEGER_LITERAL) {
-      pg_assert(0&&"todo");
+      pg_assert(0 && "todo");
     }
   }
 }
