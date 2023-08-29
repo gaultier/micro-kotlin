@@ -94,7 +94,7 @@
 
 - [ ] Read kotlin metadata in class files (protobuf)
 - [ ] Full-fledged type inference
-- [ ] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
+- [x] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] High level APIs for the driver
 - [ ] Generate line tables
 - [ ] Generate full debug information
@@ -129,40 +129,9 @@
 - [ ] Async stuff (suspend, etc)
 - [ ] Java <-> Kotlin interop e.g. @JvmName, etc
 - [ ] Runtime reflection
-
-## Approach for reading external class files to know what class/fields/methods are available
-
-### Naive
-
-1. For each class file in the class path:
-    1. Parse the whole class file
-    2. For each method:
-        1. Skip if not public (TODO: skip if not accessible e.g. not in the same package, etc)
-        2. Record the name and descriptor
-        3. Sanity checks
-        4. ~Put it in a map/array~
-    2. For each field:
-        1. Skip if not public (TODO: skip if not accessible e.g. not in the same package, etc)
-        2. Record the name and descriptor
-        3. Sanity checks
-        4. ~Put it in a map/array~
-
-### Better approach, mimicking javac/java: on-demand
-
-1 For each fully-qualified type to resolve e.g. `foo.bar.Baz` $TYPE:
-    1. For each colon-separated entry in the class path e.g. `/tmp:/usr/share` $ENTRY:
-      1. stat(2)  `$ENTRY/$TYPE.class` e.g. `/tmp/foo/bar/Baz.class`
-        - If it fails or is not a file, continue 
-        - If it succeeds: Parse the class file
-
-If not found or types do not match: type error.
-
-Same for methods/fields.
-
-Remaining questions:
-
-- How to deal with conflicts? E.g. both `/tmp/foo/bar/Baz.class` and `/usr/share/foo/bar/Baz.class` were found => First found (in order of appearance in the class path) wins.
-- Caching/cache eviction? => Naive first version when searching for methods/fields where parsing the class file is needed: keep every parsed class file in memory. More advanced: real cache.
+- [ ] Maybe: multi thread the compiler
+- [ ] Maybe: implement/vendor libzip
+- [ ] Optimize size of `allocation_metadata_t`
 
 ### kotlin.Metadata annotation in class file
 
@@ -190,13 +159,6 @@ Remaining questions:
 
 
 ## Open questions
-
-- ~~Do we want to record attributes of each field/method? It could allow e.g. inlining of the code.~~ Yes.
-- How to implement generics
-- Method resolution (complex)
-- Type inference (complex)
-- Lazily scan classpath as needed?
-- Is scanning for `MethodRef` in the constant pool of classes enough to know about the existance and signature of a method?
 
 ## Non-goals
 
