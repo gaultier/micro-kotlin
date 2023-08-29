@@ -1113,6 +1113,7 @@ static bool resolver_is_type_integer(const ty_type_t *type) {
   case TYPE_SHORT:
   case TYPE_INT:
   case TYPE_LONG:
+  case TYPE_INTEGER_LITERAL:
     return true;
   default:
     return false;
@@ -1180,6 +1181,7 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
                                                 const ty_type_t *b) {
   pg_assert(resolver_is_type_integer(a));
 
+  // Every type is a subtype of Any.
   if (b->kind == TYPE_ANY)
     return true;
 
@@ -1187,6 +1189,16 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
   // are subtypes of Comparable but we do not implement interfaces yet).
   if (!resolver_is_type_integer(b))
     return false;
+
+  // > All integer literal type are equivalent w.r.t. subtyping
+  // > ILT(T1,…,TK)<:ILT(U1,…,UN)
+  // > ILT(U1,…,UN)<:ILT(T1,…,TK)
+  // > ∀Ti∈{T1,…,TK}:ILT(T1,…,TK)<:Ti
+  // > ∀Ti∈{T1,…,TK}:Ti<:ILT(T1,…,TK)
+  if (a->kind == TYPE_INTEGER_LITERAL || b->kind == TYPE_INTEGER_LITERAL)
+    return true;
+
+
 
   return (resolver_widen_integer_type(a) & resolver_widen_integer_type(b)) ==
          resolver_widen_integer_type(b);
