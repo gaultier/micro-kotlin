@@ -7102,9 +7102,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     } else if (flag & NODE_NUMBER_FLAGS_LONG) {
       node->type_i = TYPE_LONG_I;
     } else {
-      // FIXME: In this case, the type should potentially be: `Byte | Short | Int | Long`.
-      // >  it has an integer literal type containing all the built-in integer
-      // types guaranteed to be able to represent this value.
+      // FIXME: In this case, the type should potentially be: `Byte | Short |
+      // Int | Long`.
+      
+      // >  it has an integer literal type containing all the
+      // built-in integer types guaranteed to be able to represent this value.
       node->type_i = TYPE_INT_I;
     }
 
