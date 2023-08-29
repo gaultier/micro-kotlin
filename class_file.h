@@ -4569,9 +4569,6 @@ static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
 }
 
 static const u8 NODE_NUMBER_FLAGS_OVERFLOW = 1 << 0;
-static const u8 NODE_NUMBER_FLAGS_BYTE = 1 << 1;
-static const u8 NODE_NUMBER_FLAGS_SHORT = 1 << 2;
-static const u8 NODE_NUMBER_FLAGS_INT = 1 << 3;
 static const u8 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
 static const u8 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
 static const u8 NODE_NUMBER_FLAGS_LONG = 1 << 6;
@@ -4603,6 +4600,7 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
     pg_assert(lex_is_digit(c) || c == 'L' || c == '_');
     if (c == '_')
       continue;
+    // > An integer literal with the long literal mark has type kotlin.Long.
     if (c == 'L') {
       *flag |= NODE_NUMBER_FLAGS_LONG;
       continue;
@@ -4610,6 +4608,9 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
 
     const u64 delta = ten_unit * (c - '0');
     i64 number_i64 = (i64)number;
+    // > If the value is greater than maximum kotlin.Long value (see built-in
+    // integer types), it is an illegal integer literal and should be a
+    // compile-time error;
     if (__builtin_add_overflow((i64)number_i64, delta, &number_i64)) {
       *flag |= NODE_NUMBER_FLAGS_OVERFLOW;
       return 0;
@@ -4618,11 +4619,9 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
     ten_unit *= 10;
   }
 
-  // Apparently, without type hint, a number literal fitting within an Int, is
-  // an Int, e.g. `val one = 1`. Not, say, a Byte.
-  if (number <= INT32_MAX)
-    *flag |= NODE_NUMBER_FLAGS_INT;
-  else if (number <= INT64_MAX)
+  // > if the value is greater than maximum kotlin.Int value (see built-in
+  // integer types), it has type kotlin.Long;
+  if (INT32_MAX < number && number <= INT64_MAX)
     *flag |= NODE_NUMBER_FLAGS_LONG;
 
   // TODO: Float, Double.
@@ -7097,18 +7096,15 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const u64 number = par_number(resolver->parser, token, &flag);
     if (flag & NODE_NUMBER_FLAGS_OVERFLOW) {
       par_error(resolver->parser, token,
-                "Long literal is too big (> 9223372036854775807)");
+                "Integer literal is too big (> 9223372036854775807)");
       return 0;
 
     } else if (flag & NODE_NUMBER_FLAGS_LONG) {
       node->type_i = TYPE_LONG_I;
     } else {
-      if (number > INT32_MAX) {
-        par_error(resolver->parser, token,
-                  "Integer literal is too big (> 2147483647)");
-        return 0;
-      }
-
+      // FIXME: In this case, the type should potentially be: `Byte | Short | Int | Long`.
+      // >  it has an integer literal type containing all the built-in integer
+      // types guaranteed to be able to represent this value.
       node->type_i = TYPE_INT_I;
     }
 

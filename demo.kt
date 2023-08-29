@@ -21,6 +21,7 @@ fun main() {
   println(fibonacci_rec(10))
 
   print_arguments(1, 2)
+  println(plus(127L, 128L))
 }
 
 fun print_arguments(a: Int, b: Int){
