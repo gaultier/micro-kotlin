@@ -7137,23 +7137,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     } else {
       // >  it has an integer literal type containing all the
       // built-in integer types guaranteed to be able to represent this value.
-      if (number <= INT8_MAX) {
-        ty_type_t type = {.kind = TYPE_INTEGER_LITERAL,
-                          .v = {.integer_literal_types = TYPE_BYTE |
-                                                         TYPE_SHORT | TYPE_INT |
-                                                         TYPE_LONG}};
-        node->type_i = resolver_add_type(resolver, &type, arena);
-      } else if (number <= INT16_MAX) {
-        ty_type_t type = {
-            .kind = TYPE_INTEGER_LITERAL,
-            .v = {.integer_literal_types = TYPE_SHORT | TYPE_INT | TYPE_LONG}};
-        node->type_i = resolver_add_type(resolver, &type, arena);
-      } else if (number <= INT32_MAX) {
-        ty_type_t type = {.kind = TYPE_INTEGER_LITERAL,
-                          .v = {.integer_literal_types = TYPE_INT | TYPE_LONG}};
-        node->type_i = resolver_add_type(resolver, &type, arena);
+
+      if (number <= INT32_MAX) {
+        node->type_i = TYPE_INT_I;
       } else {
-        // Easy case: Must be TYPE_LONG.
         node->type_i = TYPE_LONG_I;
       }
     }
@@ -7608,37 +7595,6 @@ static void resolver_collect_user_defined_function_signatures(
 
     resolver->current_function_i = 0;
     ty_end_scope(resolver);
-  }
-}
-
-void resolver_err_on_remaining_problematic_types(const resolver_t *resolver,
-                                                 arena_t *arena) {
-  for (u32 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
-    const par_ast_node_t *const node = &resolver->parser->nodes[i];
-    const ty_type_t *const type = &resolver->types[node->type_i];
-    if (type->kind == TYPE_INTEGER_LITERAL) {
-      const lex_token_t token =
-          resolver->parser->lexer->tokens[node->main_token_i];
-
-      string_t err = string_reserve(64, arena);
-      string_append_cstring(&err, "Ambiguous integer literal: ", arena);
-      string_append_string(
-          &err, ty_type_to_human_string(resolver->types, node->type_i, arena),
-          arena);
-
-      par_error(resolver->parser, token, err.value);
-    } else if (type->kind == TYPE_ANY) {
-      const lex_token_t token =
-          resolver->parser->lexer->tokens[node->main_token_i];
-
-      string_t err = string_reserve(64, arena);
-      string_append_cstring(&err, "Ambiguous type: ", arena);
-      string_append_string(
-          &err, ty_type_to_human_string(resolver->types, node->type_i, arena),
-          arena);
-
-      par_error(resolver->parser, token, err.value);
-    }
   }
 }
 
@@ -9977,7 +9933,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 }
 
 static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
-                    u32 root_i,  arena_t *arena) {
+                    u32 root_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);
