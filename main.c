@@ -168,14 +168,11 @@ int main(int argc, char *argv[]) {
 
     const string_t class_file_path =
         cf_make_class_file_path_kt(source_file_name, &arena);
-    resolver_t resolver = {
-        .parser = &parser,
-        .class_path_entries = class_path_entries,
-        .this_class_name =
-            cg_make_class_name_from_path(class_file_path, &arena),
-    };
-    pg_array_init_reserve(resolver.variables, 512, &arena);
-    pg_array_init_reserve(resolver.types, 1 << 18, &arena);
+
+    resolver_t resolver = {0};
+    resolver_init(&resolver, &parser, class_path_entries, class_file_path,
+                  &arena);
+
     resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
     arena_clear(&scratch_arena);
     LOG("After loading known types: arena=%lu", arena.current_offset);

@@ -418,6 +418,13 @@ typedef struct {
   char *value;
 } string_t;
 
+static void string_replace_char(string_t s, char before, char after) {
+  for (u64 i = 0; i < s.len; i++) {
+    if (s.value[i] == before)
+      s.value[i] = after;
+  }
+}
+
 static bool string_is_empty(string_t s) { return s.len == 0; }
 
 static u64 string_fnv1_hash(string_t s) {
@@ -1106,6 +1113,7 @@ typedef struct {
   par_parser_t *parser;
   string_t this_class_name;
   string_t *class_path_entries;
+  string_t *imported_package_names;
   ty_variable_t *variables;
   ty_type_t *types;
   u32 current_type_i;
@@ -1113,6 +1121,45 @@ typedef struct {
   u32 current_function_i;
   pg_pad(4);
 } resolver_t;
+
+static string_t cg_make_class_name_from_path(string_t path, arena_t *arena);
+
+static void resolver_init(resolver_t *resolver, par_parser_t *parser,
+                          string_t *class_path_entries,
+                          string_t class_file_path, arena_t *arena) {
+
+  resolver->parser = parser;
+  resolver->class_path_entries = class_path_entries;
+  resolver->this_class_name =
+      cg_make_class_name_from_path(class_file_path, arena);
+
+  pg_array_init_reserve(resolver->variables, 512, arena);
+  pg_array_init_reserve(resolver->types, 1 << 18, arena);
+  pg_array_init_reserve(resolver->imported_package_names, 256, arena);
+
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.annotation"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.collections"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.comparisons"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.io"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.ranges"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.sequences"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.text"), arena);
+
+
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("java.lang"), arena);
+  pg_array_append(resolver->imported_package_names,
+                  string_make_from_c_no_alloc("kotlin.jvm"), arena);
+}
 
 static void type_init_package_and_name(string_t fully_qualified_jvm_name,
                                        string_t *package_name, string_t *name,
@@ -1135,7 +1182,7 @@ static void type_init_package_and_name(string_t fully_qualified_jvm_name,
   pg_assert(!string_is_empty(*package_name));
   pg_assert(string_last(*package_name) != sep);
 
-  // TODO: Replace `/` by `.` in package_name?
+  string_replace_char(*package_name, '/', '.');
 
   *name = string_clone_n_c(last_sep + 1, right_len, arena);
   pg_assert(!string_is_empty(*name));
@@ -7000,7 +7047,8 @@ static void resolver_load_standard_types(resolver_t *resolver,
     fprintf(
         stderr,
         "Could not load the kotlin stdlib classes (failed to load the class "
-        "`kotlin/io/ConsoleKt` as sanity check for `println` functions). Please provide the CLI "
+        "`kotlin/io/ConsoleKt` as sanity check for `println` functions). "
+        "Please provide the CLI "
         "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n");
     exit(ENOENT);
   }
