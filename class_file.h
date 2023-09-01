@@ -7073,15 +7073,16 @@ static void resolver_load_standard_types(resolver_t *resolver,
                     arena);
 
   u32 dummy = 0;
+  const string_t sanity_check = string_make_from_c_no_alloc("kotlin.io.ConsoleKt");
   if (!resolver_resolve_fully_qualified_name(
-          resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
+          resolver, sanity_check, &dummy,
           scratch_arena, arena)) {
     fprintf(
         stderr,
         "Could not load the kotlin stdlib classes (failed to load the class "
-        "`kotlin/io/ConsoleKt` as sanity check for `println` functions). "
+        "`%.*s` as sanity check for `println` functions). "
         "Please provide the CLI "
-        "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n");
+        "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n", sanity_check.len, sanity_check.value);
     exit(ENOENT);
   }
 }
