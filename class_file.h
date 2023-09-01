@@ -489,6 +489,17 @@ static string_t string_make_from_c_no_alloc(char *s) {
   return res;
 }
 
+static string_t string_clone_n_c(const char *src, u64 n, arena_t *arena) {
+  pg_assert(src != NULL);
+
+  string_t result = string_reserve(n, arena);
+  memcpy(result.value, src, n);
+  result.len = n;
+
+  string_ensure_null_terminated(&result, arena);
+  return result;
+}
+
 static string_t string_clone_n(string_t src, u64 n, arena_t *arena) {
   pg_assert(src.value != NULL);
   pg_assert(n <= src.len);
@@ -605,6 +616,10 @@ static void string_drop_before_last_incl(string_t *s, char c) {
   char *const new_s_value = last_c + 1;
   s->len -= new_s_value - s->value;
   s->value = new_s_value;
+}
+
+static char string_last(string_t s) {
+  return string_is_empty(s) ? 0 : s.value[s.len - 1];
 }
 
 static void string_drop_after_last_incl(string_t *s, char c) {
@@ -929,6 +944,7 @@ typedef enum {
 struct ty_type_t {
   string_t this_class_name;
   string_t super_class_name;
+  string_t package_name;
   union {
     ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;          // TYPE_ARRAY_REFERENCE
@@ -1097,6 +1113,35 @@ typedef struct {
   u32 current_function_i;
   pg_pad(4);
 } resolver_t;
+
+static void type_init_package_and_name(string_t fully_qualified_jvm_name,
+                                       string_t *package_name, string_t *name,
+                                       arena_t *arena) {
+  const char sep = '/';
+  const char *const last_sep = ut_memrchr(fully_qualified_jvm_name.value, sep,
+                                          fully_qualified_jvm_name.len);
+  // No package component.
+  if (last_sep == NULL) {
+    *name = string_make(fully_qualified_jvm_name, arena);
+    return;
+  }
+
+  const u64 left_len = last_sep - fully_qualified_jvm_name.value;
+  const u64 right_len = fully_qualified_jvm_name.len - left_len - 1;
+
+  *package_name =
+      string_clone_n(fully_qualified_jvm_name,
+                     last_sep - fully_qualified_jvm_name.value, arena);
+  pg_assert(!string_is_empty(*package_name));
+  pg_assert(string_last(*package_name) != sep);
+
+  // TODO: Replace `/` by `.` in package_name?
+
+  *name = string_clone_n_c(last_sep + 1, right_len, arena);
+  pg_assert(!string_is_empty(*name));
+
+  pg_assert(string_first(*name) != sep);
+}
 
 static const ty_type_t *resolver_eval_type(resolver_t *resolver,
                                            const ty_type_t *in) {
@@ -5806,14 +5851,14 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
 
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, u32 this_class_type_i,
-    const cf_class_file_t *class_file, const string_t this_class_name,
-    arena_t *arena) {
+    const cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
   bool has_at_least_one_inline_only_method = false;
   const u64 initial_types_count = pg_array_len(resolver->types);
+  const ty_type_t *const this_class_type = &resolver->types[this_class_type_i];
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5822,7 +5867,10 @@ static void resolver_load_methods_from_class_file(
     const string_t name = cf_constant_array_get_as_string(
         &class_file->constant_pool, method->name);
 
-    ty_type_t type = {.this_class_name = this_class_name};
+    ty_type_t type = {
+        .this_class_name = this_class_type->this_class_name,
+        .package_name = this_class_type->package_name,
+    };
     cf_parse_descriptor(resolver, descriptor, &type, arena);
     pg_assert(type.kind == TYPE_METHOD);
 
@@ -5865,7 +5913,8 @@ static void resolver_load_methods_from_class_file(
       arena_t tmp_arena = *arena;
       const string_t human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
-      LOG("Loaded %s: access_flags=%u type=%.*s",ty_type_kind_string(resolver->types,type_i), method->access_flags,
+      LOG("Loaded %s: access_flags=%u type=%.*s",
+          ty_type_kind_string(resolver->types, type_i), method->access_flags,
           human_type.len, human_type.value);
     }
   }
@@ -6076,10 +6125,10 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
                                uncompressed_size_according_to_directory_entry,
                                &local_file_header, &class_file, &tmp_arena);
 
-        ty_type_t type = {
-            .kind = TYPE_INSTANCE,
-            .this_class_name = string_make(class_file.class_name, arena),
-        };
+        ty_type_t type = {.kind = TYPE_INSTANCE};
+        type_init_package_and_name(class_file.class_name, &type.package_name,
+                                   &type.this_class_name, arena);
+
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
@@ -6090,13 +6139,15 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         }
 
         resolver_load_methods_from_class_file(resolver, this_class_type_i,
-                                              &class_file, type.this_class_name,
-                                              arena);
+                                              &class_file, arena);
 
-        LOG("Loaded file=%.*s class_name=%.*s archive=%.*s", file_name.len,
-            file_name.value, class_file.class_name.len,
-            class_file.class_name.value, class_file.archive_file_path.len,
-            class_file.archive_file_path.value);
+        LOG("Loaded class_file_path=%.*s  archive_file_path=%.*s "
+            "kind=uncompressed package_name=%.*s class_name=%.*s",
+            class_file.class_file_path.len, class_file.class_file_path.value,
+            class_file.archive_file_path.len,
+            class_file.archive_file_path.value, type.package_name.len,
+            type.package_name.value, type.this_class_name.len,
+            type.this_class_name.value);
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
@@ -6127,10 +6178,10 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         cf_buf_read_class_file((char *)dst, dst_len, &dst_current, &class_file,
                                &tmp_arena);
 
-        ty_type_t type = {
-            .kind = TYPE_INSTANCE,
-            .this_class_name = string_make(class_file.class_name, arena),
-        };
+        ty_type_t type = {.kind = TYPE_INSTANCE};
+        type_init_package_and_name(class_file.class_name, &type.package_name,
+                                   &type.this_class_name, arena);
+
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
@@ -6148,13 +6199,15 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
         }
 
         resolver_load_methods_from_class_file(resolver, this_class_type_i,
-                                              &class_file, type.this_class_name,
-                                              arena);
+                                              &class_file, arena);
 
-        LOG("Loaded %.*s from %.*s (compressed)",
+        LOG("Loaded class_file_path=%.*s  archive_file_path=%.*s "
+            "kind=compressed package_name=%.*s class_name=%.*s",
             class_file.class_file_path.len, class_file.class_file_path.value,
             class_file.archive_file_path.len,
-            class_file.archive_file_path.value);
+            class_file.archive_file_path.value, type.package_name.len,
+            type.package_name.value, type.this_class_name.len,
+            type.this_class_name.value);
 
         inflateEnd(&stream);
       }
@@ -6291,6 +6344,11 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
     string_append_cstring(&result, "private ", arena);
 
   string_append_cstring(&result, "fun ", arena);
+
+  if (!string_is_empty(type->package_name)) {
+    string_append_string(&result, type->package_name, arena);
+    string_append_cstring(&result, ".", arena);
+  }
 
   if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0) {
     string_append_string(&result, this_class_type->this_class_name, arena);
@@ -6939,9 +6997,11 @@ static void resolver_load_standard_types(resolver_t *resolver,
   if (!resolver_resolve_class_name(
           resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
           scratch_arena, arena)) {
-    fprintf(stderr,
-            "Could not load the kotlin stdlib classes. Please provide the CLI "
-            "option manually e.g.: -c /usr/share/java/kotlin-stdlib.jar\n");
+    fprintf(
+        stderr,
+        "Could not load the kotlin stdlib classes (failed to load the class "
+        "`kotlin/io/ConsoleKt` as sanity check for `println` functions). Please provide the CLI "
+        "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n");
     exit(ENOENT);
   }
 }
