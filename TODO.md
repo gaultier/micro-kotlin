@@ -100,6 +100,7 @@
 
 **Later:**
 
+- [ ] Heap dump as pprof format (?)
 - [ ] Read kotlin metadata in class files (protobuf)
 - [ ] Full-fledged type inference
 - [x] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
