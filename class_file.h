@@ -403,7 +403,7 @@ static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
-static bool mem_eq_c(const char *a, u32 a_len, char *b) {
+static bool mem_eq_c(const char *a, u32 a_len, const char *b) {
   pg_assert(b != NULL);
 
   const u64 b_len = strlen(b);
@@ -626,7 +626,7 @@ static bool string_eq(string_t a, string_t b) {
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
 
-static bool string_eq_c(string_t a, char *b) {
+static bool string_eq_c(string_t a, const char *b) {
   pg_assert(b != NULL);
 
   return mem_eq_c(a.value, a.len, b);
@@ -826,8 +826,6 @@ typedef enum __attribute__((packed)) {
   BYTECODE_IMPDEP2 = 0xff,
 } cf_op_kind_t;
 
-static char *const CF_INIT_CONSTRUCTOR_STRING = "<init>";
-
 typedef struct {
   u32 scope_depth;
   u32 var_definition_node_i;
@@ -888,8 +886,11 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_INSTANCE = 1 << 11,
   TYPE_ARRAY = 1 << 12,
   TYPE_INTEGER_LITERAL = 1 << 13,
+  TYPE_CONSTRUCTOR = 1 << 14,
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
+
+static char * const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct cg_frame_t {
   cf_variable_t *locals;
@@ -1226,6 +1227,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
     // Those types are not a subtype of anything (expect Any but we handled that
     // case already).
   case TYPE_METHOD:
+  case TYPE_CONSTRUCTOR:
   case TYPE_DOUBLE:
   case TYPE_FLOAT:
   case TYPE_CHAR:
@@ -1636,7 +1638,8 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
 
     break;
   }
-  case TYPE_METHOD: {
+  case TYPE_METHOD:
+  case TYPE_CONSTRUCTOR: {
     const ty_type_method_t *const method_type = &type->v.method;
     string_append_char(descriptor, '(', arena);
 
@@ -1765,6 +1768,9 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
   }
 
   case '(': {
+    // Might be: TYPE_CONSTRUCTOR, but we cannot know based on the type
+    // descriptor, only based on the name.
+    // Hence, the caller will have to patch the kind afterwards.
     type->kind = TYPE_METHOD;
     string_drop_first_n(&remaining, 1);
 
@@ -4414,6 +4420,8 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
     return "TYPE_STRING";
   case TYPE_METHOD:
     return "TYPE_METHOD";
+  case TYPE_CONSTRUCTOR:
+    return "TYPE_CONSTRUCTOR";
   case TYPE_ARRAY:
     return "TYPE_ARRAY";
   case TYPE_INSTANCE:
@@ -4461,7 +4469,8 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_INSTANCE: {
     return string_make(type->this_class_name, arena);
   }
-  case TYPE_METHOD: {
+  case TYPE_METHOD:
+  case TYPE_CONSTRUCTOR: {
     const ty_type_method_t *const method_type = &type->v.method;
 
     string_t res = string_reserve(128, arena);
@@ -5817,7 +5826,13 @@ static void resolver_load_methods_from_class_file(
     cf_parse_descriptor(resolver, descriptor, &type, arena);
     pg_assert(type.kind == TYPE_METHOD);
 
-    type.v.method.name = string_make(name, arena);
+    if (string_eq_c(name, CONSTRUCTOR_JVM_NAME)) {
+      type.kind = TYPE_CONSTRUCTOR;
+      type.v.method.name = type.this_class_name;
+    } else {
+      type.v.method.name = string_make(name, arena);
+    }
+
     type.v.method.access_flags = method->access_flags;
     type.v.method.this_class_type_i = this_class_type_i;
     cf_get_source_location_of_function(class_file, method,
@@ -6228,9 +6243,9 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
 }
 
 static void resolver_collect_callables_with_name(const resolver_t *resolver,
-                                               string_t function_name,
-                                               u32 **candidate_functions_i,
-                                               arena_t *arena) {
+                                                 string_t function_name,
+                                                 u32 **candidate_functions_i,
+                                                 arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(candidate_functions_i != NULL);
@@ -6238,18 +6253,18 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
-    if (type->kind != TYPE_METHOD)
-      continue;
+    if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR) {
+      const ty_type_method_t *const method = &type->v.method;
 
-    const ty_type_method_t *const method = &type->v.method;
+      if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
+        continue;
 
-    if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
-      continue;
+      if (!string_eq(method->name, function_name))
+        continue;
 
-    if (!string_eq(method->name, function_name))
-      continue;
-
-    pg_array_append(*candidate_functions_i, i, arena);
+      pg_array_append(*candidate_functions_i, i, arena);
+    } else if (type->kind == TYPE_CONSTRUCTOR) {
+    }
   }
 
   // TODO: Collect callable fields as well.
@@ -6261,7 +6276,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
   const ty_type_t *const type = &resolver->types[type_i];
 
-  if (type->kind != TYPE_METHOD)
+  if (!(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR))
     return ty_type_to_human_string(resolver->types, type_i, arena);
 
   const ty_type_method_t *const method = &type->v.method;
@@ -6345,13 +6360,13 @@ typedef enum __attribute__((packed)) {
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
     resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
     arena_t *scratch_arena, arena_t *arena) {
-  pg_assert(a->kind == TYPE_METHOD);
+  pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
   pg_assert(a->v.method.argument_types_i != NULL);
   pg_assert(a->this_class_name.value != NULL);
   pg_assert(a->this_class_name.len > 0);
   const u8 call_argument_count = pg_array_len(a->v.method.argument_types_i);
 
-  pg_assert(b->kind == TYPE_METHOD);
+  pg_assert(b->kind == TYPE_METHOD || b->kind == TYPE_CONSTRUCTOR);
   pg_assert(b->v.method.argument_types_i != NULL);
   pg_assert(b->this_class_name.value != NULL);
   pg_assert(b->this_class_name.len > 0);
@@ -6461,7 +6476,7 @@ static bool resolver_resolve_free_function(
   pg_assert(picked_method_type_i != NULL);
 
   resolver_collect_callables_with_name(resolver, method_name,
-                                     candidate_functions_i, arena);
+                                       candidate_functions_i, arena);
 
   const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
 
@@ -6777,7 +6792,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
 
-    if (type->kind == TYPE_METHOD)
+    if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR)
       continue;
 
     if (type->kind == TYPE_INSTANCE &&
@@ -7118,7 +7133,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(picked_method_type_i > 0);
     const ty_type_t *picked_method_type =
         &resolver->types[picked_method_type_i];
-    pg_assert(picked_method_type->kind == TYPE_METHOD);
+    pg_assert(picked_method_type->kind == TYPE_METHOD ||
+              picked_method_type->kind == TYPE_CONSTRUCTOR);
 
     node->type_i = picked_method_type_i;
 
@@ -7496,7 +7512,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const function_type =
         &resolver->types[current_function->type_i];
 
-    pg_assert(function_type->kind == TYPE_METHOD);
+    pg_assert(function_type->kind == TYPE_METHOD ||
+              function_type->kind == TYPE_CONSTRUCTOR);
     const u32 return_type_i = function_type->v.method.return_type_i;
 
     if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
@@ -8059,6 +8076,34 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
 
   if (return_type->kind == TYPE_UNIT)
     return;
+
+  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+      resolver_eval_type(gen->resolver, return_type));
+
+  cg_frame_stack_push(gen->frame, verification_info, arena);
+}
+
+static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
+                                   const ty_type_method_t *method_type,
+                                   arena_t *arena) {
+  pg_assert(gen != NULL);
+  pg_assert(gen->code != NULL);
+  pg_assert(gen->code->code != NULL);
+  pg_assert(method_ref_i > 0);
+  pg_assert(gen->frame != NULL);
+  pg_assert(gen->frame->stack != NULL);
+  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+
+  cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_SPECIAL, arena);
+  cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
+
+  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+    cg_frame_stack_pop(gen->frame);
+
+  const ty_type_t *const return_type =
+      &gen->resolver->types[method_type->return_type_i];
+
+  pg_assert(return_type->kind != TYPE_UNIT);
 
   const cf_verification_info_t verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
@@ -9059,6 +9104,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   case AST_KIND_CALL: {
     pg_assert(type->this_class_name.value != NULL);
     pg_assert(type->this_class_name.len > 0);
+    pg_assert(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR);
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       cg_emit_node(gen, class_file, node->nodes[i], arena);
@@ -9110,8 +9156,13 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       const u16 class_i =
           cf_constant_array_push(&class_file->constant_pool, &class, arena);
 
-      const cf_constant_t name = {.kind = CONSTANT_POOL_KIND_UTF8,
-                                  .v = {.s = type->v.method.name}};
+      const cf_constant_t name = {
+          .kind = CONSTANT_POOL_KIND_UTF8,
+          .v = {
+              .s = type->kind == TYPE_METHOD
+                       ? type->v.method.name
+                       : string_make_from_c_no_alloc(CONSTRUCTOR_JVM_NAME),
+          }};
       const u16 name_i =
           cf_constant_array_push(&class_file->constant_pool, &name, arena);
 
@@ -9136,7 +9187,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       const u16 method_ref_i = cf_constant_array_push(
           &class_file->constant_pool, &method_ref, arena);
 
-      cg_emit_invoke_static(gen, method_ref_i, &type->v.method, arena);
+      if (type->kind == TYPE_METHOD)
+        cg_emit_invoke_static(gen, method_ref_i, &type->v.method, arena);
+      else if (type->kind == TYPE_CONSTRUCTOR)
+        cg_emit_invoke_special(gen, method_ref_i, &type->v.method, arena);
     }
 
     break;
