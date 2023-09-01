@@ -4450,8 +4450,8 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
   }
 }
 
-static void par_find_token_position(const parser_t *parser,
-                                    lex_token_t token, u32 *line, u32 *column,
+static void par_find_token_position(const parser_t *parser, lex_token_t token,
+                                    u32 *line, u32 *column,
                                     string_t *token_string) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4656,8 +4656,7 @@ static bool par_match_token(parser_t *parser, lex_token_kind_t kind) {
   return false;
 }
 
-static void par_error(parser_t *parser, lex_token_t token,
-                      const char *error) {
+static void par_error(parser_t *parser, lex_token_t token, const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4776,8 +4775,7 @@ static string_t par_token_to_string(parser_t *parser, u32 token_i) {
 
 static u32 par_parse_expression(parser_t *parser, arena_t *arena);
 static u32 par_parse_block(parser_t *parser, arena_t *arena);
-static u32 par_parse_postfix_unary_expression(parser_t *parser,
-                                              arena_t *arena);
+static u32 par_parse_postfix_unary_expression(parser_t *parser, arena_t *arena);
 static u32 par_parse_statements(parser_t *parser, arena_t *arena);
 static u32 par_parse_declaration(parser_t *parser, arena_t *arena);
 static u32 par_parse_statement(parser_t *parser, arena_t *arena);
@@ -4807,8 +4805,7 @@ static u32 par_parse_block(parser_t *parser, arena_t *arena) {
 // controlStructureBody:
 //     block
 //     | statement
-static u32 par_parse_control_structure_body(parser_t *parser,
-                                            arena_t *arena) {
+static u32 par_parse_control_structure_body(parser_t *parser, arena_t *arena) {
   pg_assert(parser);
   pg_assert(arena);
 
@@ -5210,8 +5207,8 @@ static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
 //     | callSuffix
 //     | indexingSuffix
 //     | navigationSuffix
-static u32 par_parse_postfix_unary_suffix(parser_t *parser,
-                                          u32 *main_token_i, arena_t *arena) {
+static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
+                                          arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5252,8 +5249,7 @@ static u32 par_parse_postfix_unary_expression(parser_t *parser,
 
 // prefixUnaryExpression:
 //     {unaryPrefix} postfixUnaryExpression
-static u32 par_parse_prefix_unary_expression(parser_t *parser,
-                                             arena_t *arena) {
+static u32 par_parse_prefix_unary_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5661,8 +5657,7 @@ static u32 par_parse_function_body(parser_t *parser, arena_t *arena) {
 //     [{NL} ':' {NL} type]
 //     [{NL} typeConstraints]
 //     [{NL} functionBody]
-static u32 par_parse_function_declaration(parser_t *parser,
-                                          arena_t *arena) {
+static u32 par_parse_function_declaration(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5735,8 +5730,7 @@ static void par_sync_if_panicked(parser_t *parser) {
 //     [(NL {NL}) ';']
 //     {NL}
 //     (([getter] [{NL} [semi] setter]) | ([setter] [{NL} [semi] getter]))
-static u32 par_parse_property_declaration(parser_t *parser,
-                                          arena_t *arena) {
+static u32 par_parse_property_declaration(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
