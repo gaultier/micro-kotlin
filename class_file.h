@@ -6830,58 +6830,75 @@ static string_t find_java_home(arena_t *arena) {
 #define TYPE_SHORT_I ((u32)9)
 #define TYPE_STRING_I ((u32)10)
 
-static bool resolver_resolve_class_name(resolver_t *resolver,
-                                        string_t class_name, u32 *type_i,
-                                        arena_t *scratch_arena,
-                                        arena_t *arena) {
+static bool type_is_fully_qualified_name_equal_to_package_and_name(
+    string_t a_fqn, string_t b_package_name, string_t b_class_name,
+    arena_t *arena) {
+  arena_t tmp_arena = *arena;
+
+  string_t b_fqn =
+      string_reserve(b_package_name.len + 1 + b_class_name.len, &tmp_arena);
+  if (!string_is_empty(b_package_name)) {
+    string_append_string(&b_fqn, b_package_name, &tmp_arena);
+    string_append_char(&b_fqn, '.', &tmp_arena);
+  }
+  string_append_string(&b_fqn, b_class_name, &tmp_arena);
+
+  return string_eq(a_fqn, b_fqn);
+}
+
+static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
+                                                        string_t fqn,
+                                                        u32 *type_i,
+                                                        arena_t *scratch_arena,
+                                                        arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(class_name.value != NULL);
+  pg_assert(fqn.value != NULL);
   pg_assert(type_i != NULL);
   pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
   // TODO: Flag types coming from java as nullable.
 
-  if (string_eq_c(class_name, "kotlin.Any")) {
+  if (string_eq_c(fqn, "kotlin.Any")) {
     *type_i = TYPE_ANY_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Unit")) {
+  } else if (string_eq_c(fqn, "kotlin.Unit")) {
     *type_i = TYPE_UNIT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Boolean") ||
-             string_eq_c(class_name, "java/lang/Boolean")) {
+  } else if (string_eq_c(fqn, "kotlin.Boolean") ||
+             string_eq_c(fqn, "java/lang/Boolean")) {
     *type_i = TYPE_BOOLEAN_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Byte") ||
-             string_eq_c(class_name, "java/lang/Byte")) {
+  } else if (string_eq_c(fqn, "kotlin.Byte") ||
+             string_eq_c(fqn, "java/lang/Byte")) {
     *type_i = TYPE_BYTE_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Char") ||
-             string_eq_c(class_name, "java/lang/Char")) {
+  } else if (string_eq_c(fqn, "kotlin.Char") ||
+             string_eq_c(fqn, "java/lang/Char")) {
     *type_i = TYPE_CHAR_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Short") ||
-             string_eq_c(class_name, "java/lang/Short")) {
+  } else if (string_eq_c(fqn, "kotlin.Short") ||
+             string_eq_c(fqn, "java/lang/Short")) {
     *type_i = TYPE_SHORT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Int") ||
-             string_eq_c(class_name, "java/lang/Integer")) {
+  } else if (string_eq_c(fqn, "kotlin.Int") ||
+             string_eq_c(fqn, "java/lang/Integer")) {
     *type_i = TYPE_INT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Float") ||
-             string_eq_c(class_name, "java/lang/Float")) {
+  } else if (string_eq_c(fqn, "kotlin.Float") ||
+             string_eq_c(fqn, "java/lang/Float")) {
     *type_i = TYPE_FLOAT_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Long") ||
-             string_eq_c(class_name, "java/lang/Long")) {
+  } else if (string_eq_c(fqn, "kotlin.Long") ||
+             string_eq_c(fqn, "java/lang/Long")) {
     *type_i = TYPE_LONG_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.Double") ||
-             string_eq_c(class_name, "java/lang/Double")) {
+  } else if (string_eq_c(fqn, "kotlin.Double") ||
+             string_eq_c(fqn, "java/lang/Double")) {
     *type_i = TYPE_DOUBLE_I;
     return true;
-  } else if (string_eq_c(class_name, "kotlin.String") ||
-             string_eq_c(class_name, "java/lang/String")) {
+  } else if (string_eq_c(fqn, "kotlin.String") ||
+             string_eq_c(fqn, "java/lang/String")) {
     *type_i = TYPE_STRING_I;
     return true;
   }
@@ -6894,7 +6911,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       continue;
 
     if (type->kind == TYPE_INSTANCE &&
-        string_eq(class_name, type->this_class_name)) {
+        string_eq(fqn, type->this_class_name)) {
       *type_i = i;
       return true;
     }
@@ -6905,10 +6922,10 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
     const string_t class_path_entry = resolver->class_path_entries[i];
 
     string_t tentative_class_file_path =
-        string_reserve(class_path_entry.len + 1 + class_name.len + 6, arena);
+        string_reserve(class_path_entry.len + 1 + fqn.len + 6, arena);
     string_append_string(&tentative_class_file_path, class_path_entry, arena);
     string_append_char(&tentative_class_file_path, '/', arena);
-    string_append_string(&tentative_class_file_path, class_name, arena);
+    string_append_string(&tentative_class_file_path, fqn, arena);
     string_append_cstring(&tentative_class_file_path, ".class", arena);
 
     if (string_ends_with_cstring(tentative_class_file_path, ".class")) {
@@ -6936,12 +6953,12 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
       };
       cf_buf_read_class_file(buf, read_bytes, &current, &class_file, arena);
 
-      pg_assert(string_eq(class_name, class_file.class_name));
+      pg_assert(string_eq(fqn, class_file.class_name));
 
       // TODO: super type.
       ty_type_t this_type = {
           .kind = TYPE_INSTANCE,
-          .this_class_name = class_name,
+          .this_class_name = fqn,
       };
 
       *type_i = resolver_add_type(resolver, &this_type, arena);
@@ -6965,7 +6982,7 @@ static bool resolver_resolve_class_name(resolver_t *resolver,
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
       const ty_type_t *const type = &resolver->types[i];
       if (type->kind == TYPE_INSTANCE &&
-          string_eq(class_name, type->this_class_name)) {
+          string_eq(fqn, type->this_class_name)) {
         *type_i = i;
         return true;
       }
@@ -6991,13 +7008,14 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
   // Since most types inherit from Object, we do not allocate a string for it
   // for optimization purposes.
   if (string_is_empty(type->super_class_name)) {
-    return resolver_resolve_class_name(
+    return resolver_resolve_fully_qualified_name(
         resolver, string_make_from_c_no_alloc("java/lang/Object"),
         &type->super_type_i, scratch_arena, arena);
   }
 
-  return resolver_resolve_class_name(resolver, type->super_class_name,
-                                     &type->super_type_i, scratch_arena, arena);
+  return resolver_resolve_fully_qualified_name(
+      resolver, type->super_class_name, &type->super_type_i, scratch_arena,
+      arena);
 }
 
 static void resolver_load_standard_types(resolver_t *resolver,
@@ -7034,7 +7052,7 @@ static void resolver_load_standard_types(resolver_t *resolver,
                     arena);
 
   u32 dummy = 0;
-  if (!resolver_resolve_class_name(
+  if (!resolver_resolve_fully_qualified_name(
           resolver, string_make_from_c_no_alloc("kotlin/io/ConsoleKt"), &dummy,
           scratch_arena, arena)) {
     fprintf(
@@ -7531,7 +7549,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                string_eq_c(type_literal_string, "kotlin.Long")) {
       node->type_i = TYPE_LONG_I;
     } else {
-      const bool found = resolver_resolve_class_name(
+      const bool found = resolver_resolve_fully_qualified_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
       if (!found) {
         string_t error = string_reserve(256, arena);
