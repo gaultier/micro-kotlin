@@ -156,7 +156,7 @@ int main(int argc, char *argv[]) {
     lex_lex(&lexer, source.value, source.len, &current, &arena);
 
     // Parse.
-    par_parser_t parser = {
+    parser_t parser = {
         .buf = source.value,
         .buf_len = source.len,
         .lexer = &lexer,

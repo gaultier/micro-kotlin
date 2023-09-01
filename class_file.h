@@ -1107,10 +1107,10 @@ typedef struct {
   u32 tokens_i;
   par_parser_state_t state;
   pg_pad(3);
-} par_parser_t;
+} parser_t;
 
 typedef struct {
-  par_parser_t *parser;
+  parser_t *parser;
   string_t this_class_name;
   string_t *class_path_entries;
   string_t *imported_package_names;
@@ -1124,7 +1124,7 @@ typedef struct {
 
 static string_t cg_make_class_name_from_path(string_t path, arena_t *arena);
 
-static void resolver_init(resolver_t *resolver, par_parser_t *parser,
+static void resolver_init(resolver_t *resolver, parser_t *parser,
                           string_t *class_path_entries,
                           string_t class_file_path, arena_t *arena) {
 
@@ -1153,7 +1153,6 @@ static void resolver_init(resolver_t *resolver, par_parser_t *parser,
                   string_make_from_c_no_alloc("kotlin.sequences"), arena);
   pg_array_append(resolver->imported_package_names,
                   string_make_from_c_no_alloc("kotlin.text"), arena);
-
 
   pg_array_append(resolver->imported_package_names,
                   string_make_from_c_no_alloc("java.lang"), arena);
@@ -4435,7 +4434,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, const char *buf,
 
 // ------------------------------ Parser
 
-static u32 par_add_node(par_parser_t *parser, const par_ast_node_t *node,
+static u32 par_add_node(parser_t *parser, const par_ast_node_t *node,
                         arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(node != NULL);
@@ -4451,7 +4450,7 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
   }
 }
 
-static void par_find_token_position(const par_parser_t *parser,
+static void par_find_token_position(const parser_t *parser,
                                     lex_token_t token, u32 *line, u32 *column,
                                     string_t *token_string) {
   pg_assert(parser != NULL);
@@ -4603,7 +4602,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   pg_assert(0 && "unreachable");
 }
 
-static bool par_is_at_end(const par_parser_t *parser) {
+static bool par_is_at_end(const parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4613,7 +4612,7 @@ static bool par_is_at_end(const par_parser_t *parser) {
   return parser->tokens_i == pg_array_len(parser->lexer->tokens);
 }
 
-static lex_token_t par_peek_token(const par_parser_t *parser) {
+static lex_token_t par_peek_token(const parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
@@ -4623,7 +4622,7 @@ static lex_token_t par_peek_token(const par_parser_t *parser) {
   return parser->lexer->tokens[parser->tokens_i];
 }
 
-static lex_token_t par_peek_next_token(const par_parser_t *parser) {
+static lex_token_t par_peek_next_token(const parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
@@ -4633,7 +4632,7 @@ static lex_token_t par_peek_next_token(const par_parser_t *parser) {
   return parser->lexer->tokens[parser->tokens_i + 1];
 }
 
-static void par_advance_token(par_parser_t *parser) {
+static void par_advance_token(parser_t *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
@@ -4643,7 +4642,7 @@ static void par_advance_token(par_parser_t *parser) {
   parser->tokens_i++;
 }
 
-static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
+static bool par_match_token(parser_t *parser, lex_token_kind_t kind) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4657,7 +4656,7 @@ static bool par_match_token(par_parser_t *parser, lex_token_kind_t kind) {
   return false;
 }
 
-static void par_error(par_parser_t *parser, lex_token_t token,
+static void par_error(parser_t *parser, lex_token_t token,
                       const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4688,7 +4687,7 @@ static void par_error(par_parser_t *parser, lex_token_t token,
   }
 }
 
-static void par_expect_token(par_parser_t *parser, lex_token_kind_t kind,
+static void par_expect_token(parser_t *parser, lex_token_kind_t kind,
                              const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4706,7 +4705,7 @@ static const u8 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
 static const u8 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
 static const u8 NODE_NUMBER_FLAGS_LONG = 1 << 6;
 
-static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
+static u64 par_number(const parser_t *parser, lex_token_t token, u8 *flag) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4762,7 +4761,7 @@ static u64 par_number(const par_parser_t *parser, lex_token_t token, u8 *flag) {
   return number;
 }
 
-static string_t par_token_to_string(par_parser_t *parser, u32 token_i) {
+static string_t par_token_to_string(parser_t *parser, u32 token_i) {
   pg_assert(parser != NULL);
   pg_assert(token_i < pg_array_len(parser->lexer->tokens));
 
@@ -4775,14 +4774,14 @@ static string_t par_token_to_string(par_parser_t *parser, u32 token_i) {
   };
 }
 
-static u32 par_parse_expression(par_parser_t *parser, arena_t *arena);
-static u32 par_parse_block(par_parser_t *parser, arena_t *arena);
-static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
+static u32 par_parse_expression(parser_t *parser, arena_t *arena);
+static u32 par_parse_block(parser_t *parser, arena_t *arena);
+static u32 par_parse_postfix_unary_expression(parser_t *parser,
                                               arena_t *arena);
-static u32 par_parse_statements(par_parser_t *parser, arena_t *arena);
-static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena);
-static u32 par_parse_statement(par_parser_t *parser, arena_t *arena);
-static u32 par_parse_type(par_parser_t *parser, arena_t *arena);
+static u32 par_parse_statements(parser_t *parser, arena_t *arena);
+static u32 par_parse_declaration(parser_t *parser, arena_t *arena);
+static u32 par_parse_statement(parser_t *parser, arena_t *arena);
+static u32 par_parse_type(parser_t *parser, arena_t *arena);
 
 // block:
 //     '{'
@@ -4790,7 +4789,7 @@ static u32 par_parse_type(par_parser_t *parser, arena_t *arena);
 //     statements
 //     {NL}
 //     '}'
-static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_block(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4808,7 +4807,7 @@ static u32 par_parse_block(par_parser_t *parser, arena_t *arena) {
 // controlStructureBody:
 //     block
 //     | statement
-static u32 par_parse_control_structure_body(par_parser_t *parser,
+static u32 par_parse_control_structure_body(parser_t *parser,
                                             arena_t *arena) {
   pg_assert(parser);
   pg_assert(arena);
@@ -4829,7 +4828,7 @@ static u32 par_parse_control_structure_body(par_parser_t *parser,
 //  {NL}
 //  (controlStructureBody | ([controlStructureBody] {NL} [';'] {NL} 'else'
 //  {NL} (controlStructureBody | ';')) | ';')
-static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_if_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4882,7 +4881,7 @@ static u32 par_parse_if_expression(par_parser_t *parser, arena_t *arena) {
 //     | CONTINUE_AT
 //     | 'break'
 //     | BREAK_AT
-static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_jump_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4917,7 +4916,7 @@ static u32 par_parse_jump_expression(par_parser_t *parser, arena_t *arena) {
 //     | whenExpression
 //     | tryExpression
 //     | jumpExpression
-static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_primary_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4975,7 +4974,7 @@ static u32 par_parse_primary_expression(par_parser_t *parser, arena_t *arena) {
 //     [{NL} ',']
 //     {NL}
 //     ')'
-static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_var_declaration(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5002,7 +5001,7 @@ static u32 par_parse_var_declaration(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
+static bool par_is_lvalue(const parser_t *parser, u32 node_i) {
   pg_assert(parser != NULL);
 
   const par_ast_node_t *const node = &parser->nodes[node_i];
@@ -5019,7 +5018,7 @@ static bool par_is_lvalue(const par_parser_t *parser, u32 node_i) {
 // assignment:
 //     ((directlyAssignableExpression '=') | (assignableExpression
 //     assignmentAndOperator)) {NL} expression
-static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_assignment(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -5056,7 +5055,7 @@ static u32 par_parse_assignment(par_parser_t *parser, arena_t *arena) {
 //     ')'
 //     {NL}
 //     (controlStructureBody | ';')
-static u32 par_parse_while_statement(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_while_statement(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -5081,7 +5080,7 @@ static u32 par_parse_while_statement(par_parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
-static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_loop_statement(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -5094,7 +5093,7 @@ static u32 par_parse_loop_statement(par_parser_t *parser, arena_t *arena) {
 // statement:
 //     {label | annotation} (declaration | assignment | loopStatement |
 //     expression)
-static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_statement(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5122,7 +5121,7 @@ static u32 par_parse_statement(par_parser_t *parser, arena_t *arena) {
 // navigationSuffix:
 //     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
 //     'class')
-static u32 par_parse_navigation_suffix(par_parser_t *parser, u32 *main_token_i,
+static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
                                        par_ast_node_kind_t *parent_kind,
                                        arena_t *arena) {
   pg_assert(parser != NULL);
@@ -5160,7 +5159,7 @@ static u32 par_parse_navigation_suffix(par_parser_t *parser, u32 *main_token_i,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static void par_parse_value_arguments(par_parser_t *parser, u32 **nodes,
+static void par_parse_value_arguments(parser_t *parser, u32 **nodes,
                                       arena_t *arena) {
 
   while (!par_is_at_end(parser)) {
@@ -5189,7 +5188,7 @@ static void par_parse_value_arguments(par_parser_t *parser, u32 **nodes,
 
 // callSuffix:
 //     [typeArguments] (([valueArguments] annotatedLambda) | valueArguments)
-static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
+static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
                                  arena_t *arena) {
   if (!par_match_token(parser, TOKEN_KIND_LEFT_PAREN))
     return 0;
@@ -5211,7 +5210,7 @@ static u32 par_parse_call_suffix(par_parser_t *parser, u32 *main_token_i,
 //     | callSuffix
 //     | indexingSuffix
 //     | navigationSuffix
-static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
+static u32 par_parse_postfix_unary_suffix(parser_t *parser,
                                           u32 *main_token_i, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5229,7 +5228,7 @@ static u32 par_parse_postfix_unary_suffix(par_parser_t *parser,
 
 // postfixUnaryExpression:
 //     primaryExpression {postfixUnarySuffix}
-static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
+static u32 par_parse_postfix_unary_expression(parser_t *parser,
                                               arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5253,7 +5252,7 @@ static u32 par_parse_postfix_unary_expression(par_parser_t *parser,
 
 // prefixUnaryExpression:
 //     {unaryPrefix} postfixUnaryExpression
-static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
+static u32 par_parse_prefix_unary_expression(parser_t *parser,
                                              arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5276,7 +5275,7 @@ static u32 par_parse_prefix_unary_expression(par_parser_t *parser,
 
 // asExpression:
 //     prefixUnaryExpression {{NL} asOperator {NL} type}
-static u32 par_parse_as_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_as_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5288,7 +5287,7 @@ static u32 par_parse_as_expression(par_parser_t *parser, arena_t *arena) {
 
 // multiplicativeExpression:
 //     asExpression {multiplicativeOperator {NL} asExpression}
-static u32 par_parse_multiplicative_expression(par_parser_t *parser,
+static u32 par_parse_multiplicative_expression(parser_t *parser,
                                                arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5314,7 +5313,7 @@ static u32 par_parse_multiplicative_expression(par_parser_t *parser,
 // additiveExpression:
 //     multiplicativeExpression {additiveOperator {NL}
 //     multiplicativeExpression}
-static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_additive_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5337,7 +5336,7 @@ static u32 par_parse_additive_expression(par_parser_t *parser, arena_t *arena) {
 
 // rangeExpression:
 //     additiveExpression {'..' {NL} additiveExpression}
-static u32 par_parse_range_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_range_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5349,7 +5348,7 @@ static u32 par_parse_range_expression(par_parser_t *parser, arena_t *arena) {
 
 // infixFunctionCall:
 //     rangeExpression {simpleIdentifier {NL} rangeExpression}
-static u32 par_parse_infix_function_call(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_infix_function_call(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5361,7 +5360,7 @@ static u32 par_parse_infix_function_call(par_parser_t *parser, arena_t *arena) {
 
 // elvisExpression:
 //     infixFunctionCall {{NL} elvis {NL} infixFunctionCall}
-static u32 par_parse_elvis_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_elvis_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5374,7 +5373,7 @@ static u32 par_parse_elvis_expression(par_parser_t *parser, arena_t *arena) {
 // infixOperation:
 //     elvisExpression {(inOperator {NL} elvisExpression) | (isOperator {NL}
 //     type)}
-static u32 par_parse_infix_operation(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_infix_operation(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5386,7 +5385,7 @@ static u32 par_parse_infix_operation(par_parser_t *parser, arena_t *arena) {
 
 // genericCallLikeComparison:
 //     infixOperation {callSuffix}
-static u32 par_parse_generic_call_like_comparison(par_parser_t *parser,
+static u32 par_parse_generic_call_like_comparison(parser_t *parser,
                                                   arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5400,7 +5399,7 @@ static u32 par_parse_generic_call_like_comparison(par_parser_t *parser,
 // comparison:
 //     genericCallLikeComparison {comparisonOperator {NL}
 //     genericCallLikeComparison}
-static u32 par_parse_comparison(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_comparison(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5425,7 +5424,7 @@ static u32 par_parse_comparison(par_parser_t *parser, arena_t *arena) {
 
 // equality:
 //     comparison {equalityOperator {NL} comparison}
-static u32 par_parse_equality(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_equality(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5448,7 +5447,7 @@ static u32 par_parse_equality(par_parser_t *parser, arena_t *arena) {
 
 // conjunction:
 //     equality {{NL} '&&' {NL} equality}
-static u32 par_parse_conjunction(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_conjunction(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5470,7 +5469,7 @@ static u32 par_parse_conjunction(par_parser_t *parser, arena_t *arena) {
 
 // disjunction:
 //     conjunction {{NL} '||' {NL} conjunction}
-static u32 par_parse_disjunction(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_disjunction(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5492,7 +5491,7 @@ static u32 par_parse_disjunction(par_parser_t *parser, arena_t *arena) {
 
 // expression:
 //     disjunction
-static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_expression(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5504,7 +5503,7 @@ static u32 par_parse_expression(par_parser_t *parser, arena_t *arena) {
 
 // statements:
 //     [statement {semis statement}] [semis]
-static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_statements(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5532,7 +5531,7 @@ static u32 par_parse_statements(par_parser_t *parser, arena_t *arena) {
 // type:
 //     [typeModifiers] (functionType | parenthesizedType | nullableType |
 //     typeReference | definitelyNonNullableType)
-static u32 par_parse_type(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_type(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5566,7 +5565,7 @@ static u32 par_parse_type(par_parser_t *parser, arena_t *arena) {
 //     ':'
 //     {NL}
 //     type
-static u32 par_parse_parameter(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_parameter(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5596,7 +5595,7 @@ static u32 par_parse_parameter(par_parser_t *parser, arena_t *arena) {
 
 // functionValueParameter:
 //     [parameterModifiers] parameter [{NL} '=' {NL} expression]
-static u32 par_parse_function_value_parameter(par_parser_t *parser,
+static u32 par_parse_function_value_parameter(parser_t *parser,
                                               arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5614,7 +5613,7 @@ static u32 par_parse_function_value_parameter(par_parser_t *parser,
 //     [functionValueParameter {{NL} ',' {NL} functionValueParameter} [{NL}
 //     ',']] {NL}
 //     ')'
-static u32 par_parse_function_value_parameters(par_parser_t *parser,
+static u32 par_parse_function_value_parameters(parser_t *parser,
                                                arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5643,7 +5642,7 @@ static u32 par_parse_function_value_parameters(par_parser_t *parser,
 // functionBody:
 //     block
 //     | ('=' {NL} expression)
-static u32 par_parse_function_body(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_function_body(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -5662,7 +5661,7 @@ static u32 par_parse_function_body(par_parser_t *parser, arena_t *arena) {
 //     [{NL} ':' {NL} type]
 //     [{NL} typeConstraints]
 //     [{NL} functionBody]
-static u32 par_parse_function_declaration(par_parser_t *parser,
+static u32 par_parse_function_declaration(parser_t *parser,
                                           arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5704,7 +5703,7 @@ static u32 par_parse_function_declaration(par_parser_t *parser,
   return fn_i;
 }
 
-static void par_sync_if_panicked(par_parser_t *parser) {
+static void par_sync_if_panicked(parser_t *parser) {
   pg_assert(parser != NULL);
 
   if (parser->state != PARSER_STATE_PANIC)
@@ -5736,7 +5735,7 @@ static void par_sync_if_panicked(par_parser_t *parser) {
 //     [(NL {NL}) ';']
 //     {NL}
 //     (([getter] [{NL} [semi] setter]) | ([setter] [{NL} [semi] getter]))
-static u32 par_parse_property_declaration(par_parser_t *parser,
+static u32 par_parse_property_declaration(parser_t *parser,
                                           arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
@@ -5753,7 +5752,7 @@ static u32 par_parse_property_declaration(par_parser_t *parser,
 //     | functionDeclaration
 //     | propertyDeclaration
 //     | typeAlias
-static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_declaration(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5773,7 +5772,7 @@ static u32 par_parse_declaration(par_parser_t *parser, arena_t *arena) {
 }
 
 // topLevelObject: declaration [semis]
-static u32 par_parse_top_level_object(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_top_level_object(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5791,7 +5790,7 @@ static u32 par_parse_top_level_object(par_parser_t *parser, arena_t *arena) {
 //     importList
 //     {topLevelObject}
 //     EOF
-static u32 par_parse_kotlin_file(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse_kotlin_file(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5814,7 +5813,7 @@ static u32 par_parse_kotlin_file(par_parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static u32 par_parse(par_parser_t *parser, arena_t *arena) {
+static u32 par_parse(parser_t *parser, arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
