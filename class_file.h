@@ -890,7 +890,7 @@ enum __attribute__((packed)) ty_type_kind_t {
 };
 typedef enum ty_type_kind_t ty_type_kind_t;
 
-static char * const CONSTRUCTOR_JVM_NAME = "<init>";
+static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct cg_frame_t {
   cf_variable_t *locals;
@@ -5865,7 +5865,7 @@ static void resolver_load_methods_from_class_file(
       arena_t tmp_arena = *arena;
       const string_t human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
-      LOG("Loaded method: access_flags=%u type=%.*s", method->access_flags,
+      LOG("Loaded %s: access_flags=%u type=%.*s",ty_type_kind_string(resolver->types,type_i), method->access_flags,
           human_type.len, human_type.value);
     }
   }
