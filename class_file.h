@@ -4572,7 +4572,7 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_ARRAY: {
     string_t result = string_reserve(type->this_class_name.len + 256, arena);
     string_append_cstring(&result, "Array<", arena);
-    string_append_string(&result, type->this_class_name, arena);
+    string_append_string(&result, ty_type_to_human_string(types,type->v.array_type_i, arena),arena);
     string_append_char(&result, '>', arena);
     return result;
   }
@@ -7073,16 +7073,17 @@ static void resolver_load_standard_types(resolver_t *resolver,
                     arena);
 
   u32 dummy = 0;
-  const string_t sanity_check = string_make_from_c_no_alloc("kotlin.io.ConsoleKt");
-  if (!resolver_resolve_fully_qualified_name(
-          resolver, sanity_check, &dummy,
-          scratch_arena, arena)) {
+  const string_t sanity_check =
+      string_make_from_c_no_alloc("kotlin.io.ConsoleKt");
+  if (!resolver_resolve_fully_qualified_name(resolver, sanity_check, &dummy,
+                                             scratch_arena, arena)) {
     fprintf(
         stderr,
         "Could not load the kotlin stdlib classes (failed to load the class "
         "`%.*s` as sanity check for `println` functions). "
         "Please provide the CLI "
-        "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n", sanity_check.len, sanity_check.value);
+        "option manually e.g.: \"-c /usr/share/java/kotlin-stdlib.jar\".\n",
+        sanity_check.len, sanity_check.value);
     exit(ENOENT);
   }
 }
