@@ -658,8 +658,8 @@ static void string_drop_after_last_incl(string_t *s, char c) {
 }
 
 static bool string_eq(string_t a, string_t b) {
-  pg_assert(a.value != NULL);
-  pg_assert(b.value != NULL);
+  pg_assert(a.len>0 ?  a.value != NULL : true);
+  pg_assert(b.len>0 ? b.value != NULL:true);
 
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
@@ -1358,7 +1358,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
   }
   case TYPE_STRING: {
     return b->kind == TYPE_INSTANCE &&
-      string_eq_c(b->package_name ,"java.lang") &&
+           string_eq_c(b->package_name, "java.lang") &&
            string_eq_c(b->this_class_name, "Object");
   }
 
@@ -6357,6 +6357,16 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
+static bool resolver_is_package_imported(const resolver_t *resolver,
+                                         string_t package_name) {
+  for (u64 i = 0; i < pg_array_len(resolver->imported_package_names); i++) {
+    if (string_eq(resolver->imported_package_names[i], package_name))
+      return true;
+  }
+
+  return false;
+}
+
 static void resolver_collect_callables_with_name(const resolver_t *resolver,
                                                  string_t function_name,
                                                  u32 **candidate_functions_i,
@@ -6375,6 +6385,11 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
         continue;
 
       if (!string_eq(method->name, function_name))
+        continue;
+
+      // TODO: Should loaded but not yet imported types reside in a different
+      // array to avoid thrashing?
+      if (!resolver_is_package_imported(resolver, type->package_name))
         continue;
 
       pg_array_append(*candidate_functions_i, i, arena);
