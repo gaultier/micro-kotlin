@@ -454,6 +454,22 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   }
 }
 
+static bool string_contains(string_t s, char *char_set) {
+  pg_assert(char_set != NULL);
+
+  for (u64 i = 0; i < s.len; i++) {
+    const char c = s.value[i];
+
+    char *cursor = char_set;
+    while (*cursor != 0) {
+      if (c == *cursor)
+        return true;
+      cursor += 1;
+    }
+  }
+  return false;
+}
+
 static string_t string_reserve(u32 cap, arena_t *arena) {
   pg_assert(arena != NULL);
   pg_assert(cap < UINT32_MAX);
@@ -1827,15 +1843,16 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
 
   case 'L': {
     string_drop_first_n(&remaining, 1);
-    type->this_class_name = string_clone_until_excl(remaining, ';', arena);
+    const string_t fqn = string_clone_until_excl(remaining, ';', arena);
 
     string_drop_until_incl(&remaining, ';');
     if (string_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_STRING;
-      type->this_class_name = (string_t){0};
     } else {
       type->kind = TYPE_INSTANCE;
     }
+    type_init_package_and_name(fqn, &type->package_name, &type->this_class_name,
+                               arena);
 
     return remaining;
   }
@@ -1851,8 +1868,10 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     remaining =
         cf_parse_descriptor(resolver, descriptor_remaining, &item_type, arena);
 
-    if (!string_is_empty(item_type.this_class_name))
-      type->this_class_name = string_make(item_type.this_class_name, arena);
+    if (!string_is_empty(item_type.this_class_name)) {
+      type_init_package_and_name(item_type.this_class_name, &type->package_name,
+                                 &type->this_class_name, arena);
+    }
 
     type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
@@ -6830,9 +6849,12 @@ static string_t find_java_home(arena_t *arena) {
 #define TYPE_SHORT_I ((u32)9)
 #define TYPE_STRING_I ((u32)10)
 
-static bool type_is_fully_qualified_name_equal_to_package_and_name(
-    string_t a_fqn, string_t b_package_name, string_t b_class_name,
-    arena_t *arena) {
+static bool type_fqn_equal_to_package_and_name(string_t a_fqn,
+                                               string_t b_package_name,
+                                               string_t b_class_name,
+                                               arena_t *arena) {
+  pg_assert(!string_contains(b_class_name, "/."));
+
   arena_t tmp_arena = *arena;
 
   string_t b_fqn =
@@ -6847,10 +6869,9 @@ static bool type_is_fully_qualified_name_equal_to_package_and_name(
 }
 
 static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
-                                                        string_t fqn,
-                                                        u32 *type_i,
-                                                        arena_t *scratch_arena,
-                                                        arena_t *arena) {
+                                                  string_t fqn, u32 *type_i,
+                                                  arena_t *scratch_arena,
+                                                  arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(fqn.value != NULL);
   pg_assert(type_i != NULL);
@@ -6911,7 +6932,8 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
       continue;
 
     if (type->kind == TYPE_INSTANCE &&
-        string_eq(fqn, type->this_class_name)) {
+        type_fqn_equal_to_package_and_name(
+            fqn, type->package_name, type->this_class_name, scratch_arena)) {
       *type_i = i;
       return true;
     }
@@ -6955,11 +6977,9 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
 
       pg_assert(string_eq(fqn, class_file.class_name));
 
-      // TODO: super type.
-      ty_type_t this_type = {
-          .kind = TYPE_INSTANCE,
-          .this_class_name = fqn,
-      };
+      ty_type_t this_type = {.kind = TYPE_INSTANCE};
+      type_init_package_and_name(class_file.class_name, &this_type.package_name,
+                                 &this_type.this_class_name, arena);
 
       *type_i = resolver_add_type(resolver, &this_type, arena);
 
@@ -6982,7 +7002,8 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
       const ty_type_t *const type = &resolver->types[i];
       if (type->kind == TYPE_INSTANCE &&
-          string_eq(fqn, type->this_class_name)) {
+          type_fqn_equal_to_package_and_name(
+              fqn, type->package_name, type->this_class_name, scratch_arena)) {
         *type_i = i;
         return true;
       }
@@ -7013,9 +7034,9 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
         &type->super_type_i, scratch_arena, arena);
   }
 
-  return resolver_resolve_fully_qualified_name(
-      resolver, type->super_class_name, &type->super_type_i, scratch_arena,
-      arena);
+  return resolver_resolve_fully_qualified_name(resolver, type->super_class_name,
+                                               &type->super_type_i,
+                                               scratch_arena, arena);
 }
 
 static void resolver_load_standard_types(resolver_t *resolver,
@@ -7695,6 +7716,7 @@ static void resolver_collect_user_defined_function_signatures(
         resolver->parser->lexer->tokens[node->main_token_i];
     ty_type_t type = {
         .kind = TYPE_METHOD,
+        // FIXME: package name.
         .this_class_name = resolver->this_class_name,
         .v = {.method =
                   {
