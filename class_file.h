@@ -1358,7 +1358,8 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
   }
   case TYPE_STRING: {
     return b->kind == TYPE_INSTANCE &&
-           string_eq_c(b->this_class_name, "java/lang/Object");
+      string_eq_c(b->package_name ,"java.lang") &&
+           string_eq_c(b->this_class_name, "Object");
   }
 
   default:
@@ -4572,7 +4573,9 @@ static string_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_ARRAY: {
     string_t result = string_reserve(type->this_class_name.len + 256, arena);
     string_append_cstring(&result, "Array<", arena);
-    string_append_string(&result, ty_type_to_human_string(types,type->v.array_type_i, arena),arena);
+    string_append_string(
+        &result, ty_type_to_human_string(types, type->v.array_type_i, arena),
+        arena);
     string_append_char(&result, '>', arena);
     return result;
   }
@@ -6375,7 +6378,6 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
         continue;
 
       pg_array_append(*candidate_functions_i, i, arena);
-    } else if (type->kind == TYPE_CONSTRUCTOR) {
     }
   }
 
@@ -6878,6 +6880,9 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
   pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
+  // The JVM uses `/` but Java and Kotlin use `.` as separator.
+  pg_assert(!string_contains(fqn, "/"));
+
   // TODO: Flag types coming from java as nullable.
 
   if (string_eq_c(fqn, "kotlin.Any")) {
@@ -7030,7 +7035,7 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
   // for optimization purposes.
   if (string_is_empty(type->super_class_name)) {
     return resolver_resolve_fully_qualified_name(
-        resolver, string_make_from_c_no_alloc("java/lang/Object"),
+        resolver, string_make_from_c_no_alloc("java.lang.Object"),
         &type->super_type_i, scratch_arena, arena);
   }
 
