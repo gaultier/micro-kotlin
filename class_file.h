@@ -6227,10 +6227,10 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
-static void resolver_collect_free_functions_of_name(const resolver_t *resolver,
-                                                    string_t function_name,
-                                                    u32 **candidate_functions_i,
-                                                    arena_t *arena) {
+static void resolver_collect_callables_with_name(const resolver_t *resolver,
+                                               string_t function_name,
+                                               u32 **candidate_functions_i,
+                                               arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(candidate_functions_i != NULL);
@@ -6460,8 +6460,8 @@ static bool resolver_resolve_free_function(
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
 
-  resolver_collect_free_functions_of_name(resolver, method_name,
-                                          candidate_functions_i, arena);
+  resolver_collect_callables_with_name(resolver, method_name,
+                                     candidate_functions_i, arena);
 
   const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
 

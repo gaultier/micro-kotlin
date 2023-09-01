@@ -75,6 +75,9 @@
   * A user-friendly assert that prints the file, line, backtrace, error message, bug report link, and expression that failed (maybe even a core dump?)
   * A compile error (e.g. for syntax that is not yet supported or invalid jar/jmod/class files)
 - [ ] Fuzz (especially jar/jmod/class files)
+- [ ] **Call class constructor**
+- [ ] Call class method
+- [ ] Access class field
 - [ ] Class definition (BIG!)
   * Fields
   * Primary constructor
