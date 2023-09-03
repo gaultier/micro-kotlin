@@ -7552,9 +7552,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_NAVIGATION: { // e.g.: `foo.bar.baz`
     // IDEA:
     // If the first element `foo` is a known variable in scope: resolve that
-    // recursively.
+    // recursively. Update the node kind to `FIELD_ACCESS`.
     // Else: try to load the package `foo.bar` and find the class
-    // `baz`, or the function `public static (WhateverKt).baz`. 
+    // `baz`, or the function `public static (WhateverKt).baz`. Update the node
+    // kind to `CLASS_REFERENCE` or `CALL` (or `FUNCTION_REFERENCE` ?).
     // Else: error.
     // TODO: static fields/companion objects.
     pg_assert(0 && "unreachable");
