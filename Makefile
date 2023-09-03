@@ -22,5 +22,5 @@ test_release: clean main_release
 	for f in **/*.class; do echo $$f; (cd `dirname $$f`; java `basename -s .class $$f`);  done
 
 main_release: main.c class_file.h
-	$(CC) $(CFLAGS) -O2 -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native main.c -o $@ -Wl,--gc-sections $(LDFLAGS)
+	$(CC) $(CFLAGS) -Ofast -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native main.c -o $@ $(LDFLAGS)
 
