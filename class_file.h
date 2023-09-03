@@ -660,8 +660,9 @@ static void string_drop_after_last_incl(string_t *s, char c) {
 static bool string_eq(string_t a, string_t b) {
   pg_assert(!(a.len > 0 && a.value == NULL));
   pg_assert(!(b.len > 0 && b.value == NULL));
-  
-  if (a.len == 0 && b.len == 0 ) return true;
+
+  if (a.len == 0 && b.len == 0)
+    return true;
 
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
@@ -1007,7 +1008,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_LIST,
   AST_KIND_WHILE_LOOP,
   AST_KIND_STRING,
-  AST_KIND_FIELD_ACCESS,
+  AST_KIND_NAVIGATION,
   AST_KIND_UNRESOLVED_NAME,
   AST_KIND_RETURN,
   AST_KIND_CALL,
@@ -1032,7 +1033,7 @@ static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_LIST] = "LIST",
     [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
     [AST_KIND_STRING] = "STRING",
-    [AST_KIND_FIELD_ACCESS] = "FIELD_ACCESS",
+    [AST_KIND_NAVIGATION] = "NAVIGATION",
     [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
     [AST_KIND_RETURN] = "RETURN",
     [AST_KIND_CALL] = "CALL",
@@ -5147,7 +5148,6 @@ static u32 par_parse_statement(parser_t *parser, arena_t *arena) {
 //     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
 //     'class')
 static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
-                                       par_ast_node_kind_t *parent_kind,
                                        arena_t *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -5161,11 +5161,10 @@ static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
     return 0;
 
   *main_token_i = parser->tokens_i - 1;
-  *parent_kind = AST_KIND_FIELD_ACCESS;
 
   if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
     const par_ast_node_t node = {
-        .kind = AST_KIND_FIELD_ACCESS,
+        .kind = AST_KIND_NAVIGATION,
         .main_token_i = parser->tokens_i - 1,
     };
     return par_add_node(parser, &node, arena);
@@ -5246,7 +5245,7 @@ static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
   pg_assert(arena != NULL);
 
   if (par_peek_token(parser).kind == TOKEN_KIND_DOT)
-    pg_assert(0 && "unimplemented");
+    return par_parse_navigation_suffix(parser, main_token_i, arena);
 
   return par_parse_call_suffix(parser, main_token_i, arena);
 }
@@ -7550,7 +7549,14 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(0 && "todo");
   }
 
-  case AST_KIND_FIELD_ACCESS: {
+  case AST_KIND_NAVIGATION: { // e.g.: `foo.bar.baz`
+    // IDEA:
+    // If the first element `foo` is a known variable in scope: resolve that
+    // recursively.
+    // Else: try to load the package `foo.bar` and find the class
+    // `baz`, or the function `public static (WhateverKt).baz`. 
+    // Else: error.
+    // TODO: static fields/companion objects.
     pg_assert(0 && "unreachable");
   }
 
@@ -9863,7 +9869,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     pg_assert(0 && "todo");
     break;
   }
-  case AST_KIND_FIELD_ACCESS: {
+  case AST_KIND_NAVIGATION: {
     pg_assert(0 && "todo");
     break;
   }
