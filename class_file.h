@@ -658,8 +658,10 @@ static void string_drop_after_last_incl(string_t *s, char c) {
 }
 
 static bool string_eq(string_t a, string_t b) {
-  pg_assert(a.len>0 ?  a.value != NULL : true);
-  pg_assert(b.len>0 ? b.value != NULL:true);
+  pg_assert(!(a.len > 0 && a.value == NULL));
+  pg_assert(!(b.len > 0 && b.value == NULL));
+  
+  if (a.len == 0 && b.len == 0 ) return true;
 
   return a.len == b.len && memcmp(a.value, b.value, a.len) == 0;
 }
@@ -1117,6 +1119,7 @@ typedef struct {
 typedef struct {
   char *buf;
   lex_lexer_t *lexer;
+  string_t current_package;
   par_ast_node_t *nodes;
   u32 current_function_i;
   u32 buf_len;
@@ -1174,6 +1177,9 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
                   string_make_from_c_no_alloc("java.lang"), arena);
   pg_array_append(resolver->imported_package_names,
                   string_make_from_c_no_alloc("kotlin.jvm"), arena);
+
+  pg_array_append(resolver->imported_package_names, parser->current_package,
+                  arena);
 }
 
 static void type_init_package_and_name(string_t fully_qualified_jvm_name,
@@ -5816,6 +5822,8 @@ static u32 par_parse_kotlin_file(parser_t *parser, arena_t *arena) {
   par_ast_node_t node = {.kind = AST_KIND_LIST};
   pg_array_init_reserve(node.nodes, 512, arena);
 
+  // TODO: package, import, etc.
+
   u32 node_i = 0;
   while ((node_i = par_parse_top_level_object(parser, arena)) != 0) {
     pg_array_append(node.nodes, node_i, arena);
@@ -7738,7 +7746,7 @@ static void resolver_collect_user_defined_function_signatures(
         resolver->parser->lexer->tokens[node->main_token_i];
     ty_type_t type = {
         .kind = TYPE_METHOD,
-        // FIXME: package name.
+        .package_name = resolver->parser->current_package,
         .this_class_name = resolver->this_class_name,
         .v = {.method =
                   {
