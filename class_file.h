@@ -7193,7 +7193,8 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
-static string_t resolver_get_fqn_from_navigation_chain(const resolver_t* resolver, u32 node_i){
+static string_t
+resolver_get_fqn_from_navigation_chain(const resolver_t *resolver, u32 node_i) {
   // TODO!
   return (string_t){0};
 }
