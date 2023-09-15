@@ -7193,6 +7193,11 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
+static string_t resolver_get_fqn_from_navigation_chain(const resolver_t* resolver, u32 node_i){
+  // TODO!
+  return (string_t){0};
+}
+
 static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
 
   const u32 previous_var_i = ty_find_variable(resolver, name_token_i);
@@ -7552,13 +7557,42 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_NAVIGATION: { // e.g.: `foo.bar.baz`
     // IDEA:
     // If the first element `foo` is a known variable in scope: resolve that
-    // recursively. Update the node kind to `FIELD_ACCESS`.
+    // recursively.
     // Else: try to load the package `foo.bar` and find the class
     // `baz`, or the function `public static (WhateverKt).baz`. Update the node
     // kind to `CLASS_REFERENCE` or `CALL` (or `FUNCTION_REFERENCE` ?).
     // Else: error.
     // TODO: static fields/companion objects.
-    pg_assert(0 && "unreachable");
+
+    const u32 variable_i = ty_find_variable(resolver, node->main_token_i);
+
+    if (variable_i == (u32)-1) {
+      const string_t fqn =
+          resolver_get_fqn_from_navigation_chain(resolver, node_i);
+
+      if (resolver_resolve_fully_qualified_name(resolver, fqn, &node->type_i,
+                                                scratch_arena, arena)) {
+        pg_assert(0 && "todo");
+      } else {
+        const lex_token_t main_token =
+            resolver->parser->lexer->tokens[node->main_token_i];
+        string_t err = string_reserve(256, arena);
+        string_append_cstring(&err,
+                              "Unknown reference to a name, neither a variable "
+                              "in scope or an external identifier: ",
+                              arena);
+        string_append_string(&err, fqn, arena);
+        par_error(resolver->parser, main_token, err.value);
+        return 0;
+      }
+    } else {
+      const par_ast_node_t *const variable =
+          &resolver->parser->nodes[variable_i];
+      node->type_i = variable->type_i;
+
+      return resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    }
+    break;
   }
 
   case AST_KIND_FUNCTION_PARAMETER: {
