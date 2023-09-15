@@ -78,7 +78,7 @@
 - [ ] **Call Fully Qualified Name (FQN)**
 - [ ] Call class constructor
 - [ ] Call class method
-- [ ] Split `string_t` into `string_builder_t` and `string_t` (immutable)
+- [ ] Split `string_t` into `string_builder_t` and `string_t` (immutable, allows for trivial equality comparison with interning)
 - [ ] Access class field
 - [ ] Class definition (BIG!)
   * Fields
