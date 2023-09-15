@@ -75,12 +75,11 @@ int main(int argc, char *argv[]) {
   }
 
   arena_t arena = {0};
-  arena_init(&arena, 1L << 27); // 128 MiB
+  arena_init(&arena, 1L << 28); // 256 MiB
 
   arena_t scratch_arena = {0};
-  // This size should be at least 22 MiB since that's the size of
-  // `java.base.jmod` which we read as one byte array.
-  arena_init(&scratch_arena, 1L << 26); // 64 MiB
+  // This size should be at least the size of the biggest file we read.
+  arena_init(&scratch_arena, 1L << 28); // 256 MiB
 
   const string_t java_home = find_java_home(&arena);
   LOG("java_home=%.*s", java_home.len, java_home.value);
