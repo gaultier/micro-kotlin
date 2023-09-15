@@ -418,10 +418,10 @@ typedef struct {
   char *value;
 } string_t;
 
-static void string_replace_char(string_t s, char before, char after) {
-  for (u64 i = 0; i < s.len; i++) {
-    if (s.value[i] == before)
-      s.value[i] = after;
+static void string_replace_char(string_t *s, char before, char after) {
+  for (u64 i = 0; i < s->len; i++) {
+    if (s->value[i] == before)
+      s->value[i] = after;
   }
 }
 
@@ -1204,7 +1204,7 @@ static void type_init_package_and_name(string_t fully_qualified_jvm_name,
   pg_assert(!string_is_empty(*package_name));
   pg_assert(string_last(*package_name) != sep);
 
-  string_replace_char(*package_name, '/', '.');
+  string_replace_char(package_name, '/', '.');
 
   *name = string_clone_n_c(last_sep + 1, right_len, arena);
   pg_assert(!string_is_empty(*name));
@@ -6972,9 +6972,18 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
 
     string_t tentative_class_file_path =
         string_reserve(class_path_entry.len + 1 + fqn.len + 6, arena);
+
     string_append_string(&tentative_class_file_path, class_path_entry, arena);
     string_append_char(&tentative_class_file_path, '/', arena);
-    string_append_string(&tentative_class_file_path, fqn, arena);
+
+    {
+      arena_t tmp_arena = *arena;
+      string_t fqn_with_slashes = string_make(fqn, &tmp_arena);
+      // Transform e.g. `kotlin.io.ConsoleKt` into `kotlin/io/ConsoleKt`.
+      string_replace_char(&fqn_with_slashes, '.', '/');
+      string_append_string(&tentative_class_file_path, fqn_with_slashes, arena);
+    }
+
     string_append_cstring(&tentative_class_file_path, ".class", arena);
 
     if (string_ends_with_cstring(tentative_class_file_path, ".class")) {
