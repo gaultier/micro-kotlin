@@ -4802,6 +4802,26 @@ static string_t par_token_to_string(parser_t *parser, u32 token_i) {
   };
 }
 
+static string_t par_token_range_to_string(parser_t *parser,
+                                          u32 start_token_incl_i,
+                                          u32 end_token_excl_i) {
+  pg_assert(parser != NULL);
+  pg_assert(start_token_incl_i < pg_array_len(parser->lexer->tokens));
+  pg_assert(end_token_excl_i <= pg_array_len(parser->lexer->tokens));
+
+  const u32 start_token_incl_source_offset =
+      parser->lexer->tokens[start_token_incl_i].source_offset;
+  const u32 end_token_excl_source_offset =
+      end_token_excl_i == pg_array_len(parser->lexer->tokens)
+          ? parser->buf_len
+          : parser->lexer->tokens[end_token_excl_i].source_offset;
+
+  return (string_t){
+      .value = &parser->buf[start_token_incl_source_offset],
+      .len = end_token_excl_source_offset - start_token_incl_source_offset,
+  };
+}
+
 static u32 par_parse_expression(parser_t *parser, arena_t *arena);
 static u32 par_parse_block(parser_t *parser, arena_t *arena);
 static u32 par_parse_postfix_unary_expression(parser_t *parser, arena_t *arena);
@@ -7204,8 +7224,25 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
 
 static string_t
 resolver_get_fqn_from_navigation_chain(const resolver_t *resolver, u32 node_i) {
-  // TODO!
-  return (string_t){0};
+  const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  pg_assert(node->kind == AST_KIND_NAVIGATION);
+
+  const lex_token_t start = resolver->parser->lexer->tokens[node->main_token_i];
+  pg_assert(start.kind == TOKEN_KIND_IDENTIFIER);
+
+  u32 end_token_excl_i = node->main_token_i + 1;
+  while (end_token_excl_i < pg_array_len(resolver->parser->lexer->tokens)) {
+    const lex_token_t current =
+        resolver->parser->lexer->tokens[end_token_excl_i];
+    if (!(current.kind == TOKEN_KIND_IDENTIFIER ||
+          current.kind == TOKEN_KIND_DOT))
+      break;
+
+    end_token_excl_i+=1;
+  }
+
+  return par_token_range_to_string(resolver->parser, node->main_token_i,
+                                   end_token_excl_i);
 }
 
 static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
