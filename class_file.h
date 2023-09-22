@@ -789,16 +789,21 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
   pg_assert(arena != NULL);
 
   *result = string_reserve(announced_len, arena);
-  while (result->len < announced_len) {
+  result->len = 0;
+
+  u64 remaining = announced_len - result->len;
+  while (remaining > 0) {
     pg_assert(result->len < result->cap);
 
-    const i64 read_bytes = read(fd, result->value + result->len, result->cap);
+    const i64 read_bytes = read(fd, result->value + result->len, remaining);
     if (read_bytes == -1)
       return errno;
     if (read_bytes == 0)
       return EINVAL; // TODO: retry?
 
     result->len += read_bytes;
+    pg_assert(result->len <= announced_len);
+    remaining = announced_len - result->len;
   }
   return -1;
 }
@@ -7238,7 +7243,7 @@ resolver_get_fqn_from_navigation_chain(const resolver_t *resolver, u32 node_i) {
           current.kind == TOKEN_KIND_DOT))
       break;
 
-    end_token_excl_i+=1;
+    end_token_excl_i += 1;
   }
 
   return par_token_range_to_string(resolver->parser, node->main_token_i,

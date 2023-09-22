@@ -23,7 +23,6 @@ fun main() {
   print_arguments(1, 2)
   println(plus(127L, 128L))
 
-  kotlin.io.println("FQN call!")
 }
 
 fun print_arguments(a: Int, b: Int){
