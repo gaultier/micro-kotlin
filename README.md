@@ -14,7 +14,7 @@ My third (and last?) take on a Kotlin compiler, in C. It goes much further than 
 - Out-of-order definitions of functions and variables are supported
 - Some support for function inlining is supported (inlining the body of a called function)
 - All allocations are done with an arena allocator and there is support for a memory dump with stacktraces
-- It's only 10k lines of code!
+- It's only 10k lines of code and the final stripped executable is 145 Kib!
 
 See [TODO.md](TODO.md) for details.
 
