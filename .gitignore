@@ -1,12 +1,7 @@
-a.out
 !*.java
 *.class
-debug
-main
-debug_debug
-main_debug
-main_release
-debug_release
 META-INF/
 *.gf
-main_debug_san
+/micro-kotlin
+/micro-kotlin_debug
+/micro-kotlin_debug_san
