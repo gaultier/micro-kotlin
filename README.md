@@ -56,3 +56,24 @@ Hello, world!
 ```
 
 See `demo.kt` to see what language constructs are supported at the moment.
+
+
+```sh
+$ ./micro-kotlin -h
+A small compiler for the Kotlin programming language.
+
+  ./micro-kotlin [OPTIONS] <path>
+
+EXAMPLES:
+  ./micro-kotlin -c /usr/share/java/kotlin-stdlib.jar main.kt
+
+OPTIONS:
+  -v                Verbose.
+  -m                Debug memory usage by printing a heap dump in CSV form.
+  -h                Print this help message and exit.
+  -c <classpath>    Load additional classpath entries, which are colon separated.
+
+ENVIRONMENT:
+  JAVA_HOME         This environment variable can be set to point to a local Java installation.
+                    If it is not set, we will try to infer the system Java installation.
+```
