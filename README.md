@@ -14,6 +14,7 @@ My third (and last?) take on a Kotlin compiler, in C. It goes much further than 
 - Out-of-order definitions of functions and variables are supported
 - Some support for function inlining is supported (inlining the body of a called function)
 - All allocations are done with an arena allocator and there is support for a memory dump with stacktraces
+- It's only 10k lines of code!
 
 See [TODO.md](TODO.md) for details.
 
@@ -36,7 +37,7 @@ fun main() {
 
 ## Quickstart
 
-*Requirements: A C99 compiler, zlib (to read jar files that have compression), the Kotlin standard library, the Java standard library.*.
+*Requirements: A C99 compiler, zlib (to read jar files that have compression), the Kotlin standard library, the Java standard library.*
 
 ```sh
 # Pick whatever variant and version of the JDK you like here. We only need to get the Kotlin & Java standard library files.
