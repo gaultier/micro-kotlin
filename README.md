@@ -18,13 +18,29 @@ My third (and last?) take on a Kotlin compiler, in C. It goes much further than 
 See [TODO.md](TODO.md) for details.
 
 
+Such code works:
+
+```kotlin
+fun fibonacci_rec(n: Int) : Int {
+  if (n == 1) {
+    return 1
+  } 
+  return n + fibonacci_rec(n-1)
+}
+
+fun main() {
+  println("Hello, world!")
+  println(fibonacci_rec(10))
+}
+```
+
 ## Quickstart
 
-*Requirements: A C compiler, libz (to read jar files that have zip compression), the Kotlin standard library, the Java standard library.*.
+*Requirements: A C99 compiler, zlib (to read jar files that have compression), the Kotlin standard library, the Java standard library.*.
 
 ```sh
 # Pick whatever variant and version of the JDK you like here. We only need to get the Kotlin & Java standard library files.
-$ sudo apt install kotlin openjdk-21-jdk 
+$ sudo apt install zlib1g-dev kotlin openjdk-21-jdk 
 $ make
 $ JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64/ ./main_release -c /usr/share/java/kotlin-stdlib.jar demo.kt  
 $ java DemoKt
@@ -37,3 +53,5 @@ Hello, world!
 2
 255
 ```
+
+See `demo.kt` to see what language constructs are supported at the moment.

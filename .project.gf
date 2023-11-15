@@ -1,4 +1,4 @@
 [executable]
-path=./main_debug
-arguments=-c /usr/share/kotlin/lib/kotlin-stdlib.jar demo.kt
+path=./micro-kotlin
+arguments=  -c /usr/share/java/kotlin-stdlib.jar foo.kt
 ask_directory=1

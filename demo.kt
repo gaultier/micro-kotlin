@@ -23,6 +23,7 @@ fun main() {
   print_arguments(1, 2)
   println(plus(127L, 128L))
 
+  println(fibonacci_10())
 }
 
 fun print_arguments(a: Int, b: Int){
