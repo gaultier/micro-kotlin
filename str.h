@@ -38,7 +38,6 @@ static str_view_t str_view_advance(str_view_t s, u64 n) {
 
 static u8 str_view_first(str_view_t s) { return s.len > 0 ? s.data[0] : 0; }
 
-
 static bool str_view_ends_with(str_view_t haystack, str_view_t needle) {
   if (needle.len > haystack.len)
     return false;
@@ -118,9 +117,9 @@ static str_view_split_result_t str_view_rsplit(str_view_t haystack, u8 needle) {
 }
 
 static u64 str_builder_space(str_builder_t sb) {
-  pg_assert(sb.len <= sb.cap);
+  pg_assert(sb.len < sb.cap);
 
-  return sb.cap - sb.len;
+  return sb.cap - sb.len-1;
 }
 
 static str_builder_t str_builder_reserve_at_least(str_builder_t sb, u64 more,
