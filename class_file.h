@@ -1165,69 +1165,62 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
   switch (remaining.data[0]) {
   case 'V': {
     type->kind = TYPE_UNIT;
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'S': {
     type->kind = TYPE_SHORT;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'B': {
     type->kind = TYPE_BYTE;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'C': {
     type->kind = TYPE_CHAR;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'D': {
     type->kind = TYPE_DOUBLE;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'F': {
     type->kind = TYPE_FLOAT;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'I': {
     type->kind = TYPE_INT;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'J': {
     type->kind = TYPE_LONG;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'Z': {
     type->kind = TYPE_BOOLEAN;
 
-    string_drop_first_n(&remaining, 1);
-    return remaining;
+    return str_view_advance(remaining, 1);
   }
 
   case 'L': {
-    string_drop_first_n(&remaining, 1);
-    str_view_t fqn = string_clone_until_excl(remaining, ';', arena);
+    remaining = str_view_advance(remaining, 1);
+    str_view_split_result_t semicolon_split = str_view_split(remaining, ';',arena);
+    pg_assert(fqn.found);
+    str_view_t fqn = semicolon_split.left;
 
     string_drop_until_incl(&remaining, ';');
     if (str_view_eq_c(type->this_class_name, "java/lang/String")) {
@@ -6269,7 +6262,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
       cf_buf_read_class_file(str_view_new(buf, read_bytes), &current,
                              &class_file, arena);
 
-      pg_assert(string_eq(fqn, class_file.class_name));
+      pg_assert(str_view_eq(fqn, class_file.class_name));
 
       ty_type_t this_type = {.kind = TYPE_INSTANCE};
       type_init_package_and_name(class_file.class_name, &this_type.package_name,
@@ -6360,10 +6353,10 @@ static void resolver_load_standard_types(resolver_t *resolver,
     pg_array_append(resolver->types, known_types[i], arena);
 
   str_view_t relative_jmod_path = str_view_from_c("/jmods/java.base.jmod");
-  str_builder_t path = str_builder_new(java_home.len + relative_jmod_path.len, arena);
+  str_builder_t path =
+      str_builder_new(java_home.len + relative_jmod_path.len, arena);
   path = str_builder_append(path, java_home, arena);
   path = str_builder_append(path, relative_jmod_path, arena);
-
 
   cf_read_jmod_file(resolver, path, scratch_arena, arena);
 
@@ -6563,25 +6556,25 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
               resolver, name, call_site_argument_types_i, &picked_method_type_i,
               &candidate_functions_i, &tmp_arena, arena)) {
 
-        str_view_t error = string_reserve(256, arena);
-        string_append_cstring(&error, "failed to find matching function",
-                              arena);
+        str_builder_t error = str_builder_new(256, arena);
+        error = str_builder_append_c(error, "failed to find matching function",
+                                     arena);
 
         if (pg_array_len(candidate_functions_i) == 0) {
-          string_append_cstring(
-              &error, ", could not find any function with this name: ", arena);
-          string_append_string(&error, name, arena);
+          error = str_builder_append_c(
+              error, ", could not find any function with this name: ", arena);
+          error = str_builder_append(error, name, arena);
         } else {
-          string_append_cstring(&error, ", possible candidates: ", arena);
+          error = str_builder_append_c(error, ", possible candidates: ", arena);
 
           for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
             const u32 candidate_type_i = candidate_functions_i[i];
 
-            string_append_cstring(&error, "\n  ", arena);
-            string_append_string(&error,
-                                 resolver_function_to_human_string(
-                                     resolver, candidate_type_i, arena),
-                                 arena);
+            error = str_builder_append_c(error, "\n  ", arena);
+            error = str_builder_append(error,
+                                       resolver_function_to_human_string(
+                                           resolver, candidate_type_i, arena),
+                                       arena);
           }
         }
         par_error(resolver->parser, token, error.value);
@@ -6636,13 +6629,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (type->kind != TYPE_BOOLEAN) {
-        str_view_t error = string_reserve(256, arena);
-        string_append_cstring(&error, "incompatible types: got ", arena);
-        string_append_string(
-            &error,
+        str_view_t error = str_builder_new(256, arena);
+        error = str_builder_append_c(error, "incompatible types: got ", arena);
+        error = str_builder_append(
+            error,
             ty_type_to_human_string(resolver->types, node->type_i, arena),
             arena);
-        string_append_cstring(&error, ", expected Boolean ", arena);
+        error = str_builder_append_c(error, ", expected Boolean ", arena);
         par_error(resolver->parser, token, error.value);
         return 0;
       }
@@ -6666,15 +6659,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ", arena);
-      string_append_string(
-          &error, ty_type_to_human_string(resolver->types, lhs_i, arena),
-          arena);
-      string_append_cstring(&error, " vs ", arena);
-      string_append_string(
-          &error, ty_type_to_human_string(resolver->types, rhs_i, arena),
-          arena);
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append_c(error, "incompatible types: ", arena);
+      error = str_builder_append(
+          error, ty_type_to_human_string(resolver->types, lhs_i, arena), arena);
+      error = str_builder_append_c(error, " vs ", arena);
+      error = str_builder_append(
+          error, ty_type_to_human_string(resolver->types, rhs_i, arena), arena);
       par_error(resolver->parser, token, error.value);
     }
 
@@ -6691,11 +6682,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (lhs_type->kind != TYPE_BOOLEAN) {
-        str_view_t error = string_reserve(256, arena);
-        string_append_cstring(
+        str_builder_t error = str_builder_new(256, arena);
+        error = str_builder_append_c(
             &error, "incompatible types: expected Boolean, got: ", arena);
-        string_append_string(
-            &error, ty_type_to_human_string(resolver->types, lhs_i, arena),
+        error = str_builder_append(
+            error, ty_type_to_human_string(resolver->types, lhs_i, arena),
             arena);
         par_error(resolver->parser, token, error.value);
       }
@@ -6759,12 +6750,12 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       str_view_t rhs_type_human =
           ty_type_to_human_string(resolver->types, rhs_type_i, arena);
 
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: declared type is ",
-                            arena);
-      string_append_string(&error, lhs_type_human, arena);
-      string_append_cstring(&error, ", received type is ", arena);
-      string_append_string(&error, rhs_type_human, arena);
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append(error, "incompatible types: declared type is ",
+                                 arena);
+      error = str_builder_append(error, lhs_type_human, arena);
+      error = str_builder_append_c(error, ", received type is ", arena);
+      error = str_builder_append(error, rhs_type_human, arena);
       par_error(resolver->parser, token, error.value);
 
       // Still assign a type to be able to proceed to catch as many errors
@@ -6791,13 +6782,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(
-          &error, "incompatible types, expected Boolean, got: ", arena);
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append_c(
+          error, "incompatible types, expected Boolean, got: ", arena);
 
       str_view_t type_inferred_string =
           ty_type_to_human_string(resolver->types, type_condition_i, arena);
-      string_append_string(&error, type_inferred_string, arena);
+      error = str_builder_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, error.value);
     }
 
@@ -6815,13 +6806,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(&error,
-                            "incompatible types, expect Boolean, got: ", arena);
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append_c(
+          error, "incompatible types, expect Boolean, got: ", arena);
 
       str_view_t type_inferred_string =
           ty_type_to_human_string(resolver->types, type_condition_i, arena);
-      string_append_string(&error, type_inferred_string, arena);
+      error = str_builder_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, error.value);
     }
 
@@ -6860,12 +6851,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       } else {
         const lex_token_t main_token =
             resolver->parser->lexer->tokens[node->main_token_i];
-        str_view_t err = string_reserve(256, arena);
-        string_append_cstring(&err,
-                              "Unknown reference to a name, neither a variable "
-                              "in scope or an external identifier: ",
-                              arena);
-        string_append_string(&err, fqn, arena);
+        str_builder_t err = str_builder_new(256, arena);
+        error = str_builder_append_c(
+            err,
+            "Unknown reference to a name, neither a variable "
+            "in scope or an external identifier: ",
+            arena);
+        error = str_builder_append(err, fqn, arena);
         par_error(resolver->parser, main_token, err.value);
         return 0;
       }
@@ -6928,9 +6920,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       const bool found = resolver_resolve_fully_qualified_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
       if (!found) {
-        str_view_t error = string_reserve(256, arena);
-        string_append_cstring(&error, "unknown type: ", arena);
-        string_append_string(&error, type_literal_string, arena);
+        str_builder_t error = str_builder_new(256, arena);
+        error = str_builder_append_c(error, "unknown type: ", arena);
+        error = str_builder_append(error, type_literal_string, arena);
 
         par_error(resolver->parser, token, error.value);
         return 0;
@@ -6970,14 +6962,14 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     ty_end_scope(resolver);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible types: ", arena);
-      string_append_string(
-          &error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append_c(error, "incompatible types: ", arena);
+      error = str_builder_append(
+          error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
           arena);
-      string_append_cstring(&error, " vs ", arena);
-      string_append_string(
-          &error, ty_type_to_human_string(resolver->types, rhs_type_i, arena),
+      error = str_builder_append_c(error, " vs ", arena);
+      error = str_builder_append(
+          error, ty_type_to_human_string(resolver->types, rhs_type_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -7013,29 +7005,28 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
                                   &resolver->types[return_type_i])) {
-      str_view_t error = string_reserve(256, arena);
-      string_append_cstring(&error, "incompatible return type in function `",
-                            arena);
-      string_append_string(
-          &error,
+      str_builder_t error = str_builder_new(256, arena);
+      error = str_builder_append_c(
+          error, "incompatible return type in function `", arena);
+      error = str_builder_append(
+          error,
           par_token_to_str_view(resolver->parser,
                                 current_function->main_token_i),
           arena);
-      string_append_cstring(&error, "` of type ", arena);
-      string_append_string(&error,
-                           ty_type_to_human_string(resolver->types,
-                                                   current_function->type_i,
-                                                   arena),
-                           arena);
-      string_append_cstring(&error, ": got ", arena);
+      error = str_builder_append_c(error, "` of type ", arena);
+      error = str_builder_append(
+          error,
+          ty_type_to_human_string(resolver->types, current_function->type_i,
+                                  arena),
+          arena);
+      error = str_builder_append_c(error, ": got ", arena);
 
-      string_append_string(
+      error = str_builder_append(
           &error, ty_type_to_human_string(resolver->types, node->type_i, arena),
           arena);
-      string_append_cstring(&error, ", expected ", arena);
-      string_append_string(
-          &error,
-          ty_type_to_human_string(resolver->types, return_type_i, arena),
+      error = str_builder_append_c(error, ", expected ", arena);
+      error = str_builder_append(
+          error, ty_type_to_human_string(resolver->types, return_type_i, arena),
           arena);
       par_error(resolver->parser, token, error.value);
     }
@@ -8663,7 +8654,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       const u16 name_i =
           cf_constant_array_push(&class_file->constant_pool, &name, arena);
 
-      str_view_t descriptor_s = string_reserve(256, arena);
+      str_builder_t descriptor_s = str_builder_new(256, arena);
       cf_fill_descriptor_string(gen->resolver->types, node->type_i,
                                 &descriptor_s, arena);
       const cf_constant_t descriptor = {.kind = CONSTANT_POOL_KIND_UTF8,
@@ -8711,7 +8702,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name, arena);
 
-    str_view_t descriptor = string_reserve(64, arena);
+    str_builder_t descriptor = str_builder_new(64, arena);
     cf_fill_descriptor_string(gen->resolver->types, node->type_i, &descriptor,
                               arena);
     const u16 descriptor_i =
