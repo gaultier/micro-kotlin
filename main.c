@@ -98,26 +98,25 @@ int main(int argc, char *argv[]) {
 
   {
     // TODO: when parsing multiple files, need to allocate that.
-    const string_t source_file_name = {
-        .value = argv[optind],
-        .len = strlen(argv[optind]),
-    };
-    if (!string_ends_with_cstring(source_file_name, ".kt")) {
+    str_view_t source_file_name = str_view_from_c(argv[optind]);
+    if (!str_view_ends_with(source_file_name, str_view_from_c(".kt"))) {
       fprintf(stderr, "Expected an input file ending with .kt\n");
       exit(EINVAL);
     }
 
-    const int fd = open(source_file_name.value, O_RDONLY);
+    char *source_file_name_cstr =
+        str_view_to_c(source_file_name, &scratch_arena);
+    const int fd = open(source_file_name_cstr, O_RDONLY);
     if (fd == -1) {
-      fprintf(stderr, "Failed to open the file %.*s: %s\n",
-              source_file_name.len, source_file_name.value, strerror(errno));
+      fprintf(stderr, "Failed to open the file %s: %s\n", source_file_name_cstr,
+              strerror(errno));
       return errno;
     }
 
     struct stat st = {0};
-    if (stat(source_file_name.value, &st) == -1) {
-      fprintf(stderr, "Failed to get the file size %.*s: %s\n",
-              source_file_name.len, source_file_name.value, strerror(errno));
+    if (stat(source_file_name_cstr, &st) == -1) {
+      fprintf(stderr, "Failed to get the file size %s: %s\n",
+              source_file_name_cstr, strerror(errno));
       return errno;
     }
     if (st.st_size == 0) {
@@ -125,17 +124,16 @@ int main(int argc, char *argv[]) {
     }
     if (st.st_size > UINT16_MAX) {
       fprintf(stderr,
-              "The file %.*s is too big (limit is %u, got: %ld), stopping.\n",
-              source_file_name.len, source_file_name.value, UINT16_MAX,
-              st.st_size);
+              "The file %s is too big (limit is %u, got: %ld), stopping.\n",
+              source_file_name_cstr, UINT16_MAX, st.st_size);
       return E2BIG;
     }
 
     string_t source = {0};
     int res = ut_read_all_from_fd(fd, st.st_size, &source, &arena);
     if (res != -1) {
-      fprintf(stderr, "Failed to read the full file %.*s: %s\n",
-              source_file_name.len, source_file_name.value, strerror(res));
+      fprintf(stderr, "Failed to read the full file %s: %s\n",
+              source_file_name_cstr, strerror(res));
       return res;
     }
     close(fd);
@@ -203,7 +201,7 @@ int main(int argc, char *argv[]) {
     FILE *file = fopen(class_file.class_file_path.value, "w");
     if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
-              source_file_name.len, source_file_name.value, strerror(errno));
+              (int)source_file_name.len, (char*)source_file_name.data, strerror(errno));
       return errno;
     }
     cf_write(&class_file, file);
@@ -221,14 +219,15 @@ int main(int argc, char *argv[]) {
       int fd = open(class_file.class_file_path.value, O_RDONLY);
       if (fd == -1) {
         fprintf(stderr, "Failed to open the file %.*s: %s\n",
-                source_file_name.len, source_file_name.value, strerror(errno));
+                (int)source_file_name.len, (char *)source_file_name.data,
+                strerror(errno));
         return errno;
       }
 
       struct stat st = {0};
       if (stat(class_file.class_file_path.value, &st) == -1) {
         fprintf(stderr, "Failed to get the file size %.*s: %s\n",
-                source_file_name.len, source_file_name.value, strerror(errno));
+                (int)source_file_name.len, (char*)source_file_name.data, strerror(errno));
         return errno;
       }
       pg_assert(st.st_size > 0);

@@ -794,7 +794,7 @@ typedef struct {
 } lex_token_t;
 
 typedef struct {
-  string_t file_path;
+  str_view_t file_path;
   lex_token_t *tokens;
   u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
 } lex_lexer_t;
@@ -3470,16 +3470,18 @@ static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
-static string_t cf_make_class_file_path_kt(string_t source_file_name,
+static string_t cf_make_class_file_path_kt(str_view_t source_file_name,
                                            arena_t *arena) {
-  pg_assert(source_file_name.value != NULL);
+  pg_assert(!str_view_is_empty(source_file_name));
   pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
 
-  pg_assert(string_ends_with_cstring(source_file_name, ".kt"));
+  pg_assert(str_view_ends_with(source_file_name, str_view_from_c(".kt")));
 
   string_t result = string_reserve(source_file_name.len + 8, arena);
-  string_append_string(&result, source_file_name, arena);
+  string_t source_file_name_string_fixme = (string_t){
+      .value = (char *)source_file_name.data, .len = source_file_name.len};
+  string_append_string(&result, source_file_name_string_fixme, arena);
   string_t last_path_component = string_find_last_path_component(result);
   string_capitalize_first(&last_path_component);
 
@@ -4388,8 +4390,9 @@ static void par_error(parser_t *parser, lex_token_t token, const char *error) {
     par_find_token_position(parser, token, &line, &column, &token_string);
 
     fprintf(stderr, "%.*s:%u:%u: around `%.*s`, %s\n",
-            parser->lexer->file_path.len, parser->lexer->file_path.value, line,
-            column, token_string.len, token_string.value, error);
+            (int)parser->lexer->file_path.len,
+            (char *)parser->lexer->file_path.data, line, column,
+            token_string.len, token_string.value, error);
 
     parser->state = PARSER_STATE_ERROR;
     break;
@@ -6444,8 +6447,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     LOG("[%ld] %s %.*s : %.*s (%s) (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
-        resolver->parser->lexer->file_path.len,
-        resolver->parser->lexer->file_path.value, line, column,
+        (int)resolver->parser->lexer->file_path.len,
+        (char *)resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     break;
 
@@ -6453,8 +6456,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
-        resolver->parser->lexer->file_path.len,
-        resolver->parser->lexer->file_path.value, line, column,
+        (int)resolver->parser->lexer->file_path.len,
+        (char *)resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -6468,8 +6471,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
-        resolver->parser->lexer->file_path.len,
-        resolver->parser->lexer->file_path.value, line, column,
+        (int)resolver->parser->lexer->file_path.len,
+        (char *)resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -6481,8 +6484,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
-        resolver->parser->lexer->file_path.len,
-        resolver->parser->lexer->file_path.value, line, column,
+        (int)resolver->parser->lexer->file_path.len,
+        (char *)resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     resolver_ast_fprint_node(resolver, node->lhs, file, indent + 2, arena);
     resolver_ast_fprint_node(resolver, node->rhs, file, indent + 2, arena);
@@ -6664,7 +6667,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
       continue;
 
     char *file_path = str_view_to_c(class_path_entry, scratch_arena);
-        LOG("class_path_entry=%s", file_path);
+    LOG("class_path_entry=%s", file_path);
     const u64 previous_len = pg_array_len(resolver->types);
     cf_read_jar_file(resolver, file_path, scratch_arena, arena);
 
@@ -7455,7 +7458,10 @@ static void resolver_collect_user_defined_function_signatures(
         .v = {.method =
                   {
                       .return_type_i = return_type_i,
-                      .source_file_name = resolver->parser->lexer->file_path,
+                      .source_file_name =
+                          (string_t){
+                              .value = (char*)resolver->parser->lexer->file_path.data,
+                              .len = resolver->parser->lexer->file_path.len},
                       .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   }},
     };
