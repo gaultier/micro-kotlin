@@ -576,7 +576,7 @@ static void type_init_package_and_name(str_view_t fully_qualified_jvm_name,
 
   *package_name =
       string_clone_n(fully_qualified_jvm_name,
-                     last_sep - fully_qualified_jvm_name.value, arena);
+                     last_sep - fully_qualified_jvm_name.data, arena);
   pg_assert(!str_view_is_empty(*package_name));
   pg_assert(string_last(*package_name) != sep);
 
@@ -1199,9 +1199,8 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
 
   case 'L': {
     remaining = str_view_advance(remaining, 1);
-    str_view_split_result_t semicolon_split =
-        str_view_split(remaining, ';', arena);
-    pg_assert(fqn.found);
+    str_view_split_result_t semicolon_split = str_view_split(remaining, ';');
+    pg_assert(semicolon_split.found);
     str_view_t fqn = semicolon_split.left;
 
     if (str_view_eq_c(type->this_class_name, "java/lang/String")) {
@@ -1220,7 +1219,7 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     ty_type_t item_type = {0};
 
     str_view_t descriptor_remaining = {
-        .value = remaining.data + 1,
+        .data = remaining.data + 1,
         .len = remaining.len - 1,
     };
     remaining =
@@ -5516,7 +5515,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
 
         LOG("Loaded class_file_path=%.*s  archive_file_path=%.*s "
             "kind=uncompressed package_name=%.*s class_name=%.*s",
-            class_file.class_file_path.len, class_file.class_file_path.data,
+            (int)class_file.class_file_path.len,
+            class_file.class_file_path.data,
             (int)class_file.archive_file_path.len,
             class_file.archive_file_path.data, (int)type.package_name.len,
             type.package_name.data, (int)type.this_class_name.len,
@@ -5636,7 +5636,6 @@ static bool cf_read_jmod_file(resolver_t *resolver, str_view_t path,
 static bool cf_read_jar_file(resolver_t *resolver, str_view_t path,
                              arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(path != NULL);
   pg_assert(arena != NULL);
 
   char *path_c = str_view_to_c(path, &scratch_arena);
@@ -5877,7 +5876,7 @@ static u32 resolver_select_most_specific_candidate_function(
               resolver, b_type_i, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", (int)a_human_type.len,
-              a_human_type.data, b_human_type.len, b_human_type.data, a_b, b_a);
+              a_human_type.data,(int) b_human_type.len, b_human_type.data, a_b, b_a);
 
           if (a_more_applicable_than_b && !b_more_applicable_than_a) {
             LOG("[D002] removing %.*s", (int)b_human_type.len,
