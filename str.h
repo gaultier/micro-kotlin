@@ -1,10 +1,23 @@
 #pragma once
 
+#include <bits/stdint-uintn.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "arena.h"
+
+static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
+  pg_assert(s != NULL);
+  pg_assert(n > 0);
+
+  u8 *res = s + n - 1;
+  while (res-- != s) {
+    if (*res == c)
+      return res;
+  }
+  return NULL;
+}
 
 static u64 ut_next_power_of_two(u64 n) {
   n += !n;
@@ -77,15 +90,6 @@ static bool str_view_contains_element(str_view_t haystack, u8 needle) {
   return false;
 }
 
-static str_view_t str_view_find_last_char(str_view_t haystack, char needle) {
-  for (int64_t i = haystack.len - 1; i >= 0; i++) {
-    if (haystack.data[i] == needle)
-      return (str_view_t){.data = &haystack.data[i], .len = haystack.len - 1};
-  }
-
-  return (str_view_t){0};
-}
-
 typedef struct {
   str_view_t left, right;
   u64 found_pos;
@@ -93,9 +97,24 @@ typedef struct {
   pg_pad(7);
 } str_view_split_result_t;
 
-static str_view_split_result_t str_view_split(str_view_t haystack,
-                                              char needle) {
-  uint8_t *at = (uint8_t *)memchr(haystack.data, needle, haystack.len);
+static str_view_split_result_t str_view_split(str_view_t haystack, u8 needle) {
+  uint8_t *at = memchr(haystack.data, needle, haystack.len);
+  if (at == NULL)
+    return (str_view_split_result_t){.left = haystack};
+
+  uint64_t found_pos = at - haystack.data;
+
+  return (str_view_split_result_t){
+      .left = (str_view_t){.data = haystack.data, .len = found_pos},
+      .right =
+          (str_view_t){.data = at + 1, .len = haystack.len - found_pos - 1},
+      .found_pos = found_pos,
+      .found = true,
+  };
+}
+
+static str_view_split_result_t str_view_rsplit(str_view_t haystack, u8 needle) {
+  uint8_t *at = ut_memrchr(haystack.data, needle, haystack.len);
   if (at == NULL)
     return (str_view_split_result_t){.left = haystack};
 
@@ -129,12 +148,12 @@ static str_builder_t str_builder_reserve_at_least(str_builder_t sb, u64 more,
   return (str_builder_t){.len = sb.len, .cap = new_cap, .data = new_data};
 }
 
-static u8 *str_builder_end(str_builder_t sb) { return sb.data + sb.len; }
+static u8 *str_builder_end_c(str_builder_t sb) { return sb.data + sb.len; }
 
 static str_builder_t str_builder_append(str_builder_t sb, str_view_t more,
                                         arena_t *arena) {
   sb = str_builder_reserve_at_least(sb, more.len + 1, arena);
-  memcpy(str_builder_end(sb), more.data, more.len);
+  memcpy(str_builder_end_c(sb), more.data, more.len);
   sb.data[sb.len + more.len + 1] = 0;
   return (str_builder_t){
       .len = sb.len + more.len + 1, .data = sb.data, .cap = sb.cap};
@@ -152,8 +171,9 @@ static str_builder_t str_builder_append_element(str_builder_t sb, u8 c,
 
 static str_builder_t str_builder_new(u64 initial_cap, arena_t *arena) {
   return (str_builder_t){
-      .data = arena_alloc(arena, initial_cap, 1, ALLOCATION_STRING),
-      .cap = initial_cap};
+      .data = arena_alloc(arena, initial_cap + 1, 1, ALLOCATION_STRING),
+      .cap = initial_cap + 1,
+  };
 }
 
 static str_builder_t str_builder_assume_appended_n(str_builder_t sb, u64 more) {
@@ -171,8 +191,26 @@ static str_builder_t str_builder_append_u64(str_builder_t sb, u64 n,
   return str_builder_append_c(sb, tmp, arena);
 }
 
-static str_builder_t str_builder_capitalize_first(str_builder_t sb){
-  pg_assert(sb.len>0);
-  sb.data[0] += 'a'-'A';
+static str_builder_t str_builder_capitalize_at(str_builder_t sb, u64 pos) {
+  pg_assert(pos < sb.len);
+
+  sb.data[pos] += 'a' - 'A';
+
+  return sb;
+}
+
+static str_builder_t str_builder_clone(str_view_t src, arena_t *arena) {
+  str_builder_t res = str_builder_new(src.len, arena);
+  memcpy(res.data, src.data, src.len);
+  res.len = src.len;
+  return res;
+}
+
+static str_builder_t str_builder_replace_element_starting_at(str_builder_t sb,u64 start, u8 from,
+                                                 u8 to) {
+  for (u64 i = start; i < sb.len; i++) {
+    if (sb.data[i] == from)
+      sb.data[i] = to;
+  }
   return sb;
 }

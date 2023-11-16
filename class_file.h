@@ -105,18 +105,6 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
-static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
-  pg_assert(s != NULL);
-  pg_assert(n > 0);
-
-  u8 *res = s + n - 1;
-  while (res-- != s) {
-    if (*res == c)
-      return res;
-  }
-  return NULL;
-}
-
 static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
@@ -142,7 +130,8 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder_t sb) {
   while (str_builder_space(sb) > 0) {
     pg_assert(sb.len <= sb.cap);
 
-    const i64 read_bytes = read(fd, str_builder_end(sb), str_builder_space(sb));
+    const i64 read_bytes =
+        read(fd, str_builder_end_c(sb), str_builder_space(sb));
     if (read_bytes == -1)
       return (ut_read_result_t){.error = errno};
     if (read_bytes == 0)
@@ -3138,25 +3127,34 @@ static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 }
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
+// Transform: `/a/b/foo.kt` to `/a/b/FooKt.class`
 static str_view_t cf_make_class_file_path_kt(str_view_t source_file_name,
                                              arena_t *arena) {
   pg_assert(!str_view_is_empty(source_file_name));
   pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
 
-  pg_assert(str_view_ends_with(source_file_name, str_view_from_c(".kt")));
+  str_view_split_result_t file_extension_split =
+      str_view_rsplit(source_file_name, '.');
+  pg_assert(file_extension_split.found);
+  pg_assert(str_view_eq_c(file_extension_split.right, "kt");
 
-  str_view_t result = string_reserve(source_file_name.len + 8, arena);
-  str_view_t source_file_name_string_fixme =
-      (string_t){.value = source_file_name.data, .len = source_file_name.len};
-  string_append_string(&result, source_file_name_string_fixme, arena);
-  str_view_t last_path_component = string_find_last_path_component(result);
-  string_capitalize_first(&last_path_component);
+  str_view_t suffix = str_view_from_c("Kt.class");
+  str_builder_t res = str_builder_new(file_extension_split.left.len  + suffix.len, arena);
+  res = str_builder_append(res, file_extension_split.left);
 
-  string_drop_after_last_incl(&result, '.');
-  string_append_cstring(&result, "Kt.class", arena);
+  // Capitalize
+  {
+    str_view_split_result_t last_path_component_split =
+        str_view_rsplit(source_file_name, '/');
+    pg_assert(last_path_component_split.found);
 
-  return result;
+    res = str_builder_capitalize_at(res, last_path_component_split.found_pos);
+  }
+
+  res = str_builder_append_c(res, suffix, arena);
+
+  return str_builder_build(res);
 }
 
 __attribute__((unused)) static str_view_t
@@ -3823,8 +3821,10 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   pg_assert(token_string != NULL);
   pg_assert(pg_array_len(parser->lexer->line_table) > 1);
 
-  token_string->value = &parser->buf.data[token.source_offset];
-  token_string->len = lex_find_token_length(parser->lexer, parser->buf, token);
+  *token_string = (str_view_t){
+      .data = &parser->buf.data[token.source_offset],
+      .len = lex_find_token_length(parser->lexer, parser->buf, token),
+  };
 
   for (u32 i = 0; i < pg_array_len(parser->lexer->line_table) - 1; i++) {
     const u32 line_start_offset = parser->lexer->line_table[i];
@@ -3842,7 +3842,7 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   /* pg_assert(*column > 0); */
 }
 
-static u8 *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
+static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
@@ -3910,52 +3910,50 @@ static str_view_t ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_UNIT:
     return str_view_from_c("kotlin.Unit", arena);
   case TYPE_ARRAY: {
-    str_view_t result = string_reserve(type->this_class_name.len + 256, arena);
-    string_append_cstring(&result, "Array<", arena);
-    string_append_string(
-        &result, ty_type_to_human_string(types, type->v.array_type_i, arena),
+    str_builder_t res = str_builder_new(type->this_class_name.len + 256, arena);
+    res = str_builder_append_c(result, "Array<", arena);
+    res = str_builder_append(
+        res, ty_type_to_human_string(types, type->v.array_type_i, arena),
         arena);
-    string_append_char(&result, '>', arena);
+    res = str_builder_append_element(result, '>', arena);
     return result;
   }
   case TYPE_INSTANCE: {
-    return string_make(type->this_class_name, arena);
+    return type->this_class_name;
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
     const ty_type_method_t *const method_type = &type->v.method;
 
-    str_view_t res = string_reserve(128, arena);
-    string_append_cstring(&res, "(", arena);
+    str_builder_t res = str_builder_new(128, arena);
+    res = str_builder_append_c(res, "(", arena);
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
       const u32 argument_type_i = method_type->argument_types_i[i];
-      string_append_string(
-          &res, ty_type_to_human_string(types, argument_type_i, arena), arena);
+      res = str_build_append(
+          res, ty_type_to_human_string(types, argument_type_i, arena), arena);
 
       if (i < pg_array_len(method_type->argument_types_i) - 1)
-        string_append_cstring(&res, ", ", arena);
+        res = str_builder_append_c(&res, ", ", arena);
     }
-    string_append_cstring(&res, ") : ", arena);
-    string_append_string(
-        &res, ty_type_to_human_string(types, method_type->return_type_i, arena),
+    res = str_builder_append_c(res, ") : ", arena);
+    res = str_builder_append(
+        res, ty_type_to_human_string(types, method_type->return_type_i, arena),
         arena);
     return res;
   }
   case TYPE_INTEGER_LITERAL: {
     const u32 possible_types = type->v.integer_literal_types;
-    str_view_t res = string_reserve(128, arena);
-    string_append_cstring(&res, "Integer literal: ", arena);
+    str_builder_t res = str_builder_new(128, arena);
+    res = str_builder_append_c(res, "Integer literal: ", arena);
 
     if (possible_types & TYPE_BYTE)
-      string_append_cstring(&res, "kotlin.Byte | ", arena);
+      res = str_builder_append_c(res, "kotlin.Byte | ", arena);
     if (possible_types & TYPE_SHORT)
-      string_append_cstring(&res, "kotlin.Short | ", arena);
+      res = str_builder_append_c(res, "kotlin.Short | ", arena);
     if (possible_types & TYPE_INT)
-      string_append_cstring(&res, "kotlin.Int | ", arena);
+      res = str_builder_append_c(res, "kotlin.Int | ", arena);
     if (possible_types & TYPE_LONG)
-      string_append_cstring(&res, "kotlin.Long | ", arena);
-
-    string_drop_after_last_incl(&res, '|');
+      res = str_builder_append_c(res, "kotlin.Long | ", arena);
 
     return res;
   }
@@ -5553,7 +5551,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
-                 string_ends_with_cstring(file_name, ".class")) {
+                 str_view_eq_c(file_name, ".class")) {
         u8 *dst = arena_alloc(&scratch_arena,
                               uncompressed_size_according_to_directory_entry,
                               sizeof(u8), ALLOCATION_BLOB);
@@ -6223,26 +6221,29 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
     str_view_t class_path_entry = resolver->class_path_entries[i];
 
-    str_view_t tentative_class_file_path =
-        string_reserve(class_path_entry.len + 1 + fqn.len + 6, arena);
+    str_builder_t tentative_class_file_path =
+        str_builder_new(class_path_entry.len + 1 + fqn.len + 6, arena);
 
-    str_view_t class_path_entry_string_fixme =
-        (string_t){.value = class_path_entry.data, .len = class_path_entry.len};
-    string_append_string(&tentative_class_file_path,
-                         class_path_entry_string_fixme, arena);
-    string_append_char(&tentative_class_file_path, '/', arena);
+    tentative_class_file_path =
+        str_build_append(tentative_class_file_path, class_path_entry, arena);
+    tentative_class_file_path =
+        str_builder_append_element(tentative_class_file_path, '/', arena);
 
     {
-      arena_t tmp_arena = *arena;
-      str_view_t fqn_with_slashes = string_make(fqn, &tmp_arena);
+      u64 replace_start = tentative_class_file_path.len;
+
       // Transform e.g. `kotlin.io.ConsoleKt` into `kotlin/io/ConsoleKt`.
-      string_replace_char(&fqn_with_slashes, '.', '/');
-      string_append_string(&tentative_class_file_path, fqn_with_slashes, arena);
+      tentative_class_file_path =
+          str_builder_append(tentative_class_file_path, fqn, arena);
+
+      tentative_class_file_path = str_builder_replace_element_starting_at(
+          tentative_class_file_path, replace_start, '.', '/');
     }
 
-    string_append_cstring(&tentative_class_file_path, ".class", arena);
+    tentative_class_path =
+        str_builder_append_c(tentative_class_file_path, ".class", arena);
 
-    if (string_ends_with_cstring(tentative_class_file_path, ".class")) {
+    {
       const int fd = open((char *)tentative_class_file_path.value, O_RDONLY);
       if (fd == -1)
         continue;
@@ -6358,16 +6359,13 @@ static void resolver_load_standard_types(resolver_t *resolver,
   for (u64 i = 0; i < sizeof(known_types) / sizeof(known_types[0]); i++)
     pg_array_append(resolver->types, known_types[i], arena);
 
-  str_view_t java_base_jmod_file_path =
-      string_reserve(PATH_MAX, &scratch_arena);
-  str_view_t java_home_string_fixme =
-      (string_t){.value = java_home.data, .len = java_home.len};
-  string_append_string(&java_base_jmod_file_path, java_home_string_fixme,
-                       arena);
-  string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
-                        arena);
+  str_view_t relative_jmod_path = str_view_from_c("/jmods/java.base.jmod");
+  str_builder_t path = str_builder_new(java_home.len + relative_jmod_path.len, arena);
+  path = str_builder_append(path, java_home, arena);
+  path = str_builder_append(path, relative_jmod_path, arena);
 
-  cf_read_jmod_file(resolver, java_base_jmod_file_path, scratch_arena, arena);
+
+  cf_read_jmod_file(resolver, path, scratch_arena, arena);
 
   u32 dummy = 0;
   str_view_t sanity_check = str_view_from_c("kotlin.io.ConsoleKt");
@@ -9260,7 +9258,7 @@ static str_view_t cg_make_class_name_from_path(str_view_t path,
   pg_assert(!str_view_is_empty(dot_split.left));
 
   str_builder_t res = str_builder_new(dot_split.left, arena);
-  res = str_builder_capitalize_first(res);
+  res = str_builder_capitalize_at(res);
   return str_builder_build(res);
 }
 
