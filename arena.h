@@ -41,7 +41,9 @@ typedef struct {
   u64 len;
 } str_view_t;
 
-str_view_t str_view_from_c(char *s);
+static str_view_t str_view_from_c(char *s) {
+  return (str_view_t){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
+}
 
 // ------------------- Logs
 

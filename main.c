@@ -1,6 +1,6 @@
+#include "arena.h"
 #include "class_file.h"
 #include "str.h"
-#include <bits/getopt_core.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,7 +158,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    const string_t class_file_path =
+    const str_view_t class_file_path =
         cf_make_class_file_path_kt(source_file_name, &arena);
 
     resolver_t resolver = {0};
@@ -166,7 +166,7 @@ int main(int argc, char *argv[]) {
                   &arena);
 
     resolver_load_standard_types(&resolver, java_home, scratch_arena, &arena);
-    LOG("After loading known types: arena=%lu", arena.base.len);
+    LOG("After loading known types: arena=%lu", arena.data.len);
 
     resolver_collect_user_defined_function_signatures(&resolver, &scratch_arena,
                                                       &arena);

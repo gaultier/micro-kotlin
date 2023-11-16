@@ -562,11 +562,12 @@ static void type_init_package_and_name(str_view_t fully_qualified_jvm_name,
                                        str_view_t *package_name,
                                        str_view_t *name, arena_t *arena) {
   const u8 sep = '/';
-  const u8 *const last_sep = ut_memrchr(fully_qualified_jvm_name.value, sep,
+  const u8 *const last_sep = ut_memrchr(fully_qualified_jvm_name.data, sep,
                                         fully_qualified_jvm_name.len);
   // No package component.
   if (last_sep == NULL) {
-    *name = string_make(fully_qualified_jvm_name, arena);
+    *name =
+        str_builder_build(str_builder_clone(fully_qualified_jvm_name, arena));
     return;
   }
 
@@ -576,15 +577,15 @@ static void type_init_package_and_name(str_view_t fully_qualified_jvm_name,
   *package_name =
       string_clone_n(fully_qualified_jvm_name,
                      last_sep - fully_qualified_jvm_name.value, arena);
-  pg_assert(!string_is_empty(*package_name));
+  pg_assert(!str_view_is_empty(*package_name));
   pg_assert(string_last(*package_name) != sep);
 
   string_replace_char(package_name, '/', '.');
 
   *name = string_clone_n_c(last_sep + 1, right_len, arena);
-  pg_assert(!string_is_empty(*name));
+  pg_assert(!str_view_is_empty(*name));
 
-  pg_assert(string_first(*name) != sep);
+  pg_assert(str_view_first(*name) != sep);
 }
 
 static const ty_type_t *resolver_eval_type(resolver_t *resolver,
@@ -1277,7 +1278,7 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] = ')');
-remaining=    str_view_advance(remaining, 1);
+    remaining = str_view_advance(remaining, 1);
 
     ty_type_t return_type = {0};
     remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
