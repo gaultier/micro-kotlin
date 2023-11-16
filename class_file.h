@@ -1,6 +1,5 @@
 #pragma once
 
-#include <bits/stdint-uintn.h>
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 500L
 #include <errno.h>
@@ -109,12 +108,6 @@ static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
-static bool mem_eq_c(const u8 *a, u32 a_len, const u8 *b) {
-  pg_assert(b != NULL);
-
-  const u64 b_len = strlen((char *)b);
-  return a_len == b_len && memcmp(a, b, a_len) == 0;
-}
 
 // ------------------- Utils, continued
 
@@ -561,31 +554,22 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
 static void type_init_package_and_name(str_view_t fully_qualified_jvm_name,
                                        str_view_t *package_name,
                                        str_view_t *name, arena_t *arena) {
-  const u8 sep = '/';
-  const u8 *const last_sep = ut_memrchr(fully_qualified_jvm_name.data, sep,
-                                        fully_qualified_jvm_name.len);
+  str_view_split_result_t slash_rplit_res =
+      str_view_rsplit(fully_qualified_jvm_name, '/');
+
   // No package component.
-  if (last_sep == NULL) {
+  if (!slash_rplit_res.found) {
     *name =
         str_builder_build(str_builder_clone(fully_qualified_jvm_name, arena));
     return;
   }
 
-  const u64 left_len = last_sep - fully_qualified_jvm_name.data;
-  const u64 right_len = fully_qualified_jvm_name.len - left_len - 1;
+  str_builder_t package_name_builder =
+      str_builder_clone(slash_rplit_res.left, arena);
+  str_builder_replace_element_starting_at(package_name_builder, 0, '/', '.');
+  *package_name = str_builder_build(package_name_builder);
 
-  *package_name =
-      string_clone_n(fully_qualified_jvm_name,
-                     last_sep - fully_qualified_jvm_name.data, arena);
-  pg_assert(!str_view_is_empty(*package_name));
-  pg_assert(string_last(*package_name) != sep);
-
-  string_replace_char(package_name, '/', '.');
-
-  *name = string_clone_n_c(last_sep + 1, right_len, arena);
-  pg_assert(!str_view_is_empty(*name));
-
-  pg_assert(str_view_first(*name) != sep);
+  *name = str_builder_build(str_builder_clone(slash_rplit_res.right, arena));
 }
 
 static const ty_type_t *resolver_eval_type(resolver_t *resolver,
@@ -5876,7 +5860,8 @@ static u32 resolver_select_most_specific_candidate_function(
               resolver, b_type_i, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", (int)a_human_type.len,
-              a_human_type.data,(int) b_human_type.len, b_human_type.data, a_b, b_a);
+              a_human_type.data, (int)b_human_type.len, b_human_type.data, a_b,
+              b_a);
 
           if (a_more_applicable_than_b && !b_more_applicable_than_a) {
             LOG("[D002] removing %.*s", (int)b_human_type.len,

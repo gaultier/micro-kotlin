@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(lexer.tokens, source.len, &arena);
     pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
-    const u8 *current = source.data;
+    u8 *current = source.data;
     lex_lex(&lexer, source, &current, &arena);
 
     // Parse.
@@ -168,10 +168,9 @@ int main(int argc, char *argv[]) {
     resolver_load_standard_types(&resolver, java_home, scratch_arena, &arena);
     LOG("After loading known types: arena=%lu", arena.data.len);
 
-    resolver_collect_user_defined_function_signatures(&resolver, &scratch_arena,
+    resolver_collect_user_defined_function_signatures(&resolver, scratch_arena,
                                                       &arena);
-    resolver_resolve_node(&resolver, root_i, &scratch_arena, &arena);
-    arena_clear(&scratch_arena);
+    resolver_resolve_node(&resolver, root_i, scratch_arena, &arena);
 
     // Debug types.
     {
@@ -196,7 +195,9 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
-    FILE *file = fopen(class_file.class_file_path.value, "w");
+    char *class_file_path_c_str =
+        str_view_to_c(class_file.class_file_path, &scratch_arena);
+    FILE *file = fopen(class_file_path_c_str, "w");
     if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
               (int)source_file_name.len, (char *)source_file_name.data,
@@ -215,7 +216,7 @@ int main(int argc, char *argv[]) {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
 
-      int fd = open(class_file.class_file_path.value, O_RDONLY);
+      int fd = open(class_file_path_c_str, O_RDONLY);
       if (fd == -1) {
         fprintf(stderr, "Failed to open the file %.*s: %s\n",
                 (int)source_file_name.len, (char *)source_file_name.data,
@@ -224,7 +225,7 @@ int main(int argc, char *argv[]) {
       }
 
       struct stat st = {0};
-      if (stat(class_file.class_file_path.value, &st) == -1) {
+      if (stat(class_file_path_c_str, &st) == -1) {
         fprintf(stderr, "Failed to get the file size %.*s: %s\n",
                 (int)source_file_name.len, (char *)source_file_name.data,
                 strerror(errno));
@@ -234,7 +235,7 @@ int main(int argc, char *argv[]) {
       pg_assert(st.st_size <= UINT32_MAX);
 
       const u32 buf_len = st.st_size;
-      char *const buf =
+      u8 *const buf =
           arena_alloc(&tmp_arena, buf_len, sizeof(u8), ALLOCATION_BLOB);
 
       pg_assert(read(fd, buf, buf_len) == buf_len);
@@ -242,12 +243,12 @@ int main(int argc, char *argv[]) {
 
       cf_class_file_t class_file_verify = {.class_file_path =
                                                class_file.class_file_path};
-      char *current = buf;
-      cf_buf_read_class_file(buf, buf_len, &current, &class_file_verify,
-                             &tmp_arena);
+      u8 *current = buf;
+      cf_buf_read_class_file(str_view_new(buf, buf_len), &current,
+                             &class_file_verify, &tmp_arena);
     }
   }
-  LOG("arena=%lu", arena.current_offset);
+  LOG("arena=%lu", arena.data.len);
   if (mem_debug)
-    arena_heap_dump(&arena);
+    arena_heap_dump(arena);
 }

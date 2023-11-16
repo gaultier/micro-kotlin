@@ -1,6 +1,7 @@
 #pragma once
 
-#include <bits/stdint-uintn.h>
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 500L
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -37,9 +38,6 @@ static str_view_t str_view_advance(str_view_t s, u64 n) {
 
 static u8 str_view_first(str_view_t s) { return s.len > 0 ? s.data[0] : 0; }
 
-static str_view_t str_view_from_builder(str_builder_t s) {
-  return (str_view_t){.data = s.data, .len = s.len};
-}
 
 static bool str_view_ends_with(str_view_t haystack, str_view_t needle) {
   if (needle.len > haystack.len)
@@ -72,16 +70,8 @@ static char *str_view_to_c(str_view_t s, arena_t *arena) {
   return c_str;
 }
 
-static bool str_view_contains(str_view_t haystack, str_view_t needle) {
-  for (int64_t i = 0; i < (int64_t)haystack.len - (int64_t)needle.len; i++) {
-    if (memcmp(&haystack.data[i], needle.data, needle.len) == 0)
-      return true;
-  }
-  return false;
-}
-
 static bool str_view_contains_element(str_view_t haystack, u8 needle) {
-  for (int64_t i = 0; i < (int64_t)haystack.len - (int64_t)needle.len; i++) {
+  for (int64_t i = 0; i < (int64_t)haystack.len - 1; i++) {
     if (haystack.data[i] == needle)
       return true;
   }
