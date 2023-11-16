@@ -136,9 +136,14 @@ static str_builder_t str_builder_append(str_builder_t sb, str_view_t more,
       .len = sb.len + more.len + 1, .data = sb.data, .cap = sb.cap};
 }
 
+static str_builder_t str_builder_append_c(str_builder_t sb, char *more,
+                                          arena_t *arena) {
+  return str_builder_append(sb, str_view_from_c(more), arena);
+}
+
 static str_builder_t str_builder_append_element(str_builder_t sb, u8 c,
                                                 arena_t *arena) {
-  return str_builder_append(sb, str_view_new(&c,1),arena);
+  return str_builder_append(sb, str_view_new(&c, 1), arena);
 }
 
 static str_builder_t str_builder_new(u64 initial_cap, arena_t *arena) {
@@ -153,4 +158,11 @@ static str_builder_t str_builder_assume_appended_n(str_builder_t sb, u64 more) {
 
 static str_view_t str_builder_build(str_builder_t sb) {
   return (str_view_t){.data = sb.data, .len = sb.len};
+}
+
+static str_builder_t str_builder_append_u64(str_builder_t sb, u64 n,
+                                            arena_t *arena) {
+  char tmp[25] = "";
+  snprintf(tmp, sizeof(tmp) - 1, "%lu", n);
+  return str_builder_append_c(sb, tmp, arena);
 }
