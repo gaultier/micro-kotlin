@@ -431,30 +431,28 @@ static void string_append_u64(string_t *s, u64 n, arena_t *arena) {
 
 // ------------------- Utils, continued
 
-static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
-                               arena_t *arena) {
+typedef struct {
+  str_view_t content;
+  int error;
+  pg_pad(4);
+} ut_read_result_t;
+
+static ut_read_result_t ut_read_all_from_fd(int fd, str_builder_t sb) {
   pg_assert(fd > 0);
-  pg_assert(result != NULL);
-  pg_assert(arena != NULL);
 
-  *result = string_reserve(announced_len, arena);
-  result->len = 0;
+  while (str_builder_space(sb) > 0) {
+    pg_assert(sb.len <= sb.cap);
 
-  u64 remaining = announced_len - result->len;
-  while (remaining > 0) {
-    pg_assert(result->len < result->cap);
-
-    const i64 read_bytes = read(fd, result->value + result->len, remaining);
+    const i64 read_bytes = read(fd, str_builder_end(sb), str_builder_space(sb));
     if (read_bytes == -1)
-      return errno;
+      return (ut_read_result_t){.error = errno};
     if (read_bytes == 0)
-      return EINVAL; // TODO: retry?
+      return (ut_read_result_t){.error = EINVAL}; // TODO: retry?
 
-    result->len += read_bytes;
-    pg_assert(result->len <= announced_len);
-    remaining = announced_len - result->len;
+    sb = str_builder_assume_appended_n(sb, read_bytes);
+    pg_assert(sb.len <= sb.cap);
   }
-  return -1;
+  return (ut_read_result_t){.content = str_builder_build(sb)};
 }
 
 str_view_t *class_path_string_to_class_path_entries(str_view_t class_path,
@@ -806,6 +804,7 @@ typedef struct {
 } resolver_super_class_to_resolve_t;
 
 typedef struct {
+  // FIXME: Use str_view_t
   char *buf;
   lex_lexer_t *lexer;
   string_t current_package;
@@ -1862,6 +1861,7 @@ static void buf_read_n_u8(char *buf, u64 size, u8 *dst, u64 dst_len,
   *current += dst_len;
 }
 
+// FIXME: str_view_t
 static u8 buf_read_u8(char *buf, u64 size, char **current) {
   pg_assert(buf != NULL);
   pg_assert(size > 0);
@@ -3804,6 +3804,7 @@ static void lex_number(lex_lexer_t *lexer, const char *buf, u32 buf_len,
   pg_array_append(lexer->tokens, token, arena);
 }
 
+// FIXME: use str_view_t
 static void lex_lex(lex_lexer_t *lexer, const char *buf, u32 buf_len,
                     const char **current, arena_t *arena) {
   pg_assert(lexer != NULL);
@@ -5712,7 +5713,7 @@ static void resolver_load_methods_from_class_file(
   }
 }
 
-static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
+static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
                                  char *path, arena_t *scratch_arena,
                                  arena_t *arena) {
   pg_assert(resolver != NULL);
@@ -5720,174 +5721,181 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, string_t content,
   pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
-  char *current = content.value;
+  char *current = (char *)content.data;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x50);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x4b);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x03);
-  pg_assert(buf_read_u8(content.value, content.len, &current) == 0x04);
+  pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 0x50);
+  pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 0x4b);
+  pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 0x03);
+  pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 0x04);
 
   const string_t archive_file_path = string_make_from_c(path, arena);
 
   // Assume first no trailing comment.
-  char *cdre = content.value + content.len - central_directory_end_size;
-  if (buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+  char *cdre = (char *)content.data + content.len - central_directory_end_size;
+  if (buf_read_le_u32((char *)content.data, content.len, &cdre) != 0x06054b50) {
     // Need to scan backwards in the presence of a trailing comment to find
     // the magic number.
     cdre -= sizeof(u32);
-    while (--cdre > content.value &&
-           buf_read_le_u32(content.value, content.len, &cdre) != 0x06054b50) {
+    while (--cdre > (char *)content.data &&
+           buf_read_le_u32((char *)content.data, content.len, &cdre) !=
+               0x06054b50) {
       cdre -= sizeof(u32);
     }
-    pg_assert(cdre > content.value);
+    pg_assert(cdre > (char *)content.data);
   }
 
   // disk number
-  const u16 disk_number = buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 disk_number =
+      buf_read_le_u16((char *)content.data, content.len, &cdre);
   pg_unused(disk_number);
 
   // disk start
-  const u16 disk_start = buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 disk_start =
+      buf_read_le_u16((char *)content.data, content.len, &cdre);
 
   // records count on this disk
   const u16 disk_records_count =
-      buf_read_le_u16(content.value, content.len, &cdre);
+      buf_read_le_u16((char *)content.data, content.len, &cdre);
   pg_unused(disk_records_count);
 
-  const u16 records_count = buf_read_le_u16(content.value, content.len, &cdre);
+  const u16 records_count =
+      buf_read_le_u16((char *)content.data, content.len, &cdre);
 
   const u32 central_directory_size =
-      buf_read_le_u32(content.value, content.len, &cdre);
+      buf_read_le_u32((char *)content.data, content.len, &cdre);
   pg_unused(central_directory_size);
 
   const u32 central_directory_offset =
-      buf_read_le_u32(content.value, content.len, &cdre);
+      buf_read_le_u32((char *)content.data, content.len, &cdre);
 
   pg_assert(central_directory_offset < content.len);
 
   // Sign of zip64.
   pg_assert(central_directory_offset != (u32)-1);
 
-  char *cdfh = content.value + central_directory_offset;
+  char *cdfh = (char *)content.data + central_directory_offset;
   for (u64 i = 0; i < records_count; i++) {
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x50);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x4b);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x01);
-    pg_assert(buf_read_u8(content.value, content.len, &cdfh) == 0x02);
+    pg_assert(buf_read_u8((char *)content.data, content.len, &cdfh) == 0x50);
+    pg_assert(buf_read_u8((char *)content.data, content.len, &cdfh) == 0x4b);
+    pg_assert(buf_read_u8((char *)content.data, content.len, &cdfh) == 0x01);
+    pg_assert(buf_read_u8((char *)content.data, content.len, &cdfh) == 0x02);
 
     // version made by
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // version needed to extract
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // general purpose bit flag
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     const u16 compression_method =
-        buf_read_le_u16(content.value, content.len, &cdfh);
+        buf_read_le_u16((char *)content.data, content.len, &cdfh);
     pg_assert(compression_method == 0 ||
               compression_method == 8); // No compression or DEFLATE.
 
     // file last modification time
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // file last modification date
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // crc-32 of uncompressed data
-    buf_read_le_u32(content.value, content.len, &cdfh);
+    buf_read_le_u32((char *)content.data, content.len, &cdfh);
 
     // compressed size
     const u32 compressed_size_according_to_directory_entry =
-        buf_read_le_u32(content.value, content.len, &cdfh);
+        buf_read_le_u32((char *)content.data, content.len, &cdfh);
 
     // uncompressed size
     const u32 uncompressed_size_according_to_directory_entry =
-        buf_read_le_u32(content.value, content.len, &cdfh);
+        buf_read_le_u32((char *)content.data, content.len, &cdfh);
 
     const u16 file_name_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
+        buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     const u16 extra_field_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
+        buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     const u16 file_comment_length =
-        buf_read_le_u16(content.value, content.len, &cdfh);
+        buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // disk number where file starts
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // internal file attributes
-    buf_read_le_u16(content.value, content.len, &cdfh);
+    buf_read_le_u16((char *)content.data, content.len, &cdfh);
 
     // external file attributes
-    buf_read_le_u32(content.value, content.len, &cdfh);
+    buf_read_le_u32((char *)content.data, content.len, &cdfh);
 
     const u32 local_file_header_offset =
-        buf_read_le_u32(content.value, content.len, &cdfh);
+        buf_read_le_u32((char *)content.data, content.len, &cdfh);
 
     // file name
-    buf_read_n_u8(content.value, content.len, NULL, file_name_length, &cdfh);
+    buf_read_n_u8((char *)content.data, content.len, NULL, file_name_length,
+                  &cdfh);
 
     // extra field
-    buf_read_n_u8(content.value, content.len, NULL, extra_field_length, &cdfh);
+    buf_read_n_u8((char *)content.data, content.len, NULL, extra_field_length,
+                  &cdfh);
 
     // file comment
-    buf_read_n_u8(content.value, content.len, NULL, file_comment_length, &cdfh);
+    buf_read_n_u8((char *)content.data, content.len, NULL, file_comment_length,
+                  &cdfh);
 
     // Read file header.
     {
       char *local_file_header =
-          content.value + disk_start + local_file_header_offset;
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x50);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x4b);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x03);
-      pg_assert(buf_read_u8(content.value, content.len, &local_file_header) ==
-                0x04);
+          (char *)content.data + disk_start + local_file_header_offset;
+      pg_assert(buf_read_u8((char *)content.data, content.len,
+                            &local_file_header) == 0x50);
+      pg_assert(buf_read_u8((char *)content.data, content.len,
+                            &local_file_header) == 0x4b);
+      pg_assert(buf_read_u8((char *)content.data, content.len,
+                            &local_file_header) == 0x03);
+      pg_assert(buf_read_u8((char *)content.data, content.len,
+                            &local_file_header) == 0x04);
 
       // version to extract
-      buf_read_le_u16(content.value, content.len, &local_file_header);
+      buf_read_le_u16((char *)content.data, content.len, &local_file_header);
 
       // general purpose bit flag
-      buf_read_le_u16(content.value, content.len, &local_file_header);
+      buf_read_le_u16((char *)content.data, content.len, &local_file_header);
 
-      const u16 compression_method =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
+      const u16 compression_method = buf_read_le_u16(
+          (char *)content.data, content.len, &local_file_header);
       pg_assert(compression_method == 0 ||
                 compression_method == 8); // No compression or DEFLATE.
 
       // file last modification time
-      buf_read_le_u16(content.value, content.len, &local_file_header);
+      buf_read_le_u16((char *)content.data, content.len, &local_file_header);
 
       // file last modification date
-      buf_read_le_u16(content.value, content.len, &local_file_header);
+      buf_read_le_u16((char *)content.data, content.len, &local_file_header);
 
       // crc-32 of uncompressed data
-      buf_read_le_u32(content.value, content.len, &local_file_header);
+      buf_read_le_u32((char *)content.data, content.len, &local_file_header);
 
       // compressed size
-      buf_read_le_u32(content.value, content.len, &local_file_header);
+      buf_read_le_u32((char *)content.data, content.len, &local_file_header);
 
       // uncompressed size
-      buf_read_le_u32(content.value, content.len, &local_file_header);
+      buf_read_le_u32((char *)content.data, content.len, &local_file_header);
 
-      const u16 file_name_length =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
+      const u16 file_name_length = buf_read_le_u16(
+          (char *)content.data, content.len, &local_file_header);
 
-      const u16 extra_field_length =
-          buf_read_le_u16(content.value, content.len, &local_file_header);
+      const u16 extra_field_length = buf_read_le_u16(
+          (char *)content.data, content.len, &local_file_header);
 
       const string_t file_name = {.value = local_file_header,
                                   .len = file_name_length};
-      buf_read_n_u8(content.value, content.len, NULL, file_name_length,
+      buf_read_n_u8((char *)content.data, content.len, NULL, file_name_length,
                     &local_file_header);
 
-      buf_read_n_u8(content.value, content.len, NULL, extra_field_length,
+      buf_read_n_u8((char *)content.data, content.len, NULL, extra_field_length,
                     &local_file_header);
 
       cf_class_file_t class_file = {
@@ -6018,26 +6026,26 @@ static bool cf_read_jmod_file(resolver_t *resolver, char *path,
     return false;
   }
 
-  string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
-  if (res != -1) {
+  ut_read_result_t read_res =
+      ut_read_all_from_fd(fd, str_builder_new(st.st_size, scratch_arena));
+  if (read_res.error) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
-            strerror(res));
+            strerror(read_res.error));
     return false;
   }
   close(fd);
 
+  str_view_t content = read_res.content;
   // Check magic number.
   {
-    char *current = content.value;
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 'J');
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 'M');
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 1);
-    pg_assert(buf_read_u8(content.value, content.len, &current) == 0);
+    char *current = (char *)content.data;
+    pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 'J');
+    pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 'M');
+    pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 1);
+    pg_assert(buf_read_u8((char *)content.data, content.len, &current) == 0);
   }
 
-  content.value += 4;
-  content.len -= 4;
+  content = str_view_advance(content, 4);
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
@@ -6065,16 +6073,17 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
     return false;
   }
 
-  string_t content = {0};
-  int res = ut_read_all_from_fd(fd, st.st_size, &content, scratch_arena);
-  if (res != -1) {
+  ut_read_result_t read_res =
+      ut_read_all_from_fd(fd, str_builder_new(st.st_size, arena));
+  if (read_res.error) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
-            strerror(res));
+            strerror(read_res.error));
     return false;
   }
   close(fd);
 
-  return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
+  return cf_buf_read_jar_file(resolver, read_res.content, path, scratch_arena,
+                              arena);
 }
 
 static bool resolver_is_package_imported(const resolver_t *resolver,
@@ -7460,7 +7469,8 @@ static void resolver_collect_user_defined_function_signatures(
                       .return_type_i = return_type_i,
                       .source_file_name =
                           (string_t){
-                              .value = (char*)resolver->parser->lexer->file_path.data,
+                              .value = (char *)resolver->parser->lexer
+                                           ->file_path.data,
                               .len = resolver->parser->lexer->file_path.len},
                       .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   }},

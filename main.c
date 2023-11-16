@@ -129,12 +129,12 @@ int main(int argc, char *argv[]) {
       return E2BIG;
     }
 
-    string_t source = {0};
-    int res = ut_read_all_from_fd(fd, st.st_size, &source, &arena);
-    if (res != -1) {
+    ut_read_result_t source_file_read_res =
+        ut_read_all_from_fd(fd, str_builder_new(st.st_size, &arena));
+    if (source_file_read_res.error) {
       fprintf(stderr, "Failed to read the full file %s: %s\n",
-              source_file_name_cstr, strerror(res));
-      return res;
+              source_file_name_cstr, strerror(source_file_read_res.error));
+      return source_file_read_res.error;
     }
     close(fd);
 
@@ -142,15 +142,17 @@ int main(int argc, char *argv[]) {
     lex_lexer_t lexer = {
         .file_path = source_file_name,
     };
+
+    str_view_t source = source_file_read_res.content;
     pg_array_init_reserve(lexer.tokens, source.len, &arena);
     pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
-    const char *current = source.value;
-    lex_lex(&lexer, source.value, source.len, &current, &arena);
+    const char *current = (char *)source.data;
+    lex_lex(&lexer, (char *)source.data, source.len, &current, &arena);
 
     // Parse.
     parser_t parser = {
-        .buf = source.value,
+        .buf = (char *)source.data,
         .buf_len = source.len,
         .lexer = &lexer,
     };
@@ -201,7 +203,8 @@ int main(int argc, char *argv[]) {
     FILE *file = fopen(class_file.class_file_path.value, "w");
     if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
-              (int)source_file_name.len, (char*)source_file_name.data, strerror(errno));
+              (int)source_file_name.len, (char *)source_file_name.data,
+              strerror(errno));
       return errno;
     }
     cf_write(&class_file, file);
@@ -227,7 +230,8 @@ int main(int argc, char *argv[]) {
       struct stat st = {0};
       if (stat(class_file.class_file_path.value, &st) == -1) {
         fprintf(stderr, "Failed to get the file size %.*s: %s\n",
-                (int)source_file_name.len, (char*)source_file_name.data, strerror(errno));
+                (int)source_file_name.len, (char *)source_file_name.data,
+                strerror(errno));
         return errno;
       }
       pg_assert(st.st_size > 0);
