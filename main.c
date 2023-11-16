@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
   pie_offset = ut_get_pie_displacement();
 
   int opt = 0;
-  char *classpath = NULL;
-  str_view_t java_home={0};
+  str_view_t classpath = str_view_from_c(".");
+  str_view_t java_home = {0};
 
   while ((opt = getopt(argc, argv, "hmvc:j:")) != -1) {
     switch (opt) {
@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
       break;
 
     case 'c':
-      classpath = optarg;
+      classpath = str_view_from_c(optarg);
       break;
 
     case 'h':
@@ -77,14 +77,14 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
     print_usage_and_exit(argv[0]);
   }
-  if(str_view_is_empty(java_home)){
-    fprintf(stderr, "Missing java_home (-j <java_home>)\n");
+  if (str_view_is_empty(java_home)) {
+    fprintf(stderr, "Missing java_home (-j <java_home>).\n");
     print_usage_and_exit(argv[0]);
   }
-  if (classpath == NULL) {
-    classpath = ".";
+  if (str_view_is_empty(classpath)) {
+    fprintf(stderr, "Given empty class path (-c <class_path>).\n");
+    print_usage_and_exit(argv[0]);
   }
-
 
   arena_t arena = {0};
   arena_init(&arena, 1L << 28); // 256 MiB
@@ -93,21 +93,8 @@ int main(int argc, char *argv[]) {
   // This size should be at least the size of the biggest file we read.
   arena_init(&scratch_arena, 1L << 28); // 256 MiB
 
-  string_t *class_path_entries = NULL;
-  pg_array_init_reserve(class_path_entries, 16, &arena);
-  pg_array_append(class_path_entries, string_make_from_c_no_alloc("."), &arena);
-
-  {
-    char *class_path_sep = NULL;
-    while ((class_path_sep = strchr(classpath, ':')) != NULL) {
-      const string_t class_path_entry = string_make_from_c(classpath, &arena);
-      pg_array_append(class_path_entries, class_path_entry, &arena);
-
-      classpath = class_path_sep + 1;
-    }
-    const string_t class_path_entry = string_make_from_c(classpath, &arena);
-    pg_array_append(class_path_entries, class_path_entry, &arena);
-  }
+  str_view_t *class_path_entries =
+      class_path_string_to_class_path_entries(classpath, &arena);
 
   {
     // TODO: when parsing multiple files, need to allocate that.

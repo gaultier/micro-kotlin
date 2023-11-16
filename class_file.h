@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
+#include "arena.h"
 #include "str.h"
 
 // --------------------------- Array
@@ -104,7 +105,6 @@ typedef struct pg_array_header_t {
   } while (0)
 
 // ------------------- Utils
-
 
 static char *ut_memrchr(char *s, char c, u64 n) {
   pg_assert(s != NULL);
@@ -457,6 +457,40 @@ static int ut_read_all_from_fd(int fd, u64 announced_len, string_t *result,
   return -1;
 }
 
+str_view_t *class_path_string_to_class_path_entries(str_view_t class_path,
+                                                    arena_t *arena) {
+  pg_assert(!str_view_is_empty(class_path));
+
+  str_view_t *entries = NULL;
+  pg_array_init_reserve(entries, 16, arena);
+
+  str_view_split_result_t split = {.right = class_path};
+  do {
+    split = str_view_split(split.right, ':');
+    if (!str_view_is_empty(split.left))
+      pg_array_append(entries, split.left, arena);
+  } while (split.found);
+
+  // Ensure "." is in the array so that it will be searched (but also do not
+  // duplicate it).
+  {
+    bool found = false;
+    str_view_t needle = str_view_from_c(".");
+
+    for (u64 i = 0; i < pg_array_len(entries); i++) {
+      if (str_view_eq(entries[i], needle)) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found)
+      pg_array_append(entries, needle, arena);
+  }
+
+  return entries;
+}
+
 // ------------------------ Class file code
 
 typedef enum __attribute__((packed)) {
@@ -786,7 +820,7 @@ typedef struct {
 typedef struct {
   parser_t *parser;
   string_t this_class_name;
-  string_t *class_path_entries;
+  str_view_t *class_path_entries;
   string_t *imported_package_names;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -799,7 +833,7 @@ typedef struct {
 static string_t cg_make_class_name_from_path(string_t path, arena_t *arena);
 
 static void resolver_init(resolver_t *resolver, parser_t *parser,
-                          string_t *class_path_entries,
+                          str_view_t *class_path_entries,
                           string_t class_file_path, arena_t *arena) {
 
   resolver->parser = parser;
@@ -5966,7 +6000,8 @@ static bool cf_read_jmod_file(resolver_t *resolver, char *path,
 
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
-    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
+    fprintf(stderr, "Failed to open the JMOD file %s: %s\n", path,
+            strerror(errno));
     return false;
   }
 
@@ -6012,7 +6047,8 @@ static bool cf_read_jar_file(resolver_t *resolver, char *path,
 
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
-    fprintf(stderr, "Failed to open the file %s: %s\n", path, strerror(errno));
+    fprintf(stderr, "Failed to open the JAR file `%s`: %s\n", path,
+            strerror(errno));
     return false;
   }
 
@@ -6561,12 +6597,15 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
 
   // Scan the class path entries for `$CLASS_PATH_ENTRY/$CLASS_NAME.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    const string_t class_path_entry = resolver->class_path_entries[i];
+    str_view_t class_path_entry = resolver->class_path_entries[i];
 
     string_t tentative_class_file_path =
         string_reserve(class_path_entry.len + 1 + fqn.len + 6, arena);
 
-    string_append_string(&tentative_class_file_path, class_path_entry, arena);
+    string_t class_path_entry_string_fixme = (string_t){
+        .value = (char *)class_path_entry.data, .len = class_path_entry.len};
+    string_append_string(&tentative_class_file_path,
+                         class_path_entry_string_fixme, arena);
     string_append_char(&tentative_class_file_path, '/', arena);
 
     {
@@ -6620,13 +6659,14 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
   // that contains
   // `$CLASS_NAME.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    const string_t class_path_entry = resolver->class_path_entries[i];
-    if (!string_ends_with_cstring(class_path_entry, ".jar"))
+    str_view_t class_path_entry = resolver->class_path_entries[i];
+    if (!str_view_ends_with(class_path_entry, str_view_from_c(".jar")))
       continue;
 
-    LOG("class_path_entry=%.*s", class_path_entry.len, class_path_entry.value);
+    char *file_path = str_view_to_c(class_path_entry, scratch_arena);
+        LOG("class_path_entry=%s", file_path);
     const u64 previous_len = pg_array_len(resolver->types);
-    cf_read_jar_file(resolver, class_path_entry.value, scratch_arena, arena);
+    cf_read_jar_file(resolver, file_path, scratch_arena, arena);
 
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
       const ty_type_t *const type = &resolver->types[i];
