@@ -1,4 +1,6 @@
 #include "class_file.h"
+#include "str.h"
+#include <bits/getopt_core.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,17 +14,14 @@ static const char *usage =
 "\n  %s [OPTIONS] <path>"
 "\n"
 "\nEXAMPLES:"
-"\n  %s -c /usr/share/java/kotlin-stdlib.jar main.kt"
+"\n  %s -j /usr/lib/jvm/java-21-openjdk-amd64/ -c /usr/share/java/kotlin-stdlib.jar main.kt"
 "\n"
 "\nOPTIONS:"
 "\n  -v                Verbose."
 "\n  -m                Debug memory usage by printing a heap dump in CSV form."
 "\n  -h                Print this help message and exit."
 "\n  -c <classpath>    Load additional classpath entries, which are colon separated."
-"\n"
-"\nENVIRONMENT:"
-"\n  JAVA_HOME         This environment variable can be set to point to a local Java installation."
-"\n                    If it is not set, we will try to infer the system Java installation."
+"\n  -j <java_home>    Java home (the root of the Java installation)."
 "\n"
     // clang-format on
     ;
@@ -40,20 +39,28 @@ int main(int argc, char *argv[]) {
 
   int opt = 0;
   char *classpath = NULL;
+  str_view_t java_home={0};
 
-  while ((opt = getopt(argc, argv, "hmvc:")) != -1) {
+  while ((opt = getopt(argc, argv, "hmvc:j:")) != -1) {
     switch (opt) {
     case 'v':
       log_verbose = true;
       break;
+
     case 'c':
       classpath = optarg;
       break;
+
     case 'h':
       print_usage_and_exit(argv[0]);
       break;
+
     case 'm':
       mem_debug = true;
+      break;
+
+    case 'j':
+      java_home = str_view_from_c(optarg);
       break;
 
     default:
@@ -70,9 +77,14 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
     print_usage_and_exit(argv[0]);
   }
+  if(str_view_is_empty(java_home)){
+    fprintf(stderr, "Missing java_home (-j <java_home>)\n");
+    print_usage_and_exit(argv[0]);
+  }
   if (classpath == NULL) {
     classpath = ".";
   }
+
 
   arena_t arena = {0};
   arena_init(&arena, 1L << 28); // 256 MiB
@@ -80,9 +92,6 @@ int main(int argc, char *argv[]) {
   arena_t scratch_arena = {0};
   // This size should be at least the size of the biggest file we read.
   arena_init(&scratch_arena, 1L << 28); // 256 MiB
-
-  const string_t java_home = find_java_home(&arena);
-  LOG("java_home=%.*s", java_home.len, java_home.value);
 
   string_t *class_path_entries = NULL;
   pg_array_init_reserve(class_path_entries, 16, &arena);

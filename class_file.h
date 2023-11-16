@@ -15,268 +15,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#if defined(__linux__) || defined(__FreeBSD__)
-#include <elf.h>
-#endif
-
-#ifdef __linux__
-
-#ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS 0x20
-
-#endif
-
-#endif
-
-#define u64 uint64_t
-#define i64 int64_t
-#define u32 uint32_t
-#define i32 int32_t
-#define u16 uint16_t
-#define i16 int16_t
-#define u8 uint8_t
-#define i8 int8_t
-
-// ------------------- Logs
-
-static bool log_verbose = false;
-#define LOG(fmt, ...)                                                          \
-  if (log_verbose)                                                             \
-  fprintf(stderr, fmt "\n", __VA_ARGS__)
-
-// ----------- Utility macros
-
-// Check that __COUNTER__ is defined and that __COUNTER__ increases by 1
-// every time it is expanded. X + 1 == X + 0 is used in case X is defined to be
-// empty. If X is empty the expression becomes (+1 == +0).
-#if defined(__COUNTER__) && (__COUNTER__ + 1 == __COUNTER__ + 0)
-#define PG_PRIVATE_UNIQUE_ID __COUNTER__
-#else
-#define PG_PRIVATE_UNIQUE_ID __LINE__
-#endif
-
-// Helpers for generating unique variable names
-#define pg_private_name(n) pg_private_concat(n, PG_PRIVATE_UNIQUE_ID)
-#define pg_private_concat(a, b) pg_private_concat2(a, b)
-#define pg_private_concat2(a, b) a##b
-#define pg_pad(n) uint8_t pg_private_name(_padding)[n]
-
-#define pg_unused(x) (void)(x)
-
-#define pg_assert(condition)                                                   \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fflush(stdout);                                                          \
-      fflush(stderr);                                                          \
-      __builtin_trap();                                                        \
-    }                                                                          \
-  } while (0)
-
-#define pg_max(a, b) (((a) > (b)) ? (a) : (b))
-#define pg_clamp(min, x, max)                                                  \
-  (((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x))
-
-// --------------------------- Arena
-typedef struct {
-  char *base;
-  u64 current_offset;
-  u64 cap;
-} arena_t;
-
-typedef enum __attribute__((packed)) {
-  ALLOCATION_TOMBSTONE = 1 << 0,
-  ALLOCATION_OBJECT = 1 << 1,
-  ALLOCATION_STRING = 1 << 2,
-  ALLOCATION_ARRAY = 1 << 3,
-  ALLOCATION_CONSTANT_POOL = 1 << 4,
-  ALLOCATION_BLOB = 1 << 5,
-} allocation_kind_t;
-
-typedef struct {
-  allocation_kind_t kind : 8;
-  u64 user_allocation_size : 48;
-  u8 call_stack_count : 8;
-} allocation_metadata_t;
-
-static void arena_init(arena_t *arena, u64 cap) {
-  pg_assert(arena != NULL);
-
-  arena->base = mmap(NULL, cap, PROT_READ | PROT_WRITE,
-                     MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  pg_assert(arena->base != NULL);
-  pg_assert(((u64)arena->base % 16) == 0);
-  arena->cap = cap;
-  arena->current_offset = 0;
-}
-
-static u64 ut_align_forward_16(u64 n) {
-  const u64 modulo = n & (16 - 1);
-  if (modulo != 0)
-    n += 16 - modulo;
-
-  pg_assert((n % 16) == 0);
-  return n;
-}
-
-static void arena_clear(arena_t *arena) {
-  pg_assert(arena);
-  arena->current_offset = 0;
-}
-
-static void arena_mark_as_dead(arena_t *arena, void *ptr) {
-  pg_assert(arena->base <= (char *)ptr - sizeof(allocation_metadata_t));
-  pg_assert((char *)ptr <= arena->base + arena->current_offset);
-
-  u8 *meta = ((u8 *)ptr) - 16;
-  *meta |= ALLOCATION_TOMBSTONE;
-}
-
-extern char _start;
-
-static u64 ut_get_pie_displacement() {
-#ifdef __linux__
-  FILE *file = fopen("/proc/self/exe", "r");
-  if (file == NULL)
-    return 0;
-
-  u64 res = 0;
-  Elf64_Ehdr header = {0};
-  const u64 read = fread(&header, 1, sizeof(header), file);
-  if (read != sizeof(header))
-    goto end;
-
-  if (memcmp(header.e_ident, ELFMAG, SELFMAG) == 0) {
-    const Elf64_Addr entry_point = header.e_entry;
-    res = (u64)(&_start - entry_point);
-  }
-
-end:
-  fclose(file);
-  return res;
-#endif
-  // TODO
-  return 0;
-}
-
-static u64 initial_rbp = 0;
-static u64 pie_offset = 0;
-
-// TODO: Maybe use varints to reduce the size.
-static u8 ut_record_call_stack(u64 *dst, u64 cap) {
-  uintptr_t *rbp = __builtin_frame_address(0);
-
-  u64 len = 0;
-
-  while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
-    const uintptr_t rip = *(rbp + 1);
-    rbp = (uintptr_t *)*rbp;
-
-    if ((u64)rbp == initial_rbp)
-      break;
-
-    if (len >= cap)
-      break;
-
-    dst[len++] = (rip - pie_offset);
-  }
-  return len;
-}
-
-static bool mem_debug = false;
-static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
-                         allocation_kind_t kind) {
-  // clang-format off
-  //                           Metadata to be able to do heap dumps.
-  //                           v
-  //                           .....................
-  // ....|--------------------|allocation_metadata_t|+++++|*************************|
-  //     ^                    ^                     ^     ^                         ^
-  //   base          old_offset                     ^     new_offset                cap
-  //                                                ^
-  //                                                res
-  // clang-format on
-
-  pg_assert(arena != NULL);
-  pg_assert(arena->current_offset < arena->cap);
-  pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
-  pg_assert(element_size > 0);
-
-  u64 call_stack[256] = {0};
-  const u8 call_stack_count =
-      mem_debug ? ut_record_call_stack(call_stack, sizeof(call_stack) /
-                                                       sizeof(call_stack[0]))
-                : 0;
-
-  const u64 user_allocation_size = len * element_size; // TODO: check overflow.
-  pg_assert(user_allocation_size > 0);
-
-  const u64 metadata_size =
-      sizeof(allocation_metadata_t) + call_stack_count * sizeof(u64);
-  const u64 total_allocation_size = metadata_size + user_allocation_size;
-
-  if (arena->current_offset + total_allocation_size > arena->cap) {
-    fprintf(stderr,
-            "Out of memory: cap=%lu current_offset=%lu "
-            "user_allocation_size=%lu total_allocation_size=%lu\n",
-            arena->cap, arena->current_offset, user_allocation_size,
-            total_allocation_size);
-
-    // TODO: Re-alloc a bigger arena?
-    exit(ENOMEM);
-  }
-
-  const u64 new_offset =
-      ut_align_forward_16(arena->current_offset + total_allocation_size);
-
-  pg_assert((new_offset % 16) == 0);
-  pg_assert(arena->current_offset + user_allocation_size <= new_offset);
-
-  char *const new_allocation = arena->base + arena->current_offset;
-  pg_assert((((u64)new_allocation) % 16) == 0);
-  pg_assert((u64)(arena->base + arena->current_offset) <= (u64)new_allocation);
-  pg_assert((u64)(new_allocation) + user_allocation_size <=
-            (u64)arena->base + new_offset);
-
-  allocation_metadata_t *metadata = (allocation_metadata_t *)new_allocation;
-  metadata->kind = kind;
-  metadata->user_allocation_size = user_allocation_size;
-  metadata->call_stack_count = call_stack_count;
-  memcpy(metadata + 1, call_stack, sizeof(call_stack[0]) * call_stack_count);
-
-  arena->current_offset = new_offset;
-  pg_assert((((u64)arena->current_offset) % 16) == 0);
-
-  return new_allocation + metadata_size;
-}
-
-static u32
-arena_get_user_allocation_offset(const arena_t *arena,
-                                 const allocation_metadata_t *metadata) {
-  pg_assert(arena->base <= (char *)metadata &&
-            (char *)metadata <= arena->base + arena->current_offset);
-
-  return (char *)metadata - arena->base + sizeof(allocation_metadata_t) +
-         metadata->call_stack_count * sizeof(u64);
-}
-
-static char *allocation_kind_to_string(allocation_kind_t kind) {
-  const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
-
-  switch (real_kind) {
-  case ALLOCATION_OBJECT:
-    return "ALLOCATION_OBJECT";
-  case ALLOCATION_STRING:
-    return "ALLOCATION_STRING";
-  case ALLOCATION_ARRAY:
-    return "ALLOCATION_ARRAY";
-  case ALLOCATION_CONSTANT_POOL:
-    return "ALLOCATION_CONSTANT_POOL";
-  case ALLOCATION_BLOB:
-    return "ALLOCATION_BLOB";
-  default:
-    pg_assert(0 && "unreachable");
-  }
-}
+#include "str.h"
 
 // --------------------------- Array
 
@@ -366,26 +105,6 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
-static u32 ut_ht_lookup(u64 hash, u32 exp, u32 idx) {
-  const u32 mask = ((u32)1 << exp) - 1;
-  const u32 step = (hash >> (64 - exp)) | 1;
-  return (idx + step) & mask;
-}
-
-__attribute__((unused)) static bool ut_cstring_ends_with(const char *s,
-                                                         u64 s_len,
-                                                         const char *suffix,
-                                                         u64 suffix_len) {
-  pg_assert(s != NULL);
-  pg_assert(s_len > 0);
-  pg_assert(suffix != NULL);
-  pg_assert(suffix_len > 0);
-
-  if (s_len < suffix_len)
-    return false;
-
-  return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
-}
 
 static char *ut_memrchr(char *s, char c, u64 n) {
   pg_assert(s != NULL);
@@ -426,17 +145,6 @@ static void string_replace_char(string_t *s, char before, char after) {
 }
 
 static bool string_is_empty(string_t s) { return s.len == 0; }
-
-static u64 string_fnv1_hash(string_t s) {
-  u64 h = 0x100;
-  for (u64 i = 0; i < s.len; i++) {
-    pg_assert(s.value != NULL);
-
-    h ^= s.value[i] & 255;
-    h *= 1111111111111111111;
-  }
-  return h ^ h >> 32;
-}
 
 static void string_append_char(string_t *s, char c, arena_t *arena);
 
@@ -585,15 +293,6 @@ static bool string_ends_with_cstring(string_t s, char *needle) {
   return memcmp(s.value + s.len - needle_len, needle, needle_len) == 0;
 }
 
-static bool string_starts_with_cstring(string_t s, char *needle) {
-  const u64 needle_len = strlen(needle);
-
-  if (needle_len > s.len)
-    return false;
-
-  return memcmp(s.value, needle, needle_len) == 0;
-}
-
 static char string_first(string_t s) {
   return string_is_empty(s) ? 0 : s.value[0];
 }
@@ -604,18 +303,6 @@ static void string_drop_first_n(string_t *s, u64 n) {
 
   s->len -= n;
   s->value += n;
-}
-
-__attribute__((unused)) static void string_drop_prefix_cstring(string_t *s,
-                                                               char *needle) {
-  pg_assert(s != NULL);
-  pg_assert(needle != NULL);
-
-  if (string_starts_with_cstring(*s, needle)) {
-    const u64 len = strlen(needle);
-    s->value += len;
-    s->len -= len;
-  }
 }
 
 static void string_drop_until_incl(string_t *s, char needle) {
@@ -721,23 +408,6 @@ static void string_append_string(string_t *a, string_t b, arena_t *arena) {
   string_ensure_null_terminated(a, arena);
 }
 
-static void string_drop_last_n(string_t *a, u64 n) {
-  pg_assert(a != NULL);
-
-  while (a->len > 0 && n > 0) {
-    a->value[a->len - 1] = 0;
-    a->len -= 1;
-    n -= 1;
-  }
-
-  pg_assert(a->value != NULL);
-}
-
-static void string_clear(string_t *a) {
-  pg_assert(a != NULL);
-  a->len = 0;
-}
-
 static void string_append_cstring(string_t *a, const char *b, arena_t *arena) {
   pg_assert(a != NULL);
   pg_assert(b != NULL);
@@ -757,27 +427,6 @@ static void string_append_u64(string_t *s, u64 n, arena_t *arena) {
   char tmp[25] = "";
   snprintf(tmp, sizeof(tmp) - 1, "%lu", n);
   string_append_cstring(s, tmp, arena);
-}
-
-static void string_drop_last_component(string_t *path, arena_t *arena) {
-  pg_assert(path != NULL);
-  pg_assert(path->value != NULL);
-  pg_assert(path->len > 0);
-
-  char *const file = ut_memrchr(path->value, '/', path->len);
-  if (file == NULL) {
-    string_clear(path);
-    string_append_cstring(path, "./", arena);
-    return;
-  }
-
-  const u64 file_len = path->value + path->len - file;
-  string_drop_last_n(path, file_len);
-
-  if (path->len > 0)
-    pg_assert(path->value[path->len - 1] != '/');
-
-  string_ensure_null_terminated(path, arena);
 }
 
 // ------------------- Utils, continued
@@ -6805,87 +6454,6 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   }
 }
 
-static bool test_java_executable(char *path, string_t *result, arena_t *arena) {
-
-  arena_t tmp_arena = *arena;
-
-  string_t tentative_java_path = string_reserve(strlen(path) + 8, &tmp_arena);
-  string_append_cstring(&tentative_java_path, path, &tmp_arena);
-  string_append_char(&tentative_java_path, '/', &tmp_arena);
-  string_append_cstring(&tentative_java_path, "java", &tmp_arena);
-
-  string_t real_path = string_reserve(PATH_MAX + 1, arena);
-  if (realpath(tentative_java_path.value, real_path.value) == NULL)
-    return false;
-
-  real_path.len = strlen(real_path.value);
-  pg_assert(real_path.len <= PATH_MAX);
-  string_ensure_null_terminated(&real_path, arena);
-
-  struct stat st = {0};
-  if (stat(tentative_java_path.value, &st) == -1)
-    return false;
-
-  // Regular file and executable, found, e.g.:
-  // `/usr/lib/jvm/java-17-openjdk-amd64/bin/java`.
-  if ((S_ISREG(st.st_mode) && st.st_mode & 0111)) {
-
-    // Now climb back the path to find the real java home e.g.:
-    // - /usr/lib/jvm/java-17-openjdk-amd64/
-    //   - bin/
-    //     - java
-    //   - jmods
-    //     - java.base.jmod
-    //
-    while (real_path.len > 0) {
-      string_drop_last_component(&real_path, arena);
-
-      string_t jmod_directory = string_reserve(PATH_MAX + 1, &tmp_arena);
-      string_append_string(&jmod_directory, real_path, &tmp_arena);
-      string_append_char(&jmod_directory, '/', &tmp_arena);
-      string_append_cstring(&jmod_directory, "jmods", &tmp_arena);
-
-      struct stat st = {0};
-      if (stat(jmod_directory.value, &st) == -1)
-        continue;
-
-      if (S_ISDIR(st.st_mode)) {
-        *result = real_path;
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-static string_t find_java_home(arena_t *arena) {
-  char *const java_home_env = getenv("JAVA_HOME");
-  if (java_home_env != NULL) {
-    return string_make_from_c(java_home_env, arena);
-  }
-
-  char *path = getenv("PATH");
-  pg_assert(path != NULL);
-
-  char *path_sep = NULL;
-  string_t result = {0};
-  while ((path_sep = strchr(path, ':')) != NULL) {
-    *path_sep = 0;
-
-    if (test_java_executable(path, &result, arena))
-      return result;
-
-    path = path_sep + 1;
-  }
-
-  if (test_java_executable(path, &result, arena))
-    return result;
-
-  fprintf(stderr, "Failed to find the java executable in the path\n");
-  exit(EINVAL);
-}
-
 #define TYPE_ANY_I ((u32)0)
 #define TYPE_UNIT_I ((u32)1)
 #define TYPE_BOOLEAN_I ((u32)2)
@@ -7101,11 +6669,11 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
 }
 
 static void resolver_load_standard_types(resolver_t *resolver,
-                                         string_t java_home,
+                                         str_view_t java_home,
                                          arena_t *scratch_arena,
                                          arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(java_home.value != NULL);
+  pg_assert(!str_view_is_empty(java_home));
   pg_assert(arena != NULL);
 
   const ty_type_t known_types[] = {
@@ -7126,7 +6694,10 @@ static void resolver_load_standard_types(resolver_t *resolver,
     pg_array_append(resolver->types, known_types[i], arena);
 
   string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
-  string_append_string(&java_base_jmod_file_path, java_home, arena);
+  string_t java_home_string_fixme =
+      (string_t){.value = (char *)java_home.data, .len = java_home.len};
+  string_append_string(&java_base_jmod_file_path, java_home_string_fixme,
+                       arena);
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
