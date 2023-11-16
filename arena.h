@@ -1,8 +1,10 @@
 #pragma once
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 
@@ -38,6 +40,8 @@ typedef struct {
   u8 *data;
   u64 len;
 } str_view_t;
+
+str_view_t str_view_from_c(char *s);
 
 // ------------------- Logs
 
@@ -186,8 +190,8 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   // clang-format on
 
   pg_assert(arena != NULL);
-  pg_assert(arena->current_offset < arena->cap);
-  pg_assert(((u64)((arena->base + arena->current_offset)) % 16) == 0);
+  pg_assert(arena->data.len < arena->cap);
+  pg_assert(((u64)((arena->data.data + arena->data.len)) % 16) == 0);
   pg_assert(element_size > 0);
 
   u64 call_stack[256] = {0};
@@ -203,11 +207,11 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
       sizeof(allocation_metadata_t) + call_stack_count * sizeof(u64);
   const u64 total_allocation_size = metadata_size + user_allocation_size;
 
-  if (arena->current_offset + total_allocation_size > arena->cap) {
+  if (arena->data.len + total_allocation_size > arena->cap) {
     fprintf(stderr,
             "Out of memory: cap=%lu current_offset=%lu "
             "user_allocation_size=%lu total_allocation_size=%lu\n",
-            arena->cap, arena->current_offset, user_allocation_size,
+            arena->cap, arena->data.len, user_allocation_size,
             total_allocation_size);
 
     // TODO: Re-alloc a bigger arena?
@@ -215,16 +219,16 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   }
 
   const u64 new_offset =
-      ut_align_forward_16(arena->current_offset + total_allocation_size);
+      ut_align_forward_16(arena->data.len + total_allocation_size);
 
   pg_assert((new_offset % 16) == 0);
-  pg_assert(arena->current_offset + user_allocation_size <= new_offset);
+  pg_assert(arena->data.len + user_allocation_size <= new_offset);
 
-  char *const new_allocation = arena->base + arena->current_offset;
+  u8 *const new_allocation = arena->data.data + arena->data.len;
   pg_assert((((u64)new_allocation) % 16) == 0);
-  pg_assert((u64)(arena->base + arena->current_offset) <= (u64)new_allocation);
+  pg_assert((u64)(arena->data.data + arena->data.len) <= (u64)new_allocation);
   pg_assert((u64)(new_allocation) + user_allocation_size <=
-            (u64)arena->base + new_offset);
+            (u64)arena->data.data + new_offset);
 
   allocation_metadata_t *metadata = (allocation_metadata_t *)new_allocation;
   metadata->kind = kind;
@@ -232,36 +236,36 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
   metadata->call_stack_count = call_stack_count;
   memcpy(metadata + 1, call_stack, sizeof(call_stack[0]) * call_stack_count);
 
-  arena->current_offset = new_offset;
-  pg_assert((((u64)arena->current_offset) % 16) == 0);
+  arena->data.len = new_offset;
+  pg_assert((((u64)arena->data.len) % 16) == 0);
 
   return new_allocation + metadata_size;
 }
 
 static u32
-arena_get_user_allocation_offset(const arena_t *arena,
+arena_get_user_allocation_offset(arena_t arena,
                                  const allocation_metadata_t *metadata) {
-  pg_assert(arena->base <= (char *)metadata &&
-            (char *)metadata <= arena->base + arena->current_offset);
+  pg_assert(arena.data.data <= (u8 *)metadata &&
+            (u8 *)metadata <= arena.data.data + arena.data.len);
 
-  return (char *)metadata - arena->base + sizeof(allocation_metadata_t) +
+  return (u8 *)metadata - arena.data.data + sizeof(allocation_metadata_t) +
          metadata->call_stack_count * sizeof(u64);
 }
 
-static char *allocation_kind_to_string(allocation_kind_t kind) {
+static str_view_t allocation_kind_to_string(allocation_kind_t kind) {
   const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
 
   switch (real_kind) {
   case ALLOCATION_OBJECT:
-    return "ALLOCATION_OBJECT";
+    return str_view_from_c("ALLOCATION_OBJECT");
   case ALLOCATION_STRING:
-    return "ALLOCATION_STRING";
+    return str_view_from_c("ALLOCATION_STRING");
   case ALLOCATION_ARRAY:
-    return "ALLOCATION_ARRAY";
+    return str_view_from_c("ALLOCATION_ARRAY");
   case ALLOCATION_CONSTANT_POOL:
-    return "ALLOCATION_CONSTANT_POOL";
+    return str_view_from_c("ALLOCATION_CONSTANT_POOL");
   case ALLOCATION_BLOB:
-    return "ALLOCATION_BLOB";
+    return str_view_from_c("ALLOCATION_BLOB");
   default:
     pg_assert(0 && "unreachable");
   }

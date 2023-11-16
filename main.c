@@ -86,12 +86,10 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  arena_t arena = {0};
-  arena_new(&arena, 1L << 28); // 256 MiB
+  arena_t arena = arena_new(1L << 28); // 256 MiB
 
-  arena_t scratch_arena = {0};
   // This size should be at least the size of the biggest file we read.
-  arena_new(&scratch_arena, 1L << 28); // 256 MiB
+  arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
 
   str_view_t *class_path_entries =
       class_path_string_to_class_path_entries(classpath, &arena);
@@ -147,13 +145,12 @@ int main(int argc, char *argv[]) {
     pg_array_init_reserve(lexer.tokens, source.len, &arena);
     pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
-    const char *current = (char *)source.data;
-    lex_lex(&lexer, (char *)source.data, source.len, &current, &arena);
+    const u8 *current = source.data;
+    lex_lex(&lexer, source, &current, &arena);
 
     // Parse.
     parser_t parser = {
-        .buf = (char *)source.data,
-        .buf_len = source.len,
+        .buf = source,
         .lexer = &lexer,
     };
     const u32 root_i = par_parse(&parser, &arena);
@@ -168,9 +165,8 @@ int main(int argc, char *argv[]) {
     resolver_init(&resolver, &parser, class_path_entries, class_file_path,
                   &arena);
 
-    resolver_load_standard_types(&resolver, java_home, &scratch_arena, &arena);
-    arena_clear(&scratch_arena);
-    LOG("After loading known types: arena=%lu", arena.current_offset);
+    resolver_load_standard_types(&resolver, java_home, scratch_arena, &arena);
+    LOG("After loading known types: arena=%lu", arena.base.len);
 
     resolver_collect_user_defined_function_signatures(&resolver, &scratch_arena,
                                                       &arena);

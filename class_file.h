@@ -104,11 +104,11 @@ typedef struct pg_array_header_t {
 
 // ------------------- Utils
 
-static char *ut_memrchr(char *s, char c, u64 n) {
+static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);
 
-  char *res = s + n - 1;
+  u8 *res = s + n - 1;
   while (res-- != s) {
     if (*res == c)
       return res;
@@ -120,7 +120,7 @@ static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
-static bool mem_eq_c(const char *a, u32 a_len, const char *b) {
+static bool mem_eq_c(const u8 *a, u32 a_len, const u8 *b) {
   pg_assert(b != NULL);
 
   const u64 b_len = strlen(b);
@@ -132,10 +132,10 @@ static bool mem_eq_c(const char *a, u32 a_len, const char *b) {
 typedef struct {
   u32 cap;
   u32 len;
-  char *value;
+  u8 *value;
 } string_t;
 
-static void string_replace_char(string_t *s, char before, char after) {
+static void string_replace_char(string_t *s, u8 before, u8 after) {
   for (u64 i = 0; i < s->len; i++) {
     if (s->value[i] == before)
       s->value[i] = after;
@@ -144,7 +144,7 @@ static void string_replace_char(string_t *s, char before, char after) {
 
 static bool string_is_empty(string_t s) { return s.len == 0; }
 
-static void string_append_char(string_t *s, char c, arena_t *arena);
+static void string_append_char(string_t *s, u8 c, arena_t *arena);
 
 static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   pg_assert(s != NULL);
@@ -160,13 +160,13 @@ static void string_ensure_null_terminated(string_t *s, arena_t *arena) {
   }
 }
 
-static bool string_contains(string_t s, char *char_set) {
+static bool string_contains(string_t s, u8 *char_set) {
   pg_assert(char_set != NULL);
 
   for (u64 i = 0; i < s.len; i++) {
-    const char c = s.value[i];
+    const u8 c = s.value[i];
 
-    char *cursor = char_set;
+    u8 *cursor = char_set;
     while (*cursor != 0) {
       if (c == *cursor)
         return true;
@@ -209,7 +209,7 @@ static string_t string_make_from_c_no_alloc(char *s) {
   pg_assert(s != NULL);
 
   string_t res = {
-      .value = s,
+      .value = (u8 *)s,
       .len = strlen(s),
       .cap = strlen(s) + 1,
   };
@@ -218,7 +218,7 @@ static string_t string_make_from_c_no_alloc(char *s) {
   return res;
 }
 
-static string_t string_clone_n_c(const char *src, u64 n, arena_t *arena) {
+static string_t string_clone_n_c(const u8 *src, u64 n, arena_t *arena) {
   pg_assert(src != NULL);
 
   string_t result = string_reserve(n, arena);
@@ -241,8 +241,8 @@ static string_t string_clone_n(string_t src, u64 n, arena_t *arena) {
   return result;
 }
 
-static string_t string_clone_until_excl(string_t src, char c, arena_t *arena) {
-  const char *const needle = memchr(src.value, c, src.len);
+static string_t string_clone_until_excl(string_t src, u8 c, arena_t *arena) {
+  const u8 *const needle = memchr(src.value, c, src.len);
   pg_assert(needle != NULL);
 
   const u64 real_len = needle - src.value;
@@ -263,7 +263,7 @@ static string_t string_find_last_path_component(string_t path) {
   pg_assert(path.value != NULL);
   pg_assert(path.len > 0);
 
-  char *const file = ut_memrchr(path.value, '/', path.len);
+  u8 *const file = ut_memrchr(path.value, '/', path.len);
   if (file == NULL)
     return path;
 
@@ -291,7 +291,7 @@ static bool string_ends_with_cstring(string_t s, char *needle) {
   return memcmp(s.value + s.len - needle_len, needle, needle_len) == 0;
 }
 
-static char string_first(string_t s) {
+static u8 string_first(string_t s) {
   return string_is_empty(s) ? 0 : s.value[0];
 }
 
@@ -303,38 +303,38 @@ static void string_drop_first_n(string_t *s, u64 n) {
   s->value += n;
 }
 
-static void string_drop_until_incl(string_t *s, char needle) {
+static void string_drop_until_incl(string_t *s, u8 needle) {
   pg_assert(s != NULL);
 
-  char *found = memchr(s->value, needle, s->len);
+  u8 *found = memchr(s->value, needle, s->len);
   pg_assert(found != NULL);
 
   s->len -= found - s->value;
   s->value = found + 1;
 }
 
-static void string_drop_before_last_incl(string_t *s, char c) {
+static void string_drop_before_last_incl(string_t *s, u8 c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
 
-  char *const last_c = ut_memrchr(s->value, c, s->len);
+  u8 *const last_c = ut_memrchr(s->value, c, s->len);
   if (last_c == NULL)
     return; // Nothing to do.
 
-  char *const new_s_value = last_c + 1;
+  u8 *const new_s_value = last_c + 1;
   s->len -= new_s_value - s->value;
   s->value = new_s_value;
 }
 
-static char string_last(string_t s) {
+static u8 string_last(string_t s) {
   return string_is_empty(s) ? 0 : s.value[s.len - 1];
 }
 
-static void string_drop_after_last_incl(string_t *s, char c) {
+static void string_drop_after_last_incl(string_t *s, u8 c) {
   pg_assert(s != NULL);
   pg_assert(s->value != NULL);
 
-  const char *const last_c = ut_memrchr(s->value, c, s->len);
+  const u8 *const last_c = ut_memrchr(s->value, c, s->len);
   if (last_c == NULL)
     return; // Nothing to do.
 
@@ -355,10 +355,10 @@ static bool string_eq(string_t a, string_t b) {
 static bool string_eq_c(string_t a, const char *b) {
   pg_assert(b != NULL);
 
-  return mem_eq_c(a.value, a.len, b);
+  return mem_eq_c(a.value, a.len, (u8 *)b);
 }
 
-static void string_append_char(string_t *s, char c, arena_t *arena) {
+static void string_append_char(string_t *s, u8 c, arena_t *arena) {
   pg_assert(s != NULL);
   pg_assert(s->cap != 0);
   pg_assert(s->len <= s->cap);
@@ -368,8 +368,7 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
     pg_assert((u64)s->cap * 2 <= UINT32_MAX);
 
     s->cap *= 2;
-    char *const new_s =
-        arena_alloc(arena, s->cap, sizeof(u8), ALLOCATION_STRING);
+    u8 *const new_s = arena_alloc(arena, s->cap, sizeof(u8), ALLOCATION_STRING);
     s->value = memcpy(new_s, s->value, s->len);
   }
 
@@ -382,7 +381,7 @@ static void string_append_char(string_t *s, char c, arena_t *arena) {
 }
 
 __attribute__((unused)) static void
-string_append_char_if_not_exists(string_t *s, char c, arena_t *arena) {
+string_append_char_if_not_exists(string_t *s, u8 c, arena_t *arena) {
   pg_assert(s != NULL);
 
   if (s->len > 0 && s->value[s->len - 1] != c) {
@@ -552,7 +551,7 @@ typedef enum __attribute__((packed)) {
 typedef struct {
   u32 scope_depth;
   u32 var_definition_node_i;
-  string_t name;
+  str_view_t name;
 } ty_variable_t;
 
 typedef enum __attribute__((packed)) {
@@ -650,9 +649,9 @@ typedef enum {
 } ty_type_flag_t;
 
 struct ty_type_t {
-  string_t this_class_name;
-  string_t super_class_name;
-  string_t package_name;
+  str_view_t this_class_name;
+  str_view_t super_class_name;
+  str_view_t package_name;
   union {
     ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;          // TYPE_ARRAY_REFERENCE
@@ -869,9 +868,9 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
 static void type_init_package_and_name(string_t fully_qualified_jvm_name,
                                        string_t *package_name, string_t *name,
                                        arena_t *arena) {
-  const char sep = '/';
-  const char *const last_sep = ut_memrchr(fully_qualified_jvm_name.value, sep,
-                                          fully_qualified_jvm_name.len);
+  const u8 sep = '/';
+  const u8 *const last_sep = ut_memrchr(fully_qualified_jvm_name.value, sep,
+                                        fully_qualified_jvm_name.len);
   // No package component.
   if (last_sep == NULL) {
     *name = string_make(fully_qualified_jvm_name, arena);
@@ -926,7 +925,7 @@ static bool resolver_are_types_equal(const resolver_t *resolver,
 
   // Instances: Check the class name is the same.
   if (lhs->kind == TYPE_INSTANCE && rhs->kind == TYPE_INSTANCE) {
-    return string_eq(lhs->this_class_name, rhs->this_class_name);
+    return str_view_eq(lhs->this_class_name, rhs->this_class_name);
   }
 
   // Methods: Check that the class name, argument types, and return types, are
@@ -935,7 +934,7 @@ static bool resolver_are_types_equal(const resolver_t *resolver,
     const ty_type_method_t *const lhs_method = &lhs->v.method;
     const ty_type_method_t *const rhs_method = &rhs->v.method;
 
-    if (!string_eq(lhs->this_class_name, rhs->this_class_name))
+    if (!str_view_eq(lhs->this_class_name, rhs->this_class_name))
       return false;
 
     if (!resolver_are_types_equal(resolver,
@@ -1001,13 +1000,12 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
 }
 
 static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
-                                          arena_t *scratch_arena,
+                                          arena_t scratch_arena,
                                           arena_t *arena);
 
 static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
                                         const ty_type_t *b,
-                                        arena_t *scratch_arena,
-                                        arena_t *arena) {
+                                        arena_t scratch_arena, arena_t *arena) {
   // `A <: A` always.
   if (resolver_are_types_equal(resolver, a, b))
     return true;
@@ -1048,8 +1046,8 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
   }
   case TYPE_STRING: {
     return b->kind == TYPE_INSTANCE &&
-           string_eq_c(b->package_name, "java.lang") &&
-           string_eq_c(b->this_class_name, "Object");
+           str_view_eq_c(b->package_name, "java.lang") &&
+           str_view_eq_c(b->this_class_name, "Object");
   }
 
   default:
@@ -1059,7 +1057,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
 
 static bool resolver_is_function_candidate_applicable(
     resolver_t *resolver, const u32 *call_site_argument_types_i,
-    const ty_type_t *function_definition_type, arena_t *scratch_arena,
+    const ty_type_t *function_definition_type, arena_t scratch_arena,
     arena_t *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
@@ -1411,10 +1409,13 @@ static void cf_fill_descriptor_string(const ty_type_t *types, u32 type_i,
     break;
   }
   case TYPE_INSTANCE: {
-    const string_t java_class_name = type->this_class_name;
+    const str_view_t java_class_name = type->this_class_name;
 
     string_append_char(descriptor, 'L', arena);
-    string_append_string(descriptor, java_class_name, arena);
+    string_append_string(
+        descriptor,
+        (string_t){.value = java_class_name.data, .len = java_class_name.len},
+        arena);
     string_append_char(descriptor, ';', arena);
 
     break;
@@ -1535,7 +1536,7 @@ static string_t cf_parse_descriptor(resolver_t *resolver, string_t descriptor,
     const string_t fqn = string_clone_until_excl(remaining, ';', arena);
 
     string_drop_until_incl(&remaining, ';');
-    if (string_eq_c(type->this_class_name, "java/lang/String")) {
+    if (str_view_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_STRING;
     } else {
       type->kind = TYPE_INSTANCE;
@@ -1776,58 +1777,58 @@ static void file_write_be_u64(FILE *file, u64 x) {
   fwrite(x_be, sizeof(x_be), 1, file);
 }
 
-static u16 buf_read_be_u16(str_view_t buf, char **current) {
+static u16 buf_read_be_u16(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u16) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u16) <= buf.data + buf.len);
 
-  const char *const ptr = *current;
+  const u8 *const ptr = *current;
   const u16 x = (((u16)(ptr[0] & 0xff)) << 8) | ((u16)((ptr[1] & 0xff)) << 0);
   *current += sizeof(u16);
   return x;
 }
 
-static u16 buf_read_le_u16(str_view_t buf, char **current) {
+static u16 buf_read_le_u16(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u16) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u16) <= buf.data + buf.len);
 
-  const char *const ptr = *current;
+  const u8 *const ptr = *current;
   const u16 x = (((u16)(ptr[1] & 0xff)) << 8) | ((u16)((ptr[0] & 0xff)) << 0);
   *current += sizeof(u16);
   return x;
 }
 
-static u32 buf_read_be_u32(str_view_t buf, char **current) {
+static u32 buf_read_be_u32(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u32) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u32) <= buf.data + buf.len);
 
-  const char *const ptr = *current;
+  const u8 *const ptr = *current;
   const u32 x = ((u32)(ptr[0] & 0xff) << 24) | (((u32)(ptr[1] & 0xff)) << 16) |
                 (((u32)(ptr[2] & 0xff)) << 8) | (((u32)(ptr[3] & 0xff)) << 0);
   *current += sizeof(u32);
   return x;
 }
 
-static u32 buf_read_le_u32(str_view_t buf, char **current) {
+static u32 buf_read_le_u32(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u32) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u32) <= buf.data + buf.len);
 
-  const char *const ptr = *current;
+  const u8 *const ptr = *current;
   const u32 x = ((u32)(ptr[3] & 0xff) << 24) | (((u32)(ptr[2] & 0xff)) << 16) |
                 (((u32)(ptr[1] & 0xff)) << 8) | (((u32)(ptr[0] & 0xff)) << 0);
   *current += sizeof(u32);
   return x;
 }
 
-static u32 buf_read_le_u64(str_view_t buf, char **current) {
+static u32 buf_read_le_u64(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u64) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u64) <= buf.data + buf.len);
 
-  const char *const ptr = *current;
+  const u8 *const ptr = *current;
   const u64 x = ((u64)(ptr[7] & 0xff) << 56) | (((u64)(ptr[6] & 0xff)) << 48) |
                 (((u64)(ptr[5] & 0xff)) << 40) |
                 (((u64)(ptr[4] & 0xff)) << 32) | ((u64)(ptr[3] & 0xff) << 24) |
@@ -1848,10 +1849,10 @@ static str_view_t buf_read_n_u8(str_view_t buf, u64 n, u8 **current) {
   return res;
 }
 
-static u8 buf_read_u8(str_view_t buf, char **current) {
+static u8 buf_read_u8(str_view_t buf, u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u8) <= (char *)buf.data + buf.len);
+  pg_assert(*current + sizeof(u8) <= buf.data + buf.len);
 
   const u8 x = (*current)[0];
   *current += 1;
@@ -1873,7 +1874,7 @@ static void arena_heap_dump(arena_t arena) {
     memcpy(&metadata, slice.data, slice.len);
     pg_assert(metadata.user_allocation_size > 0);
 
-    const char *const kind_string = allocation_kind_to_string(metadata.kind);
+    const u8 *const kind_string = allocation_kind_to_string(metadata.kind);
 
     const u8 real_kind = metadata.kind & (~ALLOCATION_TOMBSTONE);
     u64 len = 0;
@@ -1928,11 +1929,11 @@ cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
   return constant->v.s;
 }
 
-static void cf_buf_read_attributes(str_view_t buf, char **current,
+static void cf_buf_read_attributes(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_attribute_t **attributes, arena_t *arena);
 
-static void cf_buf_read_sourcefile_attribute(str_view_t buf, char **current,
+static void cf_buf_read_sourcefile_attribute(str_view_t buf, u8 **current,
                                              cf_class_file_t *class_file,
                                              cf_attribute_t **attributes,
                                              arena_t *arena) {
@@ -1943,14 +1944,14 @@ static void cf_buf_read_sourcefile_attribute(str_view_t buf, char **current,
   pg_assert(attributes != NULL);
   pg_assert(*attributes != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   cf_attribute_source_file_t source_file = {0};
   source_file.source_file = buf_read_be_u16(buf, current);
   pg_assert(source_file.source_file > 0);
   pg_assert(source_file.source_file <= class_file->constant_pool.len);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == 2);
 
@@ -1959,8 +1960,7 @@ static void cf_buf_read_sourcefile_attribute(str_view_t buf, char **current,
   pg_array_append(*attributes, attribute, arena);
 }
 
-static void cf_buf_read_code_attribute_exceptions(str_view_t buf,
-                                                  char **current,
+static void cf_buf_read_code_attribute_exceptions(str_view_t buf, u8 **current,
                                                   cf_class_file_t *class_file,
                                                   cf_exception_t **exceptions,
                                                   arena_t *arena) {
@@ -1969,7 +1969,7 @@ static void cf_buf_read_code_attribute_exceptions(str_view_t buf,
   pg_assert(class_file != NULL);
   pg_assert(exceptions != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   pg_array_init_reserve(*exceptions, table_len, arena);
@@ -1985,31 +1985,31 @@ static void cf_buf_read_code_attribute_exceptions(str_view_t buf,
     pg_array_append(*exceptions, exception, arena);
   }
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == sizeof(u16) + table_len * sizeof(u16) * 4);
 }
 
-static void cf_buf_read_code_attribute(str_view_t buf, char **current,
+static void cf_buf_read_code_attribute(str_view_t buf, u8 **current,
                                        cf_class_file_t *class_file,
                                        u32 attribute_len, u16 name_i,
                                        cf_attribute_t **attributes,
                                        arena_t *arena) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
-  pg_assert(*current + 2 <= (char *)buf.data + buf.len);
+  pg_assert(*current + 2 <= buf.data + buf.len);
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
   pg_assert(arena != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   cf_attribute_code_t code = {0};
   code.max_physical_stack = buf_read_be_u16(buf, current);
   code.max_physical_locals = buf_read_be_u16(buf, current);
   const u32 code_len = buf_read_be_u32(buf, current);
-  pg_assert(*current + code_len <= (char *)buf.data + buf.len);
+  pg_assert(*current + code_len <= buf.data + buf.len);
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
   pg_array_init_reserve(code.code, code_len, arena);
@@ -2026,13 +2026,13 @@ static void cf_buf_read_code_attribute(str_view_t buf, char **current,
       .kind = ATTRIBUTE_KIND_CODE, .name = name_i, .v = {.code = code}};
   pg_array_append(*attributes, attribute, arena);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
 static void cf_buf_read_stack_map_table_attribute_verification_infos(
-    str_view_t buf, char **current, u16 count) {
+    str_view_t buf, u8 **current, u16 count) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
 
@@ -2049,8 +2049,7 @@ static void cf_buf_read_stack_map_table_attribute_verification_infos(
   }
 }
 
-static void cf_buf_read_stack_map_table_attribute(str_view_t buf,
-                                                  char **current,
+static void cf_buf_read_stack_map_table_attribute(str_view_t buf, u8 **current,
                                                   u32 attribute_len, u16 name_i,
                                                   cf_attribute_t **attributes,
                                                   arena_t *arena) {
@@ -2059,7 +2058,7 @@ static void cf_buf_read_stack_map_table_attribute(str_view_t buf,
   pg_assert(attributes != NULL);
   pg_assert(arena != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 len = buf_read_be_u16(buf, current);
   cf_stack_map_frame_t *stack_map_frames = NULL;
@@ -2121,18 +2120,18 @@ static void cf_buf_read_stack_map_table_attribute(str_view_t buf,
   };
   pg_array_append(*attributes, attribute, arena);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
 static void cf_buf_read_line_number_table_attribute(
-    str_view_t buf, char **current, cf_class_file_t *class_file,
+    str_view_t buf, u8 **current, cf_class_file_t *class_file,
     u32 attribute_len, cf_attribute_t **attributes, arena_t *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   pg_assert(sizeof(table_len) + table_len * (sizeof(u16) + sizeof(u16)) ==
@@ -2152,17 +2151,17 @@ static void cf_buf_read_line_number_table_attribute(
 
   pg_array_append(*attributes, attribute, arena);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
 static void
-cf_buf_read_local_variable_table_attribute(str_view_t buf, char **current,
+cf_buf_read_local_variable_table_attribute(str_view_t buf, u8 **current,
                                            cf_class_file_t *class_file,
                                            u32 attribute_len, arena_t *arena) {
   pg_unused(arena);
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   const u16 entry_size = sizeof(u16) * 5;
@@ -2184,16 +2183,16 @@ cf_buf_read_local_variable_table_attribute(str_view_t buf, char **current,
 
     // TODO store.
   }
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
 static void cf_buf_read_local_variable_type_table_attribute(
-    str_view_t buf, char **current, cf_class_file_t *class_file,
+    str_view_t buf, u8 **current, cf_class_file_t *class_file,
     u32 attribute_len, arena_t *arena) {
   pg_unused(arena);
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   const u16 entry_size = sizeof(u16) * 5;
@@ -2215,31 +2214,31 @@ static void cf_buf_read_local_variable_type_table_attribute(
 
     // TODO store.
   }
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_signature_attribute(str_view_t buf, char **current,
+static void cf_buf_read_signature_attribute(str_view_t buf, u8 **current,
                                             cf_class_file_t *class_file,
                                             u32 attribute_len, arena_t *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   pg_assert(attribute_len == 2);
   const u16 signature_i = buf_read_be_u16(buf, current);
   pg_unused(signature_i);
   // TODO store.
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
 // TODO: store this data.
-static void cf_buf_read_exceptions_attribute(str_view_t buf, char **current,
+static void cf_buf_read_exceptions_attribute(str_view_t buf, u8 **current,
                                              cf_class_file_t *class_file,
                                              u32 attribute_len,
                                              cf_attribute_t **attributes,
@@ -2250,7 +2249,7 @@ static void cf_buf_read_exceptions_attribute(str_view_t buf, char **current,
   pg_assert(attributes != NULL);
   pg_assert(arena != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   const u16 entry_size = sizeof(u16);
@@ -2267,17 +2266,17 @@ static void cf_buf_read_exceptions_attribute(str_view_t buf, char **current,
 
   pg_array_append(*attributes, attribute, arena);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_inner_classes_attribute(str_view_t buf, char **current,
+static void cf_buf_read_inner_classes_attribute(str_view_t buf, u8 **current,
                                                 cf_class_file_t *class_file,
                                                 u32 attribute_len,
                                                 arena_t *arena) {
   pg_unused(arena);
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
   const u16 entry_size = sizeof(u16) * 4;
@@ -2301,16 +2300,16 @@ static void cf_buf_read_inner_classes_attribute(str_view_t buf, char **current,
 
     // TODO store.
   }
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_annotation(str_view_t buf, char **current,
+static void cf_buf_read_annotation(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_annotation_t *annotation, arena_t *arena);
 
-static void cf_buf_read_element_value(str_view_t buf, char **current,
+static void cf_buf_read_element_value(str_view_t buf, u8 **current,
                                       cf_class_file_t *class_file,
                                       cf_element_value_t *element_value,
                                       arena_t *arena) {
@@ -2367,7 +2366,7 @@ static void cf_buf_read_element_value(str_view_t buf, char **current,
   }
 }
 
-static void cf_buf_read_annotation(str_view_t buf, char **current,
+static void cf_buf_read_annotation(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_annotation_t *annotation,
                                    arena_t *arena) {
@@ -2390,10 +2389,10 @@ static void cf_buf_read_annotation(str_view_t buf, char **current,
 }
 
 static void cf_buf_read_runtime_invisible_annotations_attribute(
-    str_view_t buf, char **current, cf_class_file_t *class_file,
+    str_view_t buf, u8 **current, cf_class_file_t *class_file,
     u32 attribute_len, cf_attribute_t **attributes, arena_t *arena) {
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
 
@@ -2411,12 +2410,12 @@ static void cf_buf_read_runtime_invisible_annotations_attribute(
   }
   pg_array_append(*attributes, attribute, arena);
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_attribute(str_view_t buf, char **current,
+static void cf_buf_read_attribute(str_view_t buf, u8 **current,
                                   cf_class_file_t *class_file,
                                   cf_attribute_t **attributes, arena_t *arena) {
   pg_assert(!str_view_is_empty(buf));
@@ -2506,7 +2505,7 @@ static void cf_buf_read_attribute(str_view_t buf, char **current,
   }
 }
 
-static void cf_buf_read_attributes(str_view_t buf, char **current,
+static void cf_buf_read_attributes(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_attribute_t **attributes,
                                    arena_t *arena) {
@@ -2527,7 +2526,7 @@ static void cf_buf_read_attributes(str_view_t buf, char **current,
 // Returns the number of incoming slots to skip:
 // - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
 // - `0` otherwise
-static u8 cf_buf_read_constant(str_view_t buf, char **current,
+static u8 cf_buf_read_constant(str_view_t buf, u8 **current,
                                cf_class_file_t *class_file,
                                u16 constant_pool_count, arena_t *arena) {
   u8 kind = buf_read_u8(buf, current);
@@ -2556,7 +2555,7 @@ static u8 cf_buf_read_constant(str_view_t buf, char **current,
   case CONSTANT_POOL_KIND_UTF8: { // FIXME: It's actually modified utf8!
     u16 len = buf_read_be_u16(buf, current);
 
-    char *const s = *current;
+    u8 *const s = *current;
     buf_read_n_u8(buf, len, current);
 
     cf_constant_t constant = {
@@ -2744,7 +2743,7 @@ static u8 cf_buf_read_constant(str_view_t buf, char **current,
   return 0;
 }
 
-static void cf_buf_read_constants(str_view_t buf, char **current,
+static void cf_buf_read_constants(str_view_t buf, u8 **current,
                                   cf_class_file_t *class_file,
                                   u16 constant_pool_count, arena_t *arena) {
   for (u64 i = 0; i < constant_pool_count; i++) {
@@ -2756,7 +2755,7 @@ static void cf_buf_read_constants(str_view_t buf, char **current,
   pg_assert(constant_pool_count <= class_file->constant_pool.len);
 }
 
-static void cf_buf_read_method(str_view_t buf, char **current,
+static void cf_buf_read_method(str_view_t buf, u8 **current,
                                cf_class_file_t *class_file, arena_t *arena) {
   cf_method_t method = {0};
   method.access_flags = buf_read_be_u16(buf, current);
@@ -2775,7 +2774,7 @@ static void cf_buf_read_method(str_view_t buf, char **current,
   pg_array_append(class_file->methods, method, arena);
 }
 
-static void cf_buf_read_methods(str_view_t buf, char **current,
+static void cf_buf_read_methods(str_view_t buf, u8 **current,
                                 cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, current);
@@ -2786,7 +2785,7 @@ static void cf_buf_read_methods(str_view_t buf, char **current,
   }
 }
 
-static void cf_buf_read_interfaces(str_view_t buf, char **current,
+static void cf_buf_read_interfaces(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    arena_t *arena) {
 
@@ -2796,7 +2795,7 @@ static void cf_buf_read_interfaces(str_view_t buf, char **current,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  const char *const current_start = *current;
+  const u8 *const current_start = *current;
 
   const u16 interfaces_count = buf_read_be_u16(buf, current);
   pg_array_init_reserve(class_file->interfaces, interfaces_count, arena);
@@ -2809,12 +2808,12 @@ static void cf_buf_read_interfaces(str_view_t buf, char **current,
     pg_array_append(class_file->interfaces, interface_i, arena);
   }
 
-  const char *const current_end = *current;
+  const u8 *const current_end = *current;
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == sizeof(u16) + interfaces_count * sizeof(u16));
 }
 
-static void cf_buf_read_field(str_view_t buf, char **current,
+static void cf_buf_read_field(str_view_t buf, u8 **current,
                               cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
@@ -2837,7 +2836,7 @@ static void cf_buf_read_field(str_view_t buf, char **current,
   pg_array_append(class_file->fields, field, arena);
 }
 
-static void cf_buf_read_fields(str_view_t buf, char **current,
+static void cf_buf_read_fields(str_view_t buf, u8 **current,
                                cf_class_file_t *class_file, arena_t *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, current);
@@ -2848,7 +2847,7 @@ static void cf_buf_read_fields(str_view_t buf, char **current,
   }
 }
 
-static void cf_buf_read_class_file(str_view_t buf, char **current,
+static void cf_buf_read_class_file(str_view_t buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    arena_t *arena) {
 
@@ -3412,7 +3411,7 @@ static u16 cf_add_constant_string(cf_constant_array_t *constant_pool,
   return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
-static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
+static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, u8 *s,
                                    arena_t *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
@@ -3446,8 +3445,8 @@ static string_t cf_make_class_file_path_kt(str_view_t source_file_name,
   pg_assert(str_view_ends_with(source_file_name, str_view_from_c(".kt")));
 
   string_t result = string_reserve(source_file_name.len + 8, arena);
-  string_t source_file_name_string_fixme = (string_t){
-      .value = (char *)source_file_name.data, .len = source_file_name.len};
+  string_t source_file_name_string_fixme =
+      (string_t){.value = source_file_name.data, .len = source_file_name.len};
   string_append_string(&result, source_file_name_string_fixme, arena);
   string_t last_path_component = string_find_last_path_component(result);
   string_capitalize_first(&last_path_component);
@@ -3523,7 +3522,7 @@ static void cf_get_source_location_of_function(
 // ---------------------------------- Lexer
 
 static u32 lex_get_current_offset(const str_view_t buf,
-                                  const char *const *current) {
+                                  const u8 *const *current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3532,7 +3531,7 @@ static u32 lex_get_current_offset(const str_view_t buf,
   return *current - buf.data;
 }
 
-static bool lex_is_at_end(const str_view_t buf, const char *const *current) {
+static bool lex_is_at_end(const str_view_t buf, const u8 *const *current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3541,7 +3540,7 @@ static bool lex_is_at_end(const str_view_t buf, const char *const *current) {
   return lex_get_current_offset(buf, current) == buf.len;
 }
 
-static char lex_peek(const str_view_t buf, const char *const *current) {
+static u8 lex_peek(const str_view_t buf, const u8 *const *current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3549,7 +3548,7 @@ static char lex_peek(const str_view_t buf, const char *const *current) {
   return lex_is_at_end(buf, current) ? 0 : **current;
 }
 
-static u8 lex_advance(const str_view_t buf, const char **current) {
+static u8 lex_advance(const str_view_t buf, const u8 **current) {
   pg_assert(!str_view_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3561,7 +3560,7 @@ static u8 lex_advance(const str_view_t buf, const char **current) {
   return lex_is_at_end(buf, current) ? 0 : c;
 }
 
-static bool lex_match(const str_view_t buf, const char **current, u8 c) {
+static bool lex_match(const str_view_t buf, const u8 **current, u8 c) {
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
 
@@ -3572,9 +3571,9 @@ static bool lex_match(const str_view_t buf, const char **current, u8 c) {
   return false;
 }
 
-static bool lex_is_digit(char c) { return ('0' <= c && c <= '9'); }
+static bool lex_is_digit(u8 c) { return ('0' <= c && c <= '9'); }
 
-static bool lex_is_identifier_char(char c) {
+static bool lex_is_identifier_char(u8 c) {
   return ut_char_is_alphabetic(c) || lex_is_digit(c) || c == '_';
 }
 
@@ -3582,13 +3581,13 @@ static u32 lex_number_length(const str_view_t buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
-  const char *current = &buf.data[current_offset];
+  const u8 *current = &buf.data[current_offset];
   pg_assert(lex_is_digit(lex_peek(buf, &current)));
 
   lex_advance(buf, &current);
 
   while (!lex_is_at_end(buf, &current)) {
-    const char c = lex_peek(buf, &current);
+    const u8 c = lex_peek(buf, &current);
 
     if (!(lex_is_digit(c) || c == '_' || c == 'L'))
       break;
@@ -3609,10 +3608,10 @@ static u32 lex_string_length(const str_view_t buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
-  const char *current = &buf.data[current_offset];
+  const u8 *current = &buf.data[current_offset];
   pg_assert(*(current - 1) == '"');
 
-  char *end_quote = memchr(current, '"', buf.len - start_offset);
+  u8 *end_quote = memchr(current, '"', buf.len - start_offset);
   pg_assert(end_quote != NULL);
 
   return end_quote - current;
@@ -3625,13 +3624,13 @@ static u32 lex_identifier_length(const str_view_t buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
-  const char *current = &buf.data[current_offset];
+  const u8 *current = &buf.data[current_offset];
   pg_assert(ut_char_is_alphabetic(*current));
 
   lex_advance(buf, &current);
 
   while (!lex_is_at_end(buf, &current)) {
-    const char c = lex_peek(buf, &current);
+    const u8 c = lex_peek(buf, &current);
 
     if (!lex_is_identifier_char(c))
       break;
@@ -3652,7 +3651,7 @@ static u32 lex_identifier_length(const str_view_t buf, u32 current_offset) {
 }
 
 static void lex_identifier(lex_lexer_t *lexer, const str_view_t buf,
-                           const char **current, arena_t *arena) {
+                           const u8 **current, arena_t *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
   pg_assert(current != NULL);
@@ -3661,7 +3660,7 @@ static void lex_identifier(lex_lexer_t *lexer, const str_view_t buf,
   pg_assert(ut_char_is_alphabetic(**current));
 
   const u32 start_offset = lex_get_current_offset(buf, current);
-  const char *const identifier = *current;
+  const u8 *const identifier = *current;
   const u32 identifier_len = lex_identifier_length(buf, start_offset);
   *current += identifier_len;
   if (mem_eq_c(identifier, identifier_len, "fun")) {
@@ -3722,7 +3721,7 @@ static void lex_identifier(lex_lexer_t *lexer, const str_view_t buf,
 }
 
 static void lex_number(lex_lexer_t *lexer, const str_view_t buf,
-                       const char **current, arena_t *arena) {
+                       const u8 **current, arena_t *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
   pg_assert(current != NULL);
@@ -3735,7 +3734,7 @@ static void lex_number(lex_lexer_t *lexer, const str_view_t buf,
   lex_advance(buf, current);
 
   while (!lex_is_at_end(buf, current)) {
-    const char c = lex_peek(buf, current);
+    const u8 c = lex_peek(buf, current);
 
     if (!(lex_is_digit(c) || c == '_'))
       break;
@@ -3752,7 +3751,7 @@ static void lex_number(lex_lexer_t *lexer, const str_view_t buf,
 }
 
 // FIXME: use str_view_t
-static void lex_lex(lex_lexer_t *lexer, str_view_t buf, const char **current,
+static void lex_lex(lex_lexer_t *lexer, str_view_t buf, const u8 **current,
                     arena_t *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table != NULL);
@@ -4144,7 +4143,7 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   /* pg_assert(*column > 0); */
 }
 
-static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
+static u8 *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
@@ -4319,7 +4318,7 @@ static bool par_match_token(parser_t *parser, lex_token_kind_t kind) {
   return false;
 }
 
-static void par_error(parser_t *parser, lex_token_t token, const char *error) {
+static void par_error(parser_t *parser, lex_token_t token, const u8 *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4334,9 +4333,8 @@ static void par_error(parser_t *parser, lex_token_t token, const char *error) {
     par_find_token_position(parser, token, &line, &column, &token_string);
 
     fprintf(stderr, "%.*s:%u:%u: around `%.*s`, %s\n",
-            (int)parser->lexer->file_path.len,
-            (char *)parser->lexer->file_path.data, line, column,
-            token_string.len, token_string.value, error);
+            (int)parser->lexer->file_path.len, parser->lexer->file_path.data,
+            line, column, token_string.len, token_string.value, error);
 
     parser->state = PARSER_STATE_ERROR;
     break;
@@ -4351,7 +4349,7 @@ static void par_error(parser_t *parser, lex_token_t token, const char *error) {
 }
 
 static void par_expect_token(parser_t *parser, lex_token_kind_t kind,
-                             const char *error) {
+                             const u8 *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4424,7 +4422,7 @@ static u64 par_number(const parser_t *parser, lex_token_t token, u8 *flag) {
   return number;
 }
 
-static str_view_t par_token_to_string(parser_t *parser, u32 token_i) {
+static str_view_t par_token_to_str_view(parser_t *parser, u32 token_i) {
   pg_assert(parser != NULL);
   pg_assert(token_i < pg_array_len(parser->lexer->tokens));
 
@@ -5656,14 +5654,13 @@ static void resolver_load_methods_from_class_file(
 }
 
 static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
-                                 char *path, arena_t *scratch_arena,
+                                 char *path, arena_t scratch_arena,
                                  arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(path != NULL);
-  pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
-  char *current = (char *)content.data;
+  u8 *current = content.data;
   const u64 central_directory_end_size = 22;
   pg_assert(content.len >= 4 + central_directory_end_size);
   pg_assert(buf_read_u8(content, &current) == 0x50);
@@ -5674,16 +5671,16 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
   const string_t archive_file_path = string_make_from_c(path, arena);
 
   // Assume first no trailing comment.
-  char *cdre = (char *)content.data + content.len - central_directory_end_size;
+  u8 *cdre = content.data + content.len - central_directory_end_size;
   if (buf_read_le_u32(content, &cdre) != 0x06054b50) {
     // Need to scan backwards in the presence of a trailing comment to find
     // the magic number.
     cdre -= sizeof(u32);
-    while (--cdre > (char *)content.data &&
+    while (--cdre > content.data &&
            buf_read_le_u32(content, &cdre) != 0x06054b50) {
       cdre -= sizeof(u32);
     }
-    pg_assert(cdre > (char *)content.data);
+    pg_assert(cdre > content.data);
   }
 
   // disk number
@@ -5709,7 +5706,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
   // Sign of zip64.
   pg_assert(central_directory_offset != (u32)-1);
 
-  char *cdfh = (char *)content.data + central_directory_offset;
+  u8 *cdfh = content.data + central_directory_offset;
   for (u64 i = 0; i < records_count; i++) {
     pg_assert(buf_read_u8(content, &cdfh) == 0x50);
     pg_assert(buf_read_u8(content, &cdfh) == 0x4b);
@@ -5774,8 +5771,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
 
     // Read file header.
     {
-      char *local_file_header =
-          (char *)content.data + disk_start + local_file_header_offset;
+      u8 *local_file_header =
+          content.data + disk_start + local_file_header_offset;
       pg_assert(buf_read_u8(content, &local_file_header) == 0x50);
       pg_assert(buf_read_u8(content, &local_file_header) == 0x4b);
       pg_assert(buf_read_u8(content, &local_file_header) == 0x03);
@@ -5827,12 +5824,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
           compression_method == 0 &&
           string_ends_with_cstring(file_name, ".class")) {
         pg_assert(path != NULL);
-        arena_t tmp_arena = *scratch_arena;
 
         cf_buf_read_class_file(
             str_view_new(local_file_header,
                          uncompressed_size_according_to_directory_entry),
-            &local_file_header, &class_file, &tmp_arena);
+            &local_file_header, &class_file, &scratch_arena);
 
         ty_type_t type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
@@ -5861,8 +5857,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 &&
                  string_ends_with_cstring(file_name, ".class")) {
-        arena_t tmp_arena = *scratch_arena;
-        u8 *dst = arena_alloc(&tmp_arena,
+        u8 *dst = arena_alloc(&scratch_arena,
                               uncompressed_size_according_to_directory_entry,
                               sizeof(u8), ALLOCATION_BLOB);
         u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
@@ -5883,9 +5878,9 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
         res = inflate(&stream, Z_SYNC_FLUSH);
         pg_assert(res == Z_STREAM_END);
 
-        char *dst_current = (char *)dst;
+        u8 *dst_current = dst;
         cf_buf_read_class_file(str_view_new(dst, dst_len), &dst_current,
-                               &class_file, &tmp_arena);
+                               &class_file, &scratch_arena);
 
         ty_type_t type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
@@ -5925,7 +5920,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
   return false;
 }
 static bool cf_read_jmod_file(resolver_t *resolver, char *path,
-                              arena_t *scratch_arena, arena_t *arena) {
+                              arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(path != NULL);
   pg_assert(arena != NULL);
@@ -5948,7 +5943,7 @@ static bool cf_read_jmod_file(resolver_t *resolver, char *path,
   }
 
   ut_read_result_t read_res =
-      ut_read_all_from_fd(fd, str_builder_new(st.st_size, scratch_arena));
+      ut_read_all_from_fd(fd, str_builder_new(st.st_size, &scratch_arena));
   if (read_res.error) {
     fprintf(stderr, "Failed to read the full file %s: %s\n", path,
             strerror(read_res.error));
@@ -5959,7 +5954,7 @@ static bool cf_read_jmod_file(resolver_t *resolver, char *path,
   str_view_t content = read_res.content;
   // Check magic number.
   {
-    char *current = (char *)content.data;
+    u8 *current = content.data;
     pg_assert(buf_read_u8(content, &current) == 'J');
     pg_assert(buf_read_u8(content, &current) == 'M');
     pg_assert(buf_read_u8(content, &current) == 1);
@@ -5971,10 +5966,9 @@ static bool cf_read_jmod_file(resolver_t *resolver, char *path,
 }
 
 static bool cf_read_jar_file(resolver_t *resolver, char *path,
-                             arena_t *scratch_arena, arena_t *arena) {
+                             arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(path != NULL);
-  pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
   const int fd = open(path, O_RDONLY);
@@ -6118,7 +6112,7 @@ static string_t resolver_function_to_human_string(const resolver_t *resolver,
 
 static void resolver_remove_non_applicable_function_candidates(
     resolver_t *resolver, u32 *candidate_functions_i,
-    const u32 *call_site_argument_types_i, arena_t *scratch_arena,
+    const u32 *call_site_argument_types_i, arena_t scratch_arena,
     arena_t *arena) {
 
   u64 i = 0;
@@ -6143,7 +6137,7 @@ typedef enum __attribute__((packed)) {
 
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
     resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
-    arena_t *scratch_arena, arena_t *arena) {
+    arena_t scratch_arena, arena_t *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
   pg_assert(a->v.method.argument_types_i != NULL);
   pg_assert(a->this_class_name.value != NULL);
@@ -6171,13 +6165,13 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
 }
 
 static u32 resolver_select_most_specific_candidate_function(
-    resolver_t *resolver, u32 *candidates, arena_t *scratch_arena,
+    resolver_t *resolver, u32 *candidates, arena_t scratch_arena,
     arena_t *arena) {
 
   const u64 candidates_count = pg_array_len(candidates);
 
   bool *tombstones = NULL;
-  pg_array_init_reserve(tombstones, candidates_count, scratch_arena);
+  pg_array_init_reserve(tombstones, candidates_count, &scratch_arena);
   pg_array_header(tombstones)->len = candidates_count;
   memset(tombstones, false, pg_array_len(tombstones));
   u64 tombstones_count = 0;
@@ -6208,9 +6202,9 @@ static u32 resolver_select_most_specific_candidate_function(
 
         if (log_verbose) {
           const string_t a_human_type = resolver_function_to_human_string(
-              resolver, a_type_i, scratch_arena);
+              resolver, a_type_i, &scratch_arena);
           const string_t b_human_type = resolver_function_to_human_string(
-              resolver, b_type_i, scratch_arena);
+              resolver, b_type_i, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", a_human_type.len,
               a_human_type.value, b_human_type.len, b_human_type.value, a_b,
@@ -6254,7 +6248,7 @@ static u32 resolver_select_most_specific_candidate_function(
 static bool resolver_resolve_free_function(
     resolver_t *resolver, string_t method_name,
     const u32 *call_site_argument_types_i, u32 *picked_method_type_i,
-    u32 **candidate_functions_i, arena_t *scratch_arena, arena_t *arena) {
+    u32 **candidate_functions_i, arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
@@ -6366,7 +6360,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
   ut_fwrite_indent(file, indent);
 
-  const char *const type_kind =
+  const u8 *const type_kind =
       ty_type_kind_string(resolver->types, node->type_i);
   string_t human_type =
       ty_type_to_human_string(resolver->types, node->type_i, arena);
@@ -6378,7 +6372,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
         (int)resolver->parser->lexer->file_path.len,
-        (char *)resolver->parser->lexer->file_path.data, line, column,
+        resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     break;
 
@@ -6387,7 +6381,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
         (int)resolver->parser->lexer->file_path.len,
-        (char *)resolver->parser->lexer->file_path.data, line, column,
+        resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -6402,7 +6396,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
         (int)resolver->parser->lexer->file_path.len,
-        (char *)resolver->parser->lexer->file_path.data, line, column,
+        resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++)
@@ -6415,7 +6409,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
         node - resolver->parser->nodes, kind_string, token_string.len,
         token_string.value, human_type.len, human_type.value, type_kind,
         (int)resolver->parser->lexer->file_path.len,
-        (char *)resolver->parser->lexer->file_path.data, line, column,
+        resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     resolver_ast_fprint_node(resolver, node->lhs, file, indent + 2, arena);
     resolver_ast_fprint_node(resolver, node->rhs, file, indent + 2, arena);
@@ -6435,80 +6429,78 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 #define TYPE_SHORT_I ((u32)9)
 #define TYPE_STRING_I ((u32)10)
 
-static bool type_fqn_equal_to_package_and_name(string_t a_fqn,
-                                               string_t b_package_name,
-                                               string_t b_class_name,
-                                               arena_t *arena) {
-  pg_assert(!string_contains(b_class_name, "/."));
+static bool type_fqn_equal_to_package_and_name(str_view_t a_fqn,
+                                               str_view_t b_package_name,
+                                               str_view_t b_class_name,
+                                               arena_t scratch_arena) {
+  pg_assert(!str_view_contains_element(b_class_name, (u8)'/'));
+  pg_assert(!str_view_contains_element(b_class_name, (u8)'.'));
 
-  arena_t tmp_arena = *arena;
-
-  string_t b_fqn =
-      string_reserve(b_package_name.len + 1 + b_class_name.len, &tmp_arena);
-  if (!string_is_empty(b_package_name)) {
-    string_append_string(&b_fqn, b_package_name, &tmp_arena);
-    string_append_char(&b_fqn, '.', &tmp_arena);
+  str_builder_t b_fqn = str_builder_new(
+      b_package_name.len + 1 + b_class_name.len, &scratch_arena);
+  if (!str_view_is_empty(b_package_name)) {
+    b_fqn = str_builder_append(b_fqn, b_package_name, &scratch_arena);
+    b_fqn = str_builder_append_element(b_fqn, '.', &scratch_arena);
   }
-  string_append_string(&b_fqn, b_class_name, &tmp_arena);
+  b_fqn = str_builder_append(b_fqn, b_class_name, &scratch_arena);
 
-  return string_eq(a_fqn, b_fqn);
+  return str_view_eq(a_fqn, str_builder_build(b_fqn));
 }
 
 static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
-                                                  string_t fqn, u32 *type_i,
-                                                  arena_t *scratch_arena,
+                                                  str_view_t fqn, u32 *type_i,
+                                                  arena_t scratch_arena,
                                                   arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(fqn.value != NULL);
+  pg_assert(!str_view_is_empty(fqn));
   pg_assert(type_i != NULL);
-  pg_assert(scratch_arena != NULL);
   pg_assert(arena != NULL);
 
   // The JVM uses `/` but Java and Kotlin use `.` as separator.
-  pg_assert(!string_contains(fqn, "/"));
+  pg_assert(!str_view_contains_element(fqn, '/'));
 
   // TODO: Flag types coming from java as nullable.
 
-  if (string_eq_c(fqn, "kotlin.Any")) {
+  if (str_view_eq_c(fqn, "kotlin.Any")) {
     *type_i = TYPE_ANY_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Unit")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Unit")) {
     *type_i = TYPE_UNIT_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Boolean") ||
-             string_eq_c(fqn, "java/lang/Boolean")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Boolean") ||
+             str_view_eq_c(fqn, "java/lang/Boolean")) {
     *type_i = TYPE_BOOLEAN_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Byte") ||
-             string_eq_c(fqn, "java/lang/Byte")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Byte") ||
+             str_view_eq_c(fqn, "java/lang/Byte")) {
     *type_i = TYPE_BYTE_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Char") ||
-             string_eq_c(fqn, "java/lang/Char")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Char") ||
+             str_view_eq_c(fqn, "java/lang/Char")) {
     *type_i = TYPE_CHAR_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Short") ||
-             string_eq_c(fqn, "java/lang/Short")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Short") ||
+             str_view_eq_c(fqn, "java/lang/Short")) {
     *type_i = TYPE_SHORT_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Int") ||
-             string_eq_c(fqn, "java/lang/Integer")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Int") ||
+             str_view_eq_c(fqn, "java/lang/Integer")) {
     *type_i = TYPE_INT_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Float") ||
-             string_eq_c(fqn, "java/lang/Float")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Float") ||
+             str_view_eq_c(fqn, "java/lang/Float")) {
     *type_i = TYPE_FLOAT_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Long") ||
-             string_eq_c(fqn, "java/lang/Long")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Long") ||
+             str_view_eq_c(fqn, "java/lang/Long")) {
     *type_i = TYPE_LONG_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.Double") ||
-             string_eq_c(fqn, "java/lang/Double")) {
+  } else if (str_view_eq_c(fqn, "kotlin.Double") ||
+             str_view_eq_c(fqn, "java/lang/Double")) {
     *type_i = TYPE_DOUBLE_I;
     return true;
-  } else if (string_eq_c(fqn, "kotlin.String") ||
-             string_eq_c(fqn, "java/lang/String")) {
+  } else if (str_view_eq_c(fqn, "kotlin.String") ||
+             str_view_eq_c(fqn, "java/lang/String")) {
     *type_i = TYPE_STRING_I;
     return true;
   }
@@ -6535,8 +6527,8 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
     string_t tentative_class_file_path =
         string_reserve(class_path_entry.len + 1 + fqn.len + 6, arena);
 
-    string_t class_path_entry_string_fixme = (string_t){
-        .value = (char *)class_path_entry.data, .len = class_path_entry.len};
+    string_t class_path_entry_string_fixme =
+        (string_t){.value = class_path_entry.data, .len = class_path_entry.len};
     string_append_string(&tentative_class_file_path,
                          class_path_entry_string_fixme, arena);
     string_append_char(&tentative_class_file_path, '/', arena);
@@ -6552,12 +6544,12 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
     string_append_cstring(&tentative_class_file_path, ".class", arena);
 
     if (string_ends_with_cstring(tentative_class_file_path, ".class")) {
-      const int fd = open(tentative_class_file_path.value, O_RDONLY);
+      const int fd = open((char *)tentative_class_file_path.value, O_RDONLY);
       if (fd == -1)
         continue;
 
       struct stat st = {0};
-      if (stat(tentative_class_file_path.value, &st) == -1)
+      if (stat((char *)tentative_class_file_path.value, &st) == -1)
         continue;
 
       if (st.st_size == 0)
@@ -6565,12 +6557,12 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
 
       if (!S_ISREG(st.st_mode))
         continue;
-      char *buf = arena_alloc(arena, st.st_size, sizeof(u8), ALLOCATION_BLOB);
+      u8 *buf = arena_alloc(arena, st.st_size, sizeof(u8), ALLOCATION_BLOB);
       const ssize_t read_bytes = read(fd, buf, st.st_size);
       pg_assert(read_bytes == st.st_size);
       close(fd);
 
-      char *current = buf;
+      u8 *current = buf;
       cf_class_file_t class_file = {
           .class_file_path = tentative_class_file_path,
       };
@@ -6597,7 +6589,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
     if (!str_view_ends_with(class_path_entry, str_view_from_c(".jar")))
       continue;
 
-    char *file_path = str_view_to_c(class_path_entry, scratch_arena);
+    char *file_path = str_view_to_c(class_path_entry, &scratch_arena);
     LOG("class_path_entry=%s", file_path);
     const u64 previous_len = pg_array_len(resolver->types);
     cf_read_jar_file(resolver, file_path, scratch_arena, arena);
@@ -6619,7 +6611,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
 // TODO: Check if there is a way not to do it lazily. Not goog to have I/O
 // randomly pop up in the middle of type checking.
 static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
-                                          arena_t *scratch_arena,
+                                          arena_t scratch_arena,
                                           arena_t *arena) {
 
   // Already done?
@@ -6644,7 +6636,7 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
 
 static void resolver_load_standard_types(resolver_t *resolver,
                                          str_view_t java_home,
-                                         arena_t *scratch_arena,
+                                         arena_t scratch_arena,
                                          arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(!str_view_is_empty(java_home));
@@ -6667,16 +6659,16 @@ static void resolver_load_standard_types(resolver_t *resolver,
   for (u64 i = 0; i < sizeof(known_types) / sizeof(known_types[0]); i++)
     pg_array_append(resolver->types, known_types[i], arena);
 
-  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, scratch_arena);
+  string_t java_base_jmod_file_path = string_reserve(PATH_MAX, &scratch_arena);
   string_t java_home_string_fixme =
-      (string_t){.value = (char *)java_home.data, .len = java_home.len};
+      (string_t){.value = java_home.data, .len = java_home.len};
   string_append_string(&java_base_jmod_file_path, java_home_string_fixme,
                        arena);
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
-  cf_read_jmod_file(resolver, java_base_jmod_file_path.value, scratch_arena,
-                    arena);
+  cf_read_jmod_file(resolver, (char *)java_base_jmod_file_path.value,
+                    scratch_arena, arena);
 
   u32 dummy = 0;
   const string_t sanity_check =
@@ -6717,8 +6709,8 @@ static void ty_end_scope(resolver_t *resolver) {
   resolver->scope_depth -= 1;
 }
 
-static u32 ty_declare_variable(resolver_t *resolver, string_t name, u32 node_i,
-                               arena_t *arena) {
+static u32 ty_declare_variable(resolver_t *resolver, str_view_t name,
+                               u32 node_i, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
@@ -6754,7 +6746,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
 
-  const str_view_t name = par_token_to_string(resolver->parser, token_i);
+  const str_view_t name = par_token_to_str_view(resolver->parser, token_i);
 
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
     const ty_variable_t *const variable = &resolver->variables[i];
@@ -6819,7 +6811,7 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
   string_t token_string = {0};
   par_find_token_position(resolver->parser, previous_var_name_token, &line,
                           &column, &token_string);
-  char error[256] = {0};
+  u8 error[256] = {0};
   snprintf(error, 255, "variable shadowing, already declared at %u:%u", line,
            column);
   par_error(resolver->parser, resolver->parser->lexer->tokens[name_token_i],
@@ -6828,7 +6820,7 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
 }
 
 static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
-                                 arena_t *scratch_arena, arena_t *arena) {
+                                 arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
@@ -6850,7 +6842,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_UNRESOLVED_NAME);
     const string_t name =
-        par_token_to_string(resolver->parser, lhs->main_token_i);
+        par_token_to_str_view(resolver->parser, lhs->main_token_i);
 
     // Resolve arguments.
     u32 *call_site_argument_types_i = NULL;
@@ -7057,7 +7049,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       return 0;
 
     const u32 variable_i = ty_declare_variable(
-        resolver, par_token_to_string(resolver->parser, node->main_token_i),
+        resolver, par_token_to_str_view(resolver->parser, node->main_token_i),
         node_i, arena);
 
     const u32 lhs_type_i =
@@ -7194,7 +7186,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
   case AST_KIND_FUNCTION_PARAMETER: {
     const u32 variable_i = ty_declare_variable(
-        resolver, par_token_to_string(resolver->parser, node->main_token_i),
+        resolver, par_token_to_str_view(resolver->parser, node->main_token_i),
         node_i, arena);
     node->type_i =
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
@@ -7204,38 +7196,38 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   }
 
   case AST_KIND_TYPE: {
-    const string_t type_literal_string =
-        par_token_to_string(resolver->parser, node->main_token_i);
+    const str_view_t type_literal_string =
+        par_token_to_str_view(resolver->parser, node->main_token_i);
 
-    if (string_eq_c(type_literal_string, "Any") ||
-        string_eq_c(type_literal_string, "kotlin.Any")) {
+    if (str_view_eq_c(type_literal_string, "Any") ||
+        str_view_eq_c(type_literal_string, "kotlin.Any")) {
       node->type_i = TYPE_ANY_I;
-    } else if (string_eq_c(type_literal_string, "Unit") ||
-               string_eq_c(type_literal_string, "kotlin.Unit")) {
+    } else if (str_view_eq_c(type_literal_string, "Unit") ||
+               str_view_eq_c(type_literal_string, "kotlin.Unit")) {
       node->type_i = TYPE_UNIT_I;
-    } else if (string_eq_c(type_literal_string, "Int") ||
-               string_eq_c(type_literal_string, "kotlin.Int")) {
+    } else if (str_view_eq_c(type_literal_string, "Int") ||
+               str_view_eq_c(type_literal_string, "kotlin.Int")) {
       node->type_i = TYPE_INT_I;
-    } else if (string_eq_c(type_literal_string, "Boolean") ||
-               string_eq_c(type_literal_string, "kotlin.Boolean")) {
+    } else if (str_view_eq_c(type_literal_string, "Boolean") ||
+               str_view_eq_c(type_literal_string, "kotlin.Boolean")) {
       node->type_i = TYPE_BOOLEAN_I;
-    } else if (string_eq_c(type_literal_string, "Byte") ||
-               string_eq_c(type_literal_string, "kotlin.Byte")) {
+    } else if (str_view_eq_c(type_literal_string, "Byte") ||
+               str_view_eq_c(type_literal_string, "kotlin.Byte")) {
       node->type_i = TYPE_BYTE_I;
-    } else if (string_eq_c(type_literal_string, "Char") ||
-               string_eq_c(type_literal_string, "kotlin.Char")) {
+    } else if (str_view_eq_c(type_literal_string, "Char") ||
+               str_view_eq_c(type_literal_string, "kotlin.Char")) {
       node->type_i = TYPE_CHAR_I;
-    } else if (string_eq_c(type_literal_string, "Short") ||
-               string_eq_c(type_literal_string, "kotlin.Short")) {
+    } else if (str_view_eq_c(type_literal_string, "Short") ||
+               str_view_eq_c(type_literal_string, "kotlin.Short")) {
       node->type_i = TYPE_SHORT_I;
-    } else if (string_eq_c(type_literal_string, "Float") ||
-               string_eq_c(type_literal_string, "kotlin.Float")) {
+    } else if (str_view_eq_c(type_literal_string, "Float") ||
+               str_view_eq_c(type_literal_string, "kotlin.Float")) {
       node->type_i = TYPE_FLOAT_I;
-    } else if (string_eq_c(type_literal_string, "Double") ||
-               string_eq_c(type_literal_string, "kotlin.Double")) {
+    } else if (str_view_eq_c(type_literal_string, "Double") ||
+               str_view_eq_c(type_literal_string, "kotlin.Double")) {
       node->type_i = TYPE_DOUBLE_I;
-    } else if (string_eq_c(type_literal_string, "Long") ||
-               string_eq_c(type_literal_string, "kotlin.Long")) {
+    } else if (str_view_eq_c(type_literal_string, "Long") ||
+               str_view_eq_c(type_literal_string, "kotlin.Long")) {
       node->type_i = TYPE_LONG_I;
     } else {
       const bool found = resolver_resolve_fully_qualified_name(
@@ -7331,7 +7323,8 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                             arena);
       string_append_string(
           &error,
-          par_token_to_string(resolver->parser, current_function->main_token_i),
+          par_token_to_str_view(resolver->parser,
+                                current_function->main_token_i),
           arena);
       string_append_cstring(&error, "` of type ", arena);
       string_append_string(&error,
@@ -7362,7 +7355,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 }
 
 static void resolver_collect_user_defined_function_signatures(
-    resolver_t *resolver, arena_t *scratch_arena, arena_t *arena) {
+    resolver_t *resolver, arena_t scratch_arena, arena_t *arena) {
   for (u64 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
     par_ast_node_t *const node = &resolver->parser->nodes[i];
     if (node->kind != AST_KIND_FUNCTION_DEFINITION)
@@ -7391,8 +7384,7 @@ static void resolver_collect_user_defined_function_signatures(
                       .return_type_i = return_type_i,
                       .source_file_name =
                           (string_t){
-                              .value = (char *)resolver->parser->lexer
-                                           ->file_path.data,
+                              .value = resolver->parser->lexer->file_path.data,
                               .len = resolver->parser->lexer->file_path.len},
                       .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   }},
@@ -7957,8 +7949,8 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
   pg_assert(method->constant_pool != NULL);
 
   const u32 code_size = pg_array_len(method->code);
-  char *code = (char *)method->code;
-  char *current = code;
+  u8 *code = method->code;
+  u8 *current = code;
 
   while (current < code + code_size) {
     const u8 opcode = buf_read_u8(code, code_size, &current);

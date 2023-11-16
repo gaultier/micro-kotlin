@@ -44,6 +44,10 @@ static bool str_view_eq(str_view_t a, str_view_t b) {
   return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 }
 
+static bool str_view_eq_c(str_view_t a, char *b) {
+  return str_view_eq(a, str_view_from_c(b));
+}
+
 static char *str_view_to_c(str_view_t s, arena_t *arena) {
   char *c_str = arena_alloc(arena, s.len + 1, 1, ALLOCATION_STRING);
   memcpy(c_str, s.data, s.len);
@@ -56,6 +60,14 @@ static char *str_view_to_c(str_view_t s, arena_t *arena) {
 static bool str_view_contains(str_view_t haystack, str_view_t needle) {
   for (int64_t i = 0; i < (int64_t)haystack.len - (int64_t)needle.len; i++) {
     if (memcmp(&haystack.data[i], needle.data, needle.len) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool str_view_contains_element(str_view_t haystack, u8 needle) {
+  for (int64_t i = 0; i < (int64_t)haystack.len - (int64_t)needle.len; i++) {
+    if (haystack.data[i] == needle)
       return true;
   }
   return false;
@@ -117,10 +129,16 @@ static u8 *str_builder_end(str_builder_t sb) { return sb.data + sb.len; }
 
 static str_builder_t str_builder_append(str_builder_t sb, str_view_t more,
                                         arena_t *arena) {
-  sb = str_builder_reserve_at_least(sb, more.len, arena);
+  sb = str_builder_reserve_at_least(sb, more.len + 1, arena);
   memcpy(str_builder_end(sb), more.data, more.len);
+  sb.data[sb.len + more.len + 1] = 0;
   return (str_builder_t){
-      .len = sb.len + more.len, .data = sb.data, .cap = sb.cap};
+      .len = sb.len + more.len + 1, .data = sb.data, .cap = sb.cap};
+}
+
+static str_builder_t str_builder_append_element(str_builder_t sb, u8 c,
+                                                arena_t *arena) {
+  return str_builder_append(sb, str_view_new(&c,1),arena);
 }
 
 static str_builder_t str_builder_new(u64 initial_cap, arena_t *arena) {
