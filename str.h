@@ -35,6 +35,10 @@ static str_view_t str_view_advance(str_view_t s, u64 n) {
   return (str_view_t){.data = s.data + n, .len = s.len - n};
 }
 
+static u8 str_view_first(str_view_t s){
+  return s.len>0?s.data[0]:0;
+}
+
 static str_view_t str_view_from_c(char *s) {
   return (str_view_t){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
 }
@@ -206,8 +210,9 @@ static str_builder_t str_builder_clone(str_view_t src, arena_t *arena) {
   return res;
 }
 
-static str_builder_t str_builder_replace_element_starting_at(str_builder_t sb,u64 start, u8 from,
-                                                 u8 to) {
+static str_builder_t str_builder_replace_element_starting_at(str_builder_t sb,
+                                                             u64 start, u8 from,
+                                                             u8 to) {
   for (u64 i = start; i < sb.len; i++) {
     if (sb.data[i] == from)
       sb.data[i] = to;

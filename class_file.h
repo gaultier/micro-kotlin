@@ -1218,11 +1218,11 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
 
   case 'L': {
     remaining = str_view_advance(remaining, 1);
-    str_view_split_result_t semicolon_split = str_view_split(remaining, ';',arena);
+    str_view_split_result_t semicolon_split =
+        str_view_split(remaining, ';', arena);
     pg_assert(fqn.found);
     str_view_t fqn = semicolon_split.left;
 
-    string_drop_until_incl(&remaining, ';');
     if (str_view_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_STRING;
     } else {
@@ -1231,7 +1231,7 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     type_init_package_and_name(fqn, &type->package_name, &type->this_class_name,
                                arena);
 
-    return remaining;
+    return semicolon_split.right;
   }
 
   case '[': {
@@ -1239,7 +1239,7 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     ty_type_t item_type = {0};
 
     str_view_t descriptor_remaining = {
-        .value = remaining.value + 1,
+        .value = remaining.data + 1,
         .len = remaining.len - 1,
     };
     remaining =
@@ -1259,13 +1259,13 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     // descriptor, only based on the name.
     // Hence, the caller will have to patch the kind afterwards.
     type->kind = TYPE_METHOD;
-    string_drop_first_n(&remaining, 1);
+    remaining = str_view_advance(remaining, 1);
 
     u32 *argument_types_i = NULL;
     pg_array_init_reserve(argument_types_i, remaining.len, arena);
 
     for (u64 i = 0; i < 255; i++) {
-      if (string_first(remaining) == ')')
+      if (str_view_first(remaining) == ')')
         break;
 
       ty_type_t argument_type = {0};
@@ -1277,7 +1277,7 @@ static str_view_t cf_parse_descriptor(resolver_t *resolver,
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] = ')');
-    string_drop_first_n(&remaining, 1);
+remaining=    str_view_advance(remaining, 1);
 
     ty_type_t return_type = {0};
     remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
