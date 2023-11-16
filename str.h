@@ -38,6 +38,10 @@ static bool str_view_ends_with(str_view_t haystack, str_view_t needle) {
   return memcmp(&haystack.data[start], needle.data, needle.len) == 0;
 }
 
+static bool str_view_ends_with_c(str_view_t haystack, char* needle) {
+  return str_view_ends_with(haystack,str_view_from_c(needle));
+}
+
 static bool str_view_is_empty(str_view_t s) { return s.len == 0; }
 
 static bool str_view_eq(str_view_t a, str_view_t b) {

@@ -3204,10 +3204,8 @@ static void cf_get_source_location_of_function(
   const cf_attribute_t *const source_file =
       cf_attribute_by_kind(code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
   if (source_file != NULL) {
-    *filename = string_make(
-        cf_constant_array_get_as_string(&class_file->constant_pool,
-                                        source_file->v.source_file.source_file),
-        arena);
+    *filename = cf_constant_array_get_as_string(
+        &class_file->constant_pool, source_file->v.source_file.source_file),
   }
 
   const cf_attribute_t *const line_number_table = cf_attribute_by_kind(
@@ -5521,7 +5519,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str_view_t content,
       // TODO: Read Manifest file?
       if (uncompressed_size_according_to_directory_entry > 0 &&
           compression_method == 0 &&
-          string_ends_with_cstring(file_name, ".class")) {
+          str_view_ends_with_c(file_name, ".class")) {
         pg_assert(path != NULL);
 
         cf_buf_read_class_file(
@@ -6319,15 +6317,15 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
   if (type->super_type_i > 0)
     return true;
 
-  if (string_eq_c(type->this_class_name, "java/lang/Object"))
+  if (str_view_eq_c(type->this_class_name, "java/lang/Object"))
     return true; // Reached the top.
 
   // Since most types inherit from Object, we do not allocate a string for it
   // for optimization purposes.
-  if (string_is_empty(type->super_class_name)) {
+  if (str_view_is_empty(type->super_class_name)) {
     return resolver_resolve_fully_qualified_name(
-        resolver, string_make_from_c_no_alloc("java.lang.Object"),
-        &type->super_type_i, scratch_arena, arena);
+        resolver, str_view_from_c("java.lang.Object"), &type->super_type_i,
+        scratch_arena, arena);
   }
 
   return resolver_resolve_fully_qualified_name(resolver, type->super_class_name,
@@ -6369,11 +6367,10 @@ static void resolver_load_standard_types(resolver_t *resolver,
   string_append_cstring(&java_base_jmod_file_path, "/jmods/java.base.jmod",
                         arena);
 
-  cf_read_jmod_file(resolver, java_base_jmod_file_path,
-                    scratch_arena, arena);
+  cf_read_jmod_file(resolver, java_base_jmod_file_path, scratch_arena, arena);
 
   u32 dummy = 0;
-  str_view_t sanity_check = string_make_from_c_no_alloc("kotlin.io.ConsoleKt");
+  str_view_t sanity_check = str_view_from_c("kotlin.io.ConsoleKt");
   if (!resolver_resolve_fully_qualified_name(resolver, sanity_check, &dummy,
                                              scratch_arena, arena)) {
     fprintf(
@@ -6451,7 +6448,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
 
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
     const ty_variable_t *const variable = &resolver->variables[i];
-    if (!string_eq(name, variable->name))
+    if (!str_view_eq(name, variable->name))
       continue;
 
     if (variable->scope_depth == (u32)-1) {
@@ -6465,7 +6462,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
-static string_t
+static str_view_t
 resolver_get_fqn_from_navigation_chain(const resolver_t *resolver, u32 node_i) {
   const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
   pg_assert(node->kind == AST_KIND_NAVIGATION);
@@ -7082,10 +7079,7 @@ static void resolver_collect_user_defined_function_signatures(
         .v = {.method =
                   {
                       .return_type_i = return_type_i,
-                      .source_file_name =
-                          (string_t){
-                              .value = resolver->parser->lexer->file_path.data,
-                              .len = resolver->parser->lexer->file_path.len},
+                      .source_file_name = resolver->parser->lexer->file_path,
                       .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   }},
     };
@@ -8666,7 +8660,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
           .v = {
               .s = type->kind == TYPE_METHOD
                        ? type->v.method.name
-                       : string_make_from_c_no_alloc(CONSTRUCTOR_JVM_NAME),
+                       : str_view_from_c(CONSTRUCTOR_JVM_NAME),
           }};
       const u16 name_i =
           cf_constant_array_push(&class_file->constant_pool, &name, arena);
