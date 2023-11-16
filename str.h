@@ -38,8 +38,8 @@ static bool str_view_ends_with(str_view_t haystack, str_view_t needle) {
   return memcmp(&haystack.data[start], needle.data, needle.len) == 0;
 }
 
-static bool str_view_ends_with_c(str_view_t haystack, char* needle) {
-  return str_view_ends_with(haystack,str_view_from_c(needle));
+static bool str_view_ends_with_c(str_view_t haystack, char *needle) {
+  return str_view_ends_with(haystack, str_view_from_c(needle));
 }
 
 static bool str_view_is_empty(str_view_t s) { return s.len == 0; }
@@ -169,4 +169,10 @@ static str_builder_t str_builder_append_u64(str_builder_t sb, u64 n,
   char tmp[25] = "";
   snprintf(tmp, sizeof(tmp) - 1, "%lu", n);
   return str_builder_append_c(sb, tmp, arena);
+}
+
+static str_builder_t str_builder_capitalize_first(str_builder_t sb){
+  pg_assert(sb.len>0);
+  sb.data[0] += 'a'-'A';
+  return sb;
 }

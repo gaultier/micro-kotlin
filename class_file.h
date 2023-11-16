@@ -9249,17 +9249,19 @@ static str_view_t cg_make_class_name_from_path(str_view_t path,
                                                arena_t *arena) {
   pg_assert(path.value != NULL);
   pg_assert(path.len > 0);
-  str_view_t class_name = string_make(path, arena);
 
-  string_drop_before_last_incl(&class_name, '/');
-  pg_assert(class_name.len > 0);
-  pg_assert(class_name.value[0] != '/');
-  string_drop_after_last_incl(&class_name, '.');
-  pg_assert(class_name.len > 0);
+  str_view_split_result_t path_separator_split = str_view_split(path, '/');
+  pg_assert(path_separator_split.found);
+  pg_assert(!str_view_is_empty(path_separator_split.right));
 
-  string_capitalize_first(&class_name);
+  str_view_split_result_t dot_split =
+      str_view_split(path_separator_split.right, '.');
+  pg_assert(dot_split.found);
+  pg_assert(!str_view_is_empty(dot_split.left));
 
-  return class_name;
+  str_builder_t res = str_builder_new(dot_split.left, arena);
+  res = str_builder_capitalize_first(res);
+  return str_builder_build(res);
 }
 
 static void cg_emit_synthetic_class(cg_generator_t *gen,
