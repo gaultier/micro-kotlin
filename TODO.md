@@ -192,3 +192,9 @@ Secondary target audience: developers using Kotlin but not Intellij who need goo
 - 'Dumb' codebase
 
 
+
+## Debug verification errors in the JVM
+
+```sh
+$ java -Xlog:verification=trace DemoKt
+```
