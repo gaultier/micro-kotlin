@@ -5491,10 +5491,11 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
   pg_assert(arena != NULL);
 
   ut_read_result_t read_res =
-    // IMPORTANT: We store the content of JMOD files in the *scratch* arena, not the *main* arena.
-    // That's because most of the stuff in there is irrelevant.
-    // We pick afterwards just the few bits we want to retain and clone them into the main arena.
-      ut_read_all_from_file_name(path, scratch_arena, &scratch_arena);
+      // IMPORTANT: We store the content of JMOD files in the *scratch* arena,
+      // not the *main* arena. That's because most of the stuff in there is
+      // irrelevant. We pick afterwards just the few bits we want to retain and
+      // clone them into the main arena.
+      ut_read_all_from_file_path(path, scratch_arena, &scratch_arena);
   if (read_res.error) {
     return false;
   }
@@ -5519,7 +5520,7 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   pg_assert(arena != NULL);
 
   ut_read_result_t read_res =
-      ut_read_all_from_file_name(path, scratch_arena, arena);
+      ut_read_all_from_file_path(path, scratch_arena, arena);
   if (read_res.error) {
     return false;
   }

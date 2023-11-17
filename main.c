@@ -138,14 +138,15 @@ int main(int argc, char *argv[]) {
     }
 
     ut_read_result_t source_file_read_res =
-        ut_read_all_from_file_name(source_file_name, scratch_arena, &arena);
+        ut_read_all_from_file_path(source_file_name, scratch_arena, &arena);
     if (source_file_read_res.error) {
       exit(source_file_read_res.error);
     }
     if (source_file_read_res.content.len > UINT32_MAX) {
       fprintf(stderr, "The source file %.*s is too big: got %lu, max is %u\n",
-(int)              source_file_name.len, source_file_name.data,
+              (int)source_file_name.len, source_file_name.data,
               source_file_read_res.content.len, UINT32_MAX);
+    return false;
       exit(E2BIG);
     }
 

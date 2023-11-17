@@ -255,7 +255,7 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
   return (ut_read_result_t){.content = sb_build(sb)};
 }
 
-static ut_read_result_t ut_read_all_from_file_name(str path, arena_t scratch_arena, arena_t* arena) {
+static ut_read_result_t ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t* arena) {
     char *path_c_str = str_to_c(path, &scratch_arena);
     const int fd = open(path_c_str, O_RDONLY);
     if (fd == -1) {
