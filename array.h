@@ -1,4 +1,4 @@
-#pragma once 
+#pragma once
 #include "arena.h"
 
 // --------------------------- Array
@@ -85,4 +85,3 @@ typedef struct pg_array_header_t {
     x[i] = x[pg_array_len(x) - 1]; /* Swap. */                                 \
     pg_array_drop_last(x);                                                     \
   } while (0)
-

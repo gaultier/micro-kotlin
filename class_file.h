@@ -1,8 +1,8 @@
 #pragma once
 
 #include "arena.h"
-#include "str.h"
 #include "array.h"
+#include "str.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -16,37 +16,6 @@
 #include <unistd.h>
 #include <zlib.h>
 
-// ------------------- Utils
-
-static bool ut_char_is_alphabetic(u8 c) {
-  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
-}
-
-// ------------------- Utils, continued
-
-typedef struct {
-  str content;
-  int error;
-  pg_pad(4);
-} ut_read_result_t;
-
-static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
-  pg_assert(fd > 0);
-
-  while (sb_space(sb) > 0) {
-    pg_assert(sb.len <= sb.cap);
-
-    const i64 read_bytes = read(fd, sb_end_c(sb), sb_space(sb));
-    if (read_bytes == -1)
-      return (ut_read_result_t){.error = errno};
-    if (read_bytes == 0)
-      return (ut_read_result_t){.error = EINVAL}; // TODO: retry?
-
-    sb = sb_assume_appended_n(sb, read_bytes);
-    pg_assert(sb.len <= sb.cap);
-  }
-  return (ut_read_result_t){.content = sb_build(sb)};
-}
 
 str *class_path_string_to_class_path_entries(str class_path, arena_t *arena) {
   pg_assert(!str_is_empty(class_path));

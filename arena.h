@@ -148,7 +148,7 @@ static arena_t arena_new(u64 cap, bool mem_debug) {
       .cap = cap,
       .data.data = mmap(NULL, cap, PROT_READ | PROT_WRITE,
                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0),
-      .mem_debug=mem_debug,
+      .mem_debug = mem_debug,
   };
   pg_assert(((u64)arena.data.data % 16) == 0);
 
@@ -282,3 +282,5 @@ static str allocation_kind_to_string(allocation_kind_t kind) {
     pg_assert(0 && "unreachable");
   }
 }
+
+
