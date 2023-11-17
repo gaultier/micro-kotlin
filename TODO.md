@@ -19,34 +19,23 @@
 - [x] Local variables
 - [x] Comments (skipped by the lexer)
 - [x] Local variable mutation
-- [ ] Decode UCS-2 Strings in class files (in constant pool)
 - [x] Function definition
-- [ ] Field access
 - [x] String literals
 - [x] Grouping
-- [ ] Explicit casts
 - [x] Long
 - [x] Refactor/rename stuff
 - [x] Add asm operations that does the right thing based on the locals/stack types (e.g. add: iadd | fadd | ladd | dadd)
 - [x] Byte
-- [ ] Char
 - [x] Short
-- [ ] Double, Float
 - [x] Control flow: If
 - [x] Logical operator !
 - [x] Comparison operators <,<=,>,>=,==,!=
 - [x] Logical operators (and, or)
 - [x] Control flow: While
-- [ ] Control flow: Continue
-- [ ] Control flow: Break
-- [ ] Control flow: For (?)
-- [ ] Control flow: When
-- [ ] Control flow: Do-while
 - [x] Control flow: Return
 - [x] Checks around return
 - [x] Move types to the resolver
 - [x] Recursion (mutual recursion?)
-- [ ] Multiple files - what about ordering and type hole filling?
 - [x] Read .class, .jar, files in classpath for stdlib and such - only keep required data, don't read everything in the class path for efficiency
 - [x] Read .jmod files
 - [x] Add class path CLI option
@@ -55,30 +44,41 @@
 - [x] Use scratch arena when reading .class, .jar, .jmod files
 - [x] Merge functions to read .jmod, .jar if possible
 - [x] Avoid duplicating method resolution in the resolver and the lowerer (descriptor)
+- [x] Heap dump on Linux, tracking of call stack during allocations.
+- [x] Default imports
+- [x] Log the file/line of the function that was resolved
+- [x] Resolve free functions by building candidate sets
+- [x] Trivial inline (no jumps, no exceptions, etc)
+- [x] Remove builtin println
+- [x] Split `string_t` into `string_builder_t` and `string_t` (immutable, allows for trivial equality comparison with interning)
+- [ ] Decode UCS-2 Strings in class files (in constant pool)
+- [ ] Field access
+- [ ] Explicit casts
+- [ ] Char
+- [ ] Double, Float
+- [ ] Control flow: Continue
+- [ ] Control flow: Break
+- [ ] Control flow: For (?)
+- [ ] Control flow: When
+- [ ] Control flow: Do-while
+- [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
 - [ ] Constant pool deduplication
 - [ ] Hashes/Hashtables in judicious places in the compiler (strings, types?)
-- [x] Heap dump on Linux, tracking of call stack during allocations.
 - [ ] Heap dump on other OSes
 - [ ] Heap dump on Linux with function names (instead of addresses)
 - [ ] Heap dump on other OSes with function names (instead of addresses)
 - [ ] ~~Union/intersection of integer types for integer literals => constraint solver for type inference inside a function body!~~
 - [ ] Package name
-- [x] Default imports
 - [ ] Imports
-- [x] Log the file/line of the function that was resolved
-- [x] Resolve free functions by building candidate sets
-- [x] Trivial inline (no jumps, no exceptions, etc)
-- [x] Remove builtin println
 - [ ] Replace all `pg_assert` (i.e. `__builtin_trap()`) by either:
   * A user-friendly assert that prints the file, line, backtrace, error message, bug report link, and expression that failed (maybe even a core dump?)
-  * A compile error (e.g. for syntax that is not yet supported or invalid jar/jmod/class files)
+  * A Kotlin compile error (e.g. for syntax that is not yet supported or invalid jar/jmod/class files)
 - [ ] Fuzz (especially jar/jmod/class files)
 - [ ] **Call Fully Qualified Name (FQN)**
 - [ ] Call class constructor
 - [ ] Call class method
-- [x] Split `string_t` into `string_builder_t` and `string_t` (immutable, allows for trivial equality comparison with interning)
 - [ ] Access class field
 - [ ] Class definition (BIG!)
   * Fields
@@ -101,10 +101,10 @@
 
 **Later:**
 
+- [x] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] Heap dump as pprof format (?)
 - [ ] Read kotlin metadata in class files (protobuf)
 - [ ] Full-fledged type inference
-- [x] Do not hold on constant pool strings from .jmod/.class/.jar files that are not useful (e.g. used for CONSTANT_POOL_KIND_CLASS_INFO, etc) to reduce memory usage
 - [ ] High level APIs for the driver
 - [ ] Generate line tables
 - [ ] Generate full debug information
