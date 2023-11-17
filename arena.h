@@ -49,6 +49,9 @@ static str str_from_c(char *s) {
   return (str){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
 }
 
+#define str_from_c_literal(s)                                                  \
+  ((str){.data = (uint8_t *)s, .len = sizeof(s) - 1})
+
 // ------------------- Logs
 
 static bool log_verbose = false;

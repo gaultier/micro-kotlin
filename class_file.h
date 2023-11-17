@@ -379,28 +379,28 @@ typedef enum __attribute__((packed)) {
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
-static const char *par_ast_node_kind_to_string[AST_KIND_MAX] = {
-    [AST_KIND_NONE] = "NONE",
-    [AST_KIND_NUMBER] = "NUMBER",
-    [AST_KIND_BOOL] = "BOOL",
-    [AST_KIND_FUNCTION_DEFINITION] = "FUNCTION_DEFINITION",
-    [AST_KIND_FUNCTION_PARAMETER] = "FUNCTION_PARAMETER",
-    [AST_KIND_TYPE] = "TYPE",
-    [AST_KIND_BINARY] = "BINARY",
-    [AST_KIND_ASSIGNMENT] = "ASSIGNMENT",
-    [AST_KIND_THEN_ELSE] = "THEN_ELSE",
-    [AST_KIND_UNARY] = "UNARY",
-    [AST_KIND_VAR_DEFINITION] = "VAR_DEFINITION",
-    [AST_KIND_VAR_REFERENCE] = "VAR_REFERENCE",
-    [AST_KIND_CLASS_REFERENCE] = "CLASS_REFERENCE",
-    [AST_KIND_IF] = "IF",
-    [AST_KIND_LIST] = "LIST",
-    [AST_KIND_WHILE_LOOP] = "WHILE_LOOP",
-    [AST_KIND_STRING] = "STRING",
-    [AST_KIND_NAVIGATION] = "NAVIGATION",
-    [AST_KIND_UNRESOLVED_NAME] = "UNRESOLVED_NAME",
-    [AST_KIND_RETURN] = "RETURN",
-    [AST_KIND_CALL] = "CALL",
+static const str par_ast_node_kind_to_string[AST_KIND_MAX] = {
+    [AST_KIND_NONE] = str_from_c_literal("NONE"),
+    [AST_KIND_NUMBER] = str_from_c_literal("NUMBER"),
+    [AST_KIND_BOOL] = str_from_c_literal("BOOL"),
+    [AST_KIND_FUNCTION_DEFINITION] = str_from_c_literal("FUNCTION_DEFINITION"),
+    [AST_KIND_FUNCTION_PARAMETER] = str_from_c_literal("FUNCTION_PARAMETER"),
+    [AST_KIND_TYPE] = str_from_c_literal("TYPE"),
+    [AST_KIND_BINARY] = str_from_c_literal("BINARY"),
+    [AST_KIND_ASSIGNMENT] = str_from_c_literal("ASSIGNMENT"),
+    [AST_KIND_THEN_ELSE] = str_from_c_literal("THEN_ELSE"),
+    [AST_KIND_UNARY] = str_from_c_literal("UNARY"),
+    [AST_KIND_VAR_DEFINITION] = str_from_c_literal("VAR_DEFINITION"),
+    [AST_KIND_VAR_REFERENCE] = str_from_c_literal("VAR_REFERENCE"),
+    [AST_KIND_CLASS_REFERENCE] = str_from_c_literal("CLASS_REFERENCE"),
+    [AST_KIND_IF] = str_from_c_literal("IF"),
+    [AST_KIND_LIST] = str_from_c_literal("LIST"),
+    [AST_KIND_WHILE_LOOP] = str_from_c_literal("WHILE_LOOP"),
+    [AST_KIND_STRING] = str_from_c_literal("STRING"),
+    [AST_KIND_NAVIGATION] = str_from_c_literal("NAVIGATION"),
+    [AST_KIND_UNRESOLVED_NAME] = str_from_c_literal("UNRESOLVED_NAME"),
+    [AST_KIND_RETURN] = str_from_c_literal("RETURN"),
+    [AST_KIND_CALL] = str_from_c_literal("CALL"),
 };
 
 // TODO: compact fields.
@@ -5986,7 +5986,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   if (node->kind == AST_KIND_NONE)
     return;
 
-  const char *const kind_string = par_ast_node_kind_to_string[node->kind];
+  const str kind_string = par_ast_node_kind_to_string[node->kind];
   const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
   u32 line = 0;
   u32 column = 0;
@@ -6004,19 +6004,19 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
   case AST_KIND_BOOL:
-    LOG("[%ld] %s %.*s : %.*s (%s) (at %.*s:%u:%u:%u)",
-        node - resolver->parser->nodes, kind_string, (int)token_string.len,
-        token_string.data, (int)human_type.len, human_type.data, type_kind,
-        (int)resolver->parser->lexer->file_path.len,
+    LOG("[%ld] %.*s %.*s : %.*s (%s) (at %.*s:%u:%u:%u)",
+        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data, (int)human_type.len,
+        human_type.data, type_kind, (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     break;
 
   case AST_KIND_LIST:
-    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
-        node - resolver->parser->nodes, kind_string, (int)token_string.len,
-        token_string.data, (int)human_type.len, human_type.data, type_kind,
-        (int)resolver->parser->lexer->file_path.len,
+    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
+        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data, (int)human_type.len,
+        human_type.data, type_kind, (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
@@ -6028,10 +6028,10 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
     human_type =
         resolver_function_to_human_string(resolver, node->type_i, arena);
-    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
-        node - resolver->parser->nodes, kind_string, (int)token_string.len,
-        token_string.data, (int)human_type.len, human_type.data, type_kind,
-        (int)resolver->parser->lexer->file_path.len,
+    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
+        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data, (int)human_type.len,
+        human_type.data, type_kind, (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
         token.source_offset, pg_array_len(node->nodes));
 
@@ -6041,8 +6041,9 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     break;
   }
   default:
-    LOG("[%ld] %s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
-        node - resolver->parser->nodes, kind_string, (int)token_string.len,
+    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
+        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data
+        , (int)token_string.len,
         token_string.data, (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
