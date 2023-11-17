@@ -79,8 +79,8 @@ typedef struct pg_array_header_t {
           arena_alloc(arena, 1, new_physical_len, ALLOCATION_ARRAY);           \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
           "new_ptr=%p diff=%lu",                                               \
-          old_physical_len, new_physical_len, pg_array_header(x), pg__ah,      \
-          (u64)pg__ah - (u64)pg_array_header(x));                              \
+          old_physical_len, new_physical_len, (void *)pg_array_header(x),      \
+          (void *)pg__ah, (u64)pg__ah - (u64)pg_array_header(x));              \
       pg_assert((u64)pg__ah >= (u64)pg_array_header(x) + old_physical_len);    \
       memcpy(pg__ah, pg_array_header(x), old_physical_len);                    \
       x = (void *)(pg__ah + 1);                                                \
@@ -379,7 +379,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
-static const str par_ast_node_kind_to_string[AST_KIND_MAX] = {
+static str par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = str_from_c_literal("NONE"),
     [AST_KIND_NUMBER] = str_from_c_literal("NUMBER"),
     [AST_KIND_BOOL] = str_from_c_literal("BOOL"),
@@ -3151,8 +3151,10 @@ cf_get_source_location_of_function(const cf_class_file_t *class_file,
   const cf_attribute_t *const source_file =
       cf_attribute_by_kind(code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
   if (source_file != NULL) {
-    *filename = cf_constant_array_get_as_string(
-        &class_file->constant_pool, source_file->v.source_file.source_file);
+    *filename = str_clone(
+        cf_constant_array_get_as_string(&class_file->constant_pool,
+                                        source_file->v.source_file.source_file),
+        arena);
   }
 
   const cf_attribute_t *const line_number_table = cf_attribute_by_kind(
@@ -6042,10 +6044,9 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   }
   default:
     LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
-        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data
-        , (int)token_string.len,
-        token_string.data, (int)human_type.len, human_type.data, type_kind,
-        (int)resolver->parser->lexer->file_path.len,
+        node - resolver->parser->nodes, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data, (int)human_type.len,
+        human_type.data, type_kind, (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
     resolver_ast_fprint_node(resolver, node->lhs, file, indent + 2, arena);
