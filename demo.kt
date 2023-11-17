@@ -1,3 +1,6 @@
+// This is a demo of what is currently supported by the compiler.
+// It also acts as a end-to-end test suite.
+
 fun log_multiply_ints(a: Int, b: Int) {
   println(a*b)
 }

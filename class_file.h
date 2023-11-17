@@ -16,7 +16,6 @@
 #include <unistd.h>
 #include <zlib.h>
 
-
 str *class_path_string_to_class_path_entries(str class_path, arena_t *arena) {
   pg_assert(!str_is_empty(class_path));
 
@@ -3102,6 +3101,11 @@ static bool lex_match(str buf, u8 **current, u8 c) {
   return false;
 }
 
+static void lex_skip_until_incl(str buf, u8 **current, u8 c) {
+  while (!(lex_is_at_end(buf, current) || lex_peek(buf, current) == c))
+    lex_advance(buf, current);
+}
+
 static bool lex_is_digit(u8 c) { return ('0' <= c && c <= '9'); }
 
 static bool lex_is_identifier_char(u8 c) {
@@ -3400,12 +3404,18 @@ static void lex_lex(lex_lexer_t *lexer, str buf, u8 **current, arena_t *arena) {
       break;
     }
     case '/': {
-      const lex_token_t token = {
-          .kind = TOKEN_KIND_SLASH,
-          .source_offset = lex_get_current_offset(buf, current),
-      };
-      pg_array_append(lexer->tokens, token, arena);
       lex_advance(buf, current);
+      if (lex_match(buf, current, '/')) {
+        lex_skip_until_incl(buf, current, '\n');
+        break;
+      } else {
+        const lex_token_t token = {
+            .kind = TOKEN_KIND_SLASH,
+            .source_offset = lex_get_current_offset(buf, current),
+        };
+        pg_array_append(lexer->tokens, token, arena);
+      }
+
       break;
     }
     case '%': {
