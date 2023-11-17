@@ -688,7 +688,7 @@ cg_type_to_verification_info(const ty_type_t *type) {
   case TYPE_STRING:
     return (cf_verification_info_t){
         .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = 0 /* type->constant_pool_item_i */ // FIXME,
+        .extra_data = 0, // Patched later.
     };
 
   default:
@@ -2715,6 +2715,7 @@ cf_write_verification_info(FILE *file,
   file_write_u8(file, verification_info.kind);
 
   if (verification_info.kind >= 7) {
+    pg_assert(verification_info.extra_data>0);
     file_write_be_u16(file, verification_info.extra_data);
   }
 }
@@ -6671,7 +6672,6 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
     pg_assert(node->lhs < pg_array_len(resolver->parser->nodes));
-    pg_assert(node->rhs > 0);
     pg_assert(node->rhs < pg_array_len(resolver->parser->nodes));
 
     const u32 type_condition_i =
@@ -7376,6 +7376,7 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
   cf_code_array_push_u16(&gen->code->code, field_i, arena);
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+
   const cf_verification_info_t verification_info = {
       .kind = VERIFICATION_INFO_OBJECT,
       .extra_data = class_i,
@@ -7633,7 +7634,8 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
   }
   u64 stack_size_after_inline_snippet = pg_array_len(gen->frame->stack);
 
-  // Not conceptually required but we do not support inlining snippets that enlarge/shrink the stack right now.
+  // Not conceptually required but we do not support inlining snippets that
+  // enlarge/shrink the stack right now.
   pg_assert(stack_size_before_inline_snippet ==
             stack_size_after_inline_snippet);
 }
@@ -8483,16 +8485,16 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       const u16 initial_locals_physical_count =
           gen->frame->locals_physical_count;
 
+      u64 stack_index = pg_array_last_index(gen->frame->stack);
+
       for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
         const u32 argument_i = node->nodes[i];
         const par_ast_node_t *const argument =
             &gen->resolver->parser->nodes[argument_i];
-        const ty_type_t *const argument_type =
-            &gen->resolver->types[argument->type_i];
 
+        // Each argument `a, b, c` is now on the stack in order: `[..] [this] a b c` with the corresponding verification info.
         const cf_verification_info_t verification_info =
-            cg_type_to_verification_info(
-                resolver_eval_type(gen->resolver, argument_type));
+            gen->frame->stack[stack_index];
         const cf_variable_t variable = {
             .node_i = argument_i,
             .type_i = argument->type_i,
@@ -8506,6 +8508,9 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
                              &physical_local_index, arena);
 
         cg_emit_store_variable(gen, physical_local_index, arena);
+
+        stack_index -=
+            cf_verification_info_kind_word_count(verification_info.kind);
       }
       cg_emit_inlined_method_call(gen, class_file, type,
                                   initial_locals_physical_count, arena);
@@ -9046,9 +9051,17 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         cf_add_constant_string(&class_file->constant_pool, s, arena);
     const u16 jstring_i =
         cf_add_constant_jstring(&class_file->constant_pool, string_i, arena);
+
+    // TODO: Deduplicate.
+    const cf_constant_t string_class_info = {
+        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+        .v = {
+            .java_class_name = cf_add_constant_string(&class_file->constant_pool, str_from_c("java/lang/String"), arena),
+        }};
+
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = jstring_i,
+        .extra_data =cf_constant_array_push(&class_file->constant_pool, &string_class_info, arena),
     };
     cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 

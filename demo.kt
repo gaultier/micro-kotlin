@@ -32,6 +32,7 @@ fun main() { /* The entrypoint */
 }
 
 fun print_arguments(a: Int, b: Int){
+  println("print_arguments")
   println(a)
   println(b)
 }
@@ -42,6 +43,8 @@ fun plus(a: Long, b: Long) : Long { return a+b }
 
 
 fun fibonacci(n: Int) {
+  println("fibonacci")
+
   var a : Int = 0
   var b : Int = 1
 
@@ -72,7 +75,7 @@ fun fibonacci_10() {
 }
 
 fun fibonacci_10_long() {
-  // println("fibonacci_10_long")
+  println("fibonacci_10_long")
 
   var a : Long = 0L
   var b : Long = 1L
