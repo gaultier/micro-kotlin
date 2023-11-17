@@ -17,7 +17,7 @@
 - [x] Naive register (e.g. locals) allocation
 - [x] Type checking, no inference
 - [x] Local variables
-- [ ] Comments
+- [x] Comments (skipped by the lexer)
 - [x] Local variable mutation
 - [ ] Decode UCS-2 Strings in class files (in constant pool)
 - [x] Function definition
