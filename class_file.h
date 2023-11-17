@@ -108,7 +108,6 @@ static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
-
 // ------------------- Utils, continued
 
 typedef struct {
@@ -3105,7 +3104,6 @@ static str_view_t cf_make_class_file_path_kt(str_view_t source_file_name,
   {
     str_view_split_result_t last_path_component_split =
         str_view_rsplit(source_file_name, '/');
-    pg_assert(last_path_component_split.found);
 
     res = str_builder_capitalize_at(res, last_path_component_split.found_pos);
   }
@@ -9204,7 +9202,6 @@ static str_view_t cg_make_class_name_from_path(str_view_t path,
                                                arena_t *arena) {
 
   str_view_split_result_t path_separator_split = str_view_split(path, '/');
-  pg_assert(path_separator_split.found);
   pg_assert(!str_view_is_empty(path_separator_split.right));
 
   str_view_split_result_t dot_split =
@@ -9212,7 +9209,7 @@ static str_view_t cg_make_class_name_from_path(str_view_t path,
   pg_assert(dot_split.found);
   pg_assert(!str_view_is_empty(dot_split.left));
 
-  str_builder_t res = str_builder_new(dot_split.left.len, arena);
+  str_builder_t res = str_builder_clone(dot_split.left, arena);
   res = str_builder_capitalize_at(res, 0);
   return str_builder_build(res);
 }

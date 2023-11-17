@@ -20,10 +20,19 @@ static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   return NULL;
 }
 
+// https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 static u64 ut_next_power_of_two(u64 n) {
-  n += !n;
+  n += !n; // Ensure n>0
 
-  return (u64)1 << (63 - __builtin_clz(n + n - 1));
+  n--;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  n |= n >> 32;
+  n++;
+  return n;
 }
 
 static str_view_t str_view_new(u8 *s, u64 n) {
@@ -87,7 +96,7 @@ typedef struct {
 static str_view_split_result_t str_view_split(str_view_t haystack, u8 needle) {
   uint8_t *at = memchr(haystack.data, needle, haystack.len);
   if (at == NULL)
-    return (str_view_split_result_t){.left = haystack};
+    return (str_view_split_result_t){.left = haystack, .right = haystack};
 
   uint64_t found_pos = at - haystack.data;
 
@@ -103,7 +112,7 @@ static str_view_split_result_t str_view_split(str_view_t haystack, u8 needle) {
 static str_view_split_result_t str_view_rsplit(str_view_t haystack, u8 needle) {
   uint8_t *at = ut_memrchr(haystack.data, needle, haystack.len);
   if (at == NULL)
-    return (str_view_split_result_t){.left = haystack};
+    return (str_view_split_result_t){.left = haystack, .right = haystack};
 
   uint64_t found_pos = at - haystack.data;
 
@@ -119,13 +128,15 @@ static str_view_split_result_t str_view_rsplit(str_view_t haystack, u8 needle) {
 static u64 str_builder_space(str_builder_t sb) {
   pg_assert(sb.len < sb.cap);
 
-  return sb.cap - sb.len-1;
+  return sb.cap - sb.len - 1;
 }
 
 static str_builder_t str_builder_reserve_at_least(str_builder_t sb, u64 more,
                                                   arena_t *arena) {
 
-  if (str_builder_space(sb) > more)
+  more += 1; // Null terminator.
+
+  if (str_builder_space(sb) >= more)
     return sb;
 
   u64 new_cap = ut_next_power_of_two(str_builder_space(sb) + more);
@@ -139,11 +150,11 @@ static u8 *str_builder_end_c(str_builder_t sb) { return sb.data + sb.len; }
 
 static str_builder_t str_builder_append(str_builder_t sb, str_view_t more,
                                         arena_t *arena) {
-  sb = str_builder_reserve_at_least(sb, more.len + 1, arena);
+  sb = str_builder_reserve_at_least(sb, more.len, arena);
   memcpy(str_builder_end_c(sb), more.data, more.len);
-  sb.data[sb.len + more.len + 1] = 0;
+  sb.data[sb.len + more.len] = 0;
   return (str_builder_t){
-      .len = sb.len + more.len + 1, .data = sb.data, .cap = sb.cap};
+      .len = sb.len + more.len, .data = sb.data, .cap = sb.cap};
 }
 
 static str_builder_t str_builder_append_c(str_builder_t sb, char *more,
@@ -153,7 +164,10 @@ static str_builder_t str_builder_append_c(str_builder_t sb, char *more,
 
 static str_builder_t str_builder_append_element(str_builder_t sb, u8 c,
                                                 arena_t *arena) {
-  return str_builder_append(sb, str_view_new(&c, 1), arena);
+  sb = str_builder_reserve_at_least(sb, 1, arena);
+  sb.data[sb.len ] = c;
+  sb.data[sb.len  + 1] = 0;
+  return (str_builder_t){.len = sb.len + 1, .data = sb.data, .cap = sb.cap};
 }
 
 static str_builder_t str_builder_new(u64 initial_cap, arena_t *arena) {
@@ -181,7 +195,7 @@ static str_builder_t str_builder_append_u64(str_builder_t sb, u64 n,
 static str_builder_t str_builder_capitalize_at(str_builder_t sb, u64 pos) {
   pg_assert(pos < sb.len);
 
-  sb.data[pos] += 'a' - 'A';
+  sb.data[pos] -= 'a' - 'A';
 
   return sb;
 }

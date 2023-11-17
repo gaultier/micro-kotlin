@@ -218,8 +218,7 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
             arena->cap, arena->data.len, user_allocation_size,
             total_allocation_size);
 
-    // TODO: Re-alloc a bigger arena?
-    exit(ENOMEM);
+    pg_assert(0);
   }
 
   const u64 new_offset =
