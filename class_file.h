@@ -3127,7 +3127,8 @@ static void lex_skip_until_incl_2(str buf, u8 **current, u8 c1, u8 c2) {
   }
 
   if (!lex_is_at_end(buf, current)) {
-    pg_assert(lex_peek(buf, current) == c1 && lex_peek_next(buf, current) == c2);
+    pg_assert(lex_peek(buf, current) == c1 &&
+              lex_peek_next(buf, current) == c2);
     lex_advance(buf, current);
     lex_advance(buf, current);
   }
