@@ -4440,6 +4440,13 @@ static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
       .kind = AST_KIND_CALL,
       .main_token_i = parser->tokens_i - 1,
   };
+
+  // Calling a function with zero arguments.
+  if (par_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
+    pg_array_init_reserve(node.nodes, 0, arena);
+    return par_add_node(parser, &node, arena);
+  }
+
   pg_array_init_reserve(node.nodes, 256, arena);
   par_parse_value_arguments(parser, &node.nodes, arena);
 

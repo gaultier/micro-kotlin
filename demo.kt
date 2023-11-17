@@ -25,6 +25,10 @@ fun main() { /* The entrypoint */
 
   print_arguments(1, 2)
   println(plus(127L, 128L))
+
+  fibonacci_10()
+  fibonacci_10_long()
+  byte_short()
 }
 
 fun print_arguments(a: Int, b: Int){
@@ -52,6 +56,8 @@ fun fibonacci(n: Int) {
 }
 
 fun fibonacci_10() {
+  println("fibonacci_10")
+
   var a : Int = 0
   var b : Int = 1
 
@@ -66,6 +72,8 @@ fun fibonacci_10() {
 }
 
 fun fibonacci_10_long() {
+  // println("fibonacci_10_long")
+
   var a : Long = 0L
   var b : Long = 1L
 
@@ -80,6 +88,8 @@ fun fibonacci_10_long() {
 }
 
 fun byte_short(){
+  println("byte_short")
+
   var x: Byte = - 1
   println(x)
 
