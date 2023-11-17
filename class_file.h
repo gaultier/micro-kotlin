@@ -7633,8 +7633,9 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
   }
   u64 stack_size_after_inline_snippet = pg_array_len(gen->frame->stack);
 
-
-  pg_assert(stack_size_before_inline_snippet ==stack_size_after_inline_snippet);
+  // Not conceptually required but we do not support inlining snippets that enlarge/shrink the stack right now.
+  pg_assert(stack_size_before_inline_snippet ==
+            stack_size_after_inline_snippet);
 }
 
 static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
