@@ -9176,10 +9176,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
 static str cg_make_class_name_from_path(str path, arena_t *arena) {
 
-  str_split_result_t path_separator_split = str_split(path, '/');
-  pg_assert(!str_is_empty(path_separator_split.right));
+  str_split_result_t slash_split = str_rsplit(path, '/');
+  pg_assert(!str_is_empty(slash_split.right));
 
-  str_split_result_t dot_split = str_split(path_separator_split.right, '.');
+  str_split_result_t dot_split = str_rsplit(slash_split.right, '.');
   pg_assert(dot_split.found);
   pg_assert(!str_is_empty(dot_split.left));
 
