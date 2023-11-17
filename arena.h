@@ -32,19 +32,21 @@
 #include <elf.h>
 #endif
 
+// String builder, like a dynamic array.
 typedef struct {
   u8 *data;
   u64 len;
   u64 cap;
-} str_builder_t;
+} str_builder;
 
+// String view, immutable.
 typedef struct {
   u8 *data;
   u64 len;
-} str_view_t;
+} str;
 
-static str_view_t str_view_from_c(char *s) {
-  return (str_view_t){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
+static str str_from_c(char *s) {
+  return (str){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
 }
 
 // ------------------- Logs
@@ -116,7 +118,7 @@ end:
 }
 
 typedef struct {
-  str_view_t data;
+  str data;
   u64 cap;
 } arena_t;
 
@@ -255,20 +257,20 @@ arena_get_user_allocation_offset(arena_t arena,
          metadata->call_stack_count * sizeof(u64);
 }
 
-static str_view_t allocation_kind_to_string(allocation_kind_t kind) {
+static str allocation_kind_to_string(allocation_kind_t kind) {
   const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
 
   switch (real_kind) {
   case ALLOCATION_OBJECT:
-    return str_view_from_c("ALLOCATION_OBJECT");
+    return str_from_c("ALLOCATION_OBJECT");
   case ALLOCATION_STRING:
-    return str_view_from_c("ALLOCATION_STRING");
+    return str_from_c("ALLOCATION_STRING");
   case ALLOCATION_ARRAY:
-    return str_view_from_c("ALLOCATION_ARRAY");
+    return str_from_c("ALLOCATION_ARRAY");
   case ALLOCATION_CONSTANT_POOL:
-    return str_view_from_c("ALLOCATION_CONSTANT_POOL");
+    return str_from_c("ALLOCATION_CONSTANT_POOL");
   case ALLOCATION_BLOB:
-    return str_view_from_c("ALLOCATION_BLOB");
+    return str_from_c("ALLOCATION_BLOB");
   default:
     pg_assert(0 && "unreachable");
   }

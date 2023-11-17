@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
   pie_offset = ut_get_pie_displacement();
 
   int opt = 0;
-  str_view_t classpath = str_view_from_c(".");
-  str_view_t java_home = {0};
+  str classpath = str_from_c(".");
+  str java_home = {0};
 
   while ((opt = getopt(argc, argv, "hmvc:j:")) != -1) {
     switch (opt) {
@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
       break;
 
     case 'c':
-      classpath = str_view_from_c(optarg);
+      classpath = str_from_c(optarg);
       break;
 
     case 'h':
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
       break;
 
     case 'j':
-      java_home = str_view_from_c(optarg);
+      java_home = str_from_c(optarg);
       break;
 
     default:
@@ -77,11 +77,11 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
     print_usage_and_exit(argv[0]);
   }
-  if (str_view_is_empty(java_home)) {
+  if (str_is_empty(java_home)) {
     fprintf(stderr, "Missing java_home (-j <java_home>).\n");
     print_usage_and_exit(argv[0]);
   }
-  if (str_view_is_empty(classpath)) {
+  if (str_is_empty(classpath)) {
     fprintf(stderr, "Given empty class path (-c <class_path>).\n");
     print_usage_and_exit(argv[0]);
   }
@@ -91,19 +91,18 @@ int main(int argc, char *argv[]) {
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
 
-  str_view_t *class_path_entries =
+  str *class_path_entries =
       class_path_string_to_class_path_entries(classpath, &arena);
 
   {
     // TODO: when parsing multiple files, need to allocate that.
-    str_view_t source_file_name = str_view_from_c(argv[optind]);
-    if (!str_view_ends_with(source_file_name, str_view_from_c(".kt"))) {
+    str source_file_name = str_from_c(argv[optind]);
+    if (!str_ends_with(source_file_name, str_from_c(".kt"))) {
       fprintf(stderr, "Expected an input file ending with .kt\n");
       exit(EINVAL);
     }
 
-    char *source_file_name_cstr =
-        str_view_to_c(source_file_name, &scratch_arena);
+    char *source_file_name_cstr = str_to_c(source_file_name, &scratch_arena);
     const int fd = open(source_file_name_cstr, O_RDONLY);
     if (fd == -1) {
       fprintf(stderr, "Failed to open the file %s: %s\n", source_file_name_cstr,
@@ -128,7 +127,7 @@ int main(int argc, char *argv[]) {
     }
 
     ut_read_result_t source_file_read_res =
-        ut_read_all_from_fd(fd, str_builder_new(st.st_size, &arena));
+        ut_read_all_from_fd(fd, sb_new(st.st_size, &arena));
     if (source_file_read_res.error) {
       fprintf(stderr, "Failed to read the full file %s: %s\n",
               source_file_name_cstr, strerror(source_file_read_res.error));
@@ -141,7 +140,7 @@ int main(int argc, char *argv[]) {
         .file_path = source_file_name,
     };
 
-    str_view_t source = source_file_read_res.content;
+    str source = source_file_read_res.content;
     pg_array_init_reserve(lexer.tokens, source.len, &arena);
     pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
@@ -158,7 +157,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    const str_view_t class_file_path =
+    const str class_file_path =
         cf_make_class_file_path_kt(source_file_name, &arena);
 
     resolver_t resolver = {0};
@@ -196,7 +195,7 @@ int main(int argc, char *argv[]) {
       return 1;
 
     char *class_file_path_c_str =
-        str_view_to_c(class_file.class_file_path, &scratch_arena);
+        str_to_c(class_file.class_file_path, &scratch_arena);
     FILE *file = fopen(class_file_path_c_str, "w");
     if (file == NULL) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
@@ -244,7 +243,7 @@ int main(int argc, char *argv[]) {
       cf_class_file_t class_file_verify = {.class_file_path =
                                                class_file.class_file_path};
       u8 *current = buf;
-      cf_buf_read_class_file(str_view_new(buf, buf_len), &current,
+      cf_buf_read_class_file(str_new(buf, buf_len), &current,
                              &class_file_verify, &tmp_arena);
     }
   }
