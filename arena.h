@@ -124,6 +124,8 @@ end:
 typedef struct {
   str data;
   u64 cap;
+  bool mem_debug;
+  pg_pad(7);
 } arena_t;
 
 typedef enum __attribute__((packed)) {
@@ -141,11 +143,12 @@ typedef struct {
   u8 call_stack_count : 8;
 } allocation_metadata_t;
 
-static arena_t arena_new(u64 cap) {
+static arena_t arena_new(u64 cap, bool mem_debug) {
   arena_t arena = {
       .cap = cap,
       .data.data = mmap(NULL, cap, PROT_READ | PROT_WRITE,
                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0),
+      .mem_debug=mem_debug,
   };
   pg_assert(((u64)arena.data.data % 16) == 0);
 
@@ -185,7 +188,6 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-static bool cli_mem_debug = false;
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
                          allocation_kind_t kind) {
   // clang-format off
@@ -206,7 +208,7 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 
   u64 call_stack[256] = {0};
   const u8 call_stack_count =
-      cli_mem_debug
+      arena->mem_debug
           ? ut_record_call_stack(call_stack,
                                  sizeof(call_stack) / sizeof(call_stack[0]))
           : 0;

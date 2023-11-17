@@ -51,6 +51,7 @@ int main(int argc, char *argv[]) {
   int opt = 0;
   str cli_classpath = str_from_c(".");
   str cli_java_home = {0};
+  bool cli_mem_debug = false;
 
   int options_index = 0;
   while ((opt = getopt_long(argc, argv, "hmvc:j:", long_cli_options,
@@ -119,10 +120,10 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  arena_t arena = arena_new(1L << 28); // 256 MiB
+  arena_t arena = arena_new(1L << 28, cli_mem_debug); // 256 MiB
 
   // This size should be at least the size of the biggest file we read.
-  arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
+  arena_t scratch_arena = arena_new(1L << 28, cli_mem_debug); // 256 MiB
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
