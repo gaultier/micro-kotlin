@@ -1,12 +1,10 @@
 #pragma once
 
-#define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 500L
+#include "arena.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "arena.h"
 
 static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);

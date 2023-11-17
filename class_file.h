@@ -1,7 +1,8 @@
 #pragma once
 
-#define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 500L
+#include "arena.h"
+#include "str.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -13,9 +14,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <zlib.h>
-
-#include "arena.h"
-#include "str.h"
 
 // --------------------------- Array
 

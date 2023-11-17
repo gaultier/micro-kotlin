@@ -2,6 +2,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 500L
+#define _GNU_SOURCE
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -184,7 +185,7 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-static bool mem_debug = false;
+static bool cli_mem_debug = false;
 static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
                          allocation_kind_t kind) {
   // clang-format off
@@ -205,9 +206,10 @@ static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
 
   u64 call_stack[256] = {0};
   const u8 call_stack_count =
-      mem_debug ? ut_record_call_stack(call_stack, sizeof(call_stack) /
-                                                       sizeof(call_stack[0]))
-                : 0;
+      cli_mem_debug
+          ? ut_record_call_stack(call_stack,
+                                 sizeof(call_stack) / sizeof(call_stack[0]))
+          : 0;
 
   const u64 user_allocation_size = len * element_size; // TODO: check overflow.
   pg_assert(user_allocation_size > 0);

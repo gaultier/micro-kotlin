@@ -1,6 +1,9 @@
 #include "arena.h"
 #include "class_file.h"
 #include "str.h"
+#include <asm-generic/errno-base.h>
+#include <bits/getopt_core.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,14 +20,22 @@ static const char *usage =
 "\n  %s -j /usr/lib/jvm/java-21-openjdk-amd64/ -c /usr/share/java/kotlin-stdlib.jar main.kt"
 "\n"
 "\nOPTIONS:"
-"\n  -v                Verbose."
-"\n  -m                Debug memory usage by printing a heap dump in CSV form."
-"\n  -h                Print this help message and exit."
-"\n  -c <classpath>    Load additional classpath entries, which are colon separated."
-"\n  -j <java_home>    Java home (the root of the Java installation)."
+"\n  -v, --verbose                  Verbose."
+"\n  -m, --memory-usage             Debug memory usage by printing a heap dump in CSV form."
+"\n  -h, --help                     Print this help message and exit."
+"\n  -c, --classpath <classpath>    Load additional classpath entries, which are colon separated."
+"\n  -j, --java-home <java_home>    Java home (the root of the Java installation)."
 "\n"
     // clang-format on
     ;
+
+static struct option long_cli_options[] = {
+    {.name = "java-home", .has_arg = true, .val = 'j'},
+    {.name = "memory-usage", .has_arg = false, .val = 'm'},
+    {.name = "classpath", .has_arg = true, .val = 'c'},
+    {.name = "verbose", .has_arg = false, .val = 'v'},
+    {.name = "help", .has_arg = false, .val = 'h'},
+};
 
 static void print_usage_and_exit(const char *executable_name) {
   printf(usage, executable_name, executable_name);
@@ -38,17 +49,19 @@ int main(int argc, char *argv[]) {
   pie_offset = ut_get_pie_displacement();
 
   int opt = 0;
-  str classpath = str_from_c(".");
-  str java_home = {0};
+  str cli_classpath = str_from_c(".");
+  str cli_java_home = {0};
 
-  while ((opt = getopt(argc, argv, "hmvc:j:")) != -1) {
+  int options_index = 0;
+  while ((opt = getopt_long(argc, argv, "hmvc:j:", long_cli_options,
+                            &options_index)) != -1) {
     switch (opt) {
     case 'v':
       log_verbose = true;
       break;
 
     case 'c':
-      classpath = str_from_c(optarg);
+      cli_classpath = str_from_c(optarg);
       break;
 
     case 'h':
@@ -56,12 +69,32 @@ int main(int argc, char *argv[]) {
       break;
 
     case 'm':
-      mem_debug = true;
+      cli_mem_debug = true;
       break;
 
     case 'j':
-      java_home = str_from_c(optarg);
+      cli_java_home = str_from_c(optarg);
       break;
+
+    case 0: // Long option
+    {
+      struct option long_cli_option = long_cli_options[options_index];
+      str cli_option_name = str_from_c((char *)long_cli_option.name);
+      str cli_arg = str_from_c(optarg);
+      if (str_eq_c(cli_option_name, "java-home"))
+        cli_java_home = cli_arg;
+      if (str_eq_c(cli_option_name, "classpath"))
+        cli_classpath = cli_arg;
+      else {
+        fprintf(stderr,
+                "Got argument for long option that did not expect any: %s %s\n",
+                long_cli_option.name, optarg);
+        print_usage_and_exit(argv[0]);
+        exit(EINVAL);
+      }
+
+      break;
+    }
 
     default:
       fprintf(stderr, "Unknown option: %c\n", opt);
@@ -77,11 +110,11 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Multiple source files not yet supported.\n");
     print_usage_and_exit(argv[0]);
   }
-  if (str_is_empty(java_home)) {
-    fprintf(stderr, "Missing java_home (-j <java_home>).\n");
+  if (str_is_empty(cli_java_home)) {
+    fprintf(stderr, "Missing required option -j, --java-home.\n");
     print_usage_and_exit(argv[0]);
   }
-  if (str_is_empty(classpath)) {
+  if (str_is_empty(cli_classpath)) {
     fprintf(stderr, "Given empty class path (-c <class_path>).\n");
     print_usage_and_exit(argv[0]);
   }
@@ -92,7 +125,7 @@ int main(int argc, char *argv[]) {
   arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
 
   str *class_path_entries =
-      class_path_string_to_class_path_entries(classpath, &arena);
+      class_path_string_to_class_path_entries(cli_classpath, &arena);
 
   {
     // TODO: when parsing multiple files, need to allocate that.
@@ -164,7 +197,8 @@ int main(int argc, char *argv[]) {
     resolver_init(&resolver, &parser, class_path_entries, class_file_path,
                   &arena);
 
-    resolver_load_standard_types(&resolver, java_home, scratch_arena, &arena);
+    resolver_load_standard_types(&resolver, cli_java_home, scratch_arena,
+                                 &arena);
     LOG("After loading known types: arena=%lu", arena.data.len);
 
     resolver_collect_user_defined_function_signatures(&resolver, scratch_arena,
@@ -248,6 +282,6 @@ int main(int argc, char *argv[]) {
     }
   }
   LOG("arena=%lu", arena.data.len);
-  if (mem_debug)
+  if (cli_mem_debug)
     arena_heap_dump(arena);
 }
