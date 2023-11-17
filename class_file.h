@@ -7505,6 +7505,8 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
   u8 *code = method->code;
   u8 *current = code;
 
+  u64 stack_size_before_inline_snippet = pg_array_len(gen->frame->stack);
+
   while (current < code + code_size) {
     const u8 opcode = buf_read_u8(str_new(code, code_size), &current);
 
@@ -7629,6 +7631,10 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
       pg_assert(0 && "unimplemented");
     }
   }
+  u64 stack_size_after_inline_snippet = pg_array_len(gen->frame->stack);
+
+
+  pg_assert(stack_size_before_inline_snippet ==stack_size_after_inline_snippet);
 }
 
 static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
