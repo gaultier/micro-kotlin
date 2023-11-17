@@ -62,6 +62,17 @@ static bool str_view_ends_with_c(str_view_t haystack, char *needle) {
 static bool str_view_is_empty(str_view_t s) { return s.len == 0; }
 
 static bool str_view_eq(str_view_t a, str_view_t b) {
+  if (a.len == 0 && b.len != 0)
+    return false;
+  if (b.len == 0 && a.len != 0)
+    return false;
+
+  if (a.len == 0 && b.len == 0)
+    return true;
+
+  pg_assert(a.data != NULL);
+  pg_assert(b.data != NULL);
+
   return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 }
 
@@ -165,8 +176,8 @@ static str_builder_t str_builder_append_c(str_builder_t sb, char *more,
 static str_builder_t str_builder_append_element(str_builder_t sb, u8 c,
                                                 arena_t *arena) {
   sb = str_builder_reserve_at_least(sb, 1, arena);
-  sb.data[sb.len ] = c;
-  sb.data[sb.len  + 1] = 0;
+  sb.data[sb.len] = c;
+  sb.data[sb.len + 1] = 0;
   return (str_builder_t){.len = sb.len + 1, .data = sb.data, .cap = sb.cap};
 }
 
@@ -194,7 +205,8 @@ static str_builder_t str_builder_append_u64(str_builder_t sb, u64 n,
 
 static str_builder_t str_builder_capitalize_at(str_builder_t sb, u64 pos) {
   pg_assert(pos < sb.len);
-
+  
+  if ('a' <= sb.data[pos] && sb.data[pos] <='z')
   sb.data[pos] -= 'a' - 'A';
 
   return sb;

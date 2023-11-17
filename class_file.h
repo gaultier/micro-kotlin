@@ -1665,7 +1665,7 @@ static void cf_buf_read_code_attribute(str_view_t buf, u8 **current,
 
   pg_array_init_reserve(code.code, code_len, arena);
   str_view_t code_slice = buf_read_n_u8(buf, code_len, current);
-  memcpy(&code, code_slice.data, code_slice.len);
+  memcpy(code.code, code_slice.data, code_slice.len);
   pg_array_header(code.code)->len = code_len;
 
   cf_buf_read_code_attribute_exceptions(buf, current, class_file,
@@ -6174,21 +6174,28 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
   }
 
   // Scan the class path entries for `$CLASS_PATH_ENTRY/$CLASS_NAME.class`.
+  // E.g.: `/usr/share/java/kotlin-stdlib.jar` -> `/usr/share/java/Fqn.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    str_view_t class_path_entry = resolver->class_path_entries[i];
+    str_view_t entry = resolver->class_path_entries[i];
+    str_view_split_result_t entry_last_slash_split =
+        str_view_rsplit(entry, '/');
+    str_view_t parent = entry_last_slash_split.left;
+
+    str_view_t final_extension = str_view_from_c(".class");
 
     str_builder_t tentative_class_file_path =
-        str_builder_new(class_path_entry.len + 1 + fqn.len + 6, arena);
+        str_builder_new(parent.len + 1 + fqn.len + final_extension.len, arena);
 
     tentative_class_file_path =
-        str_builder_append(tentative_class_file_path, class_path_entry, arena);
+        str_builder_append(tentative_class_file_path, parent, arena);
     tentative_class_file_path =
         str_builder_append_element(tentative_class_file_path, '/', arena);
 
     {
       u64 replace_start = tentative_class_file_path.len;
 
-      // Transform e.g. `kotlin.io.ConsoleKt` into `kotlin/io/ConsoleKt`.
+      // Transform e.g. `/a/b/kotlin.io.ConsoleKt` into
+      // `/a/b/kotlin/io/ConsoleKt`.
       tentative_class_file_path =
           str_builder_append(tentative_class_file_path, fqn, arena);
 
@@ -6197,7 +6204,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver,
     }
 
     tentative_class_file_path =
-        str_builder_append_c(tentative_class_file_path, ".class", arena);
+        str_builder_append(tentative_class_file_path, final_extension, arena);
 
     {
       const int fd = open((char *)tentative_class_file_path.data, O_RDONLY);
