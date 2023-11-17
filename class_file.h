@@ -6499,7 +6499,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
               resolver, name, call_site_argument_types_i, &picked_method_type_i,
               &candidate_functions_i, tmp_arena, arena)) {
 
-        str_builder error = sb_new(256, arena);
+        str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "failed to find matching function", arena);
 
         if (pg_array_len(candidate_functions_i) == 0) {
@@ -6571,7 +6571,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (type->kind != TYPE_BOOLEAN) {
-        str_builder error = sb_new(256, arena);
+        str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "incompatible types: got ", arena);
         error = sb_append(
             error,
@@ -6601,7 +6601,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
           error, ty_type_to_human_string(resolver->types, lhs_i, arena), arena);
@@ -6624,7 +6624,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (lhs_type->kind != TYPE_BOOLEAN) {
-        str_builder error = sb_new(256, arena);
+        str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(
             error, "incompatible types: expected Boolean, got: ", arena);
         error = sb_append(
@@ -6692,7 +6692,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       str rhs_type_human =
           ty_type_to_human_string(resolver->types, rhs_type_i, arena);
 
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible types: declared type is ", arena);
       error = sb_append(error, lhs_type_human, arena);
@@ -6724,7 +6724,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error,
                           "incompatible types, expected Boolean, got: ", arena);
 
@@ -6748,7 +6748,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error,
                           "incompatible types, expect Boolean, got: ", arena);
 
@@ -6793,7 +6793,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       } else {
         const lex_token_t main_token =
             resolver->parser->lexer->tokens[node->main_token_i];
-        str_builder error = sb_new(256, arena);
+        str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error,
                             "Unknown reference to a name, neither a variable "
                             "in scope or an external identifier: ",
@@ -6861,7 +6861,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       const bool found = resolver_resolve_fully_qualified_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
       if (!found) {
-        str_builder error = sb_new(256, arena);
+        str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "unknown type: ", arena);
         error = sb_append(error, type_literal_string, arena);
 
@@ -6903,7 +6903,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     ty_end_scope(resolver);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
           error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
@@ -6946,7 +6946,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
                                   &resolver->types[return_type_i])) {
-      str_builder error = sb_new(256, arena);
+      str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible return type in function `", arena);
       error = sb_append(error,
