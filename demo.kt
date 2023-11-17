@@ -16,7 +16,7 @@ fun fibonacci_rec(n: Int) : Int {
   return n + fibonacci_rec(n-1)
 }
 
-fun main() {
+fun main() { /* The entrypoint */
   println("Hello, world!")
   log_multiply_ints(3, 4)
   println(return_multiply_ints(8,9))

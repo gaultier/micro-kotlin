@@ -3078,6 +3078,18 @@ static u8 lex_peek(str buf, u8 **current) {
   return lex_is_at_end(buf, current) ? 0 : **current;
 }
 
+static u8 lex_peek_next(str buf, u8 **current) {
+  pg_assert(!str_is_empty(buf));
+  pg_assert(current != NULL);
+  pg_assert(*current != NULL);
+
+  u64 remaining = buf.len - lex_get_current_offset(buf, current);
+  if (remaining < 1)
+    return 0;
+
+  return *(*current + 1);
+}
+
 static u8 lex_advance(str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -3101,9 +3113,24 @@ static bool lex_match(str buf, u8 **current, u8 c) {
   return false;
 }
 
-static void lex_skip_until_incl(str buf, u8 **current, u8 c) {
-  while (!(lex_is_at_end(buf, current) || lex_peek(buf, current) == c))
+static void lex_skip_until_incl_1(str buf, u8 **current, u8 c) {
+  while (!(lex_is_at_end(buf, current) || lex_peek(buf, current) == c)) {
     lex_advance(buf, current);
+  }
+}
+
+static void lex_skip_until_incl_2(str buf, u8 **current, u8 c1, u8 c2) {
+  while (
+      !(lex_is_at_end(buf, current) ||
+        (lex_peek(buf, current) == c1 && lex_peek_next(buf, current) == c2))) {
+    lex_advance(buf, current);
+  }
+
+  if (!lex_is_at_end(buf, current)) {
+    pg_assert(lex_peek(buf, current) == c1 && lex_peek_next(buf, current) == c2);
+    lex_advance(buf, current);
+    lex_advance(buf, current);
+  }
 }
 
 static bool lex_is_digit(u8 c) { return ('0' <= c && c <= '9'); }
@@ -3405,9 +3432,10 @@ static void lex_lex(lex_lexer_t *lexer, str buf, u8 **current, arena_t *arena) {
     }
     case '/': {
       lex_advance(buf, current);
-      if (lex_match(buf, current, '/')) {
-        lex_skip_until_incl(buf, current, '\n');
-        break;
+      if (lex_match(buf, current, '/')) { // Line comment.
+        lex_skip_until_incl_1(buf, current, '\n');
+      } else if (lex_match(buf, current, '*')) { // Delimited comment.
+        lex_skip_until_incl_2(buf, current, '*', '/');
       } else {
         const lex_token_t token = {
             .kind = TOKEN_KIND_SLASH,
