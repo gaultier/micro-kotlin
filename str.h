@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
@@ -251,4 +253,32 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
     pg_assert(sb.len <= sb.cap);
   }
   return (ut_read_result_t){.content = sb_build(sb)};
+}
+
+static ut_read_result_t ut_read_all_from_file_name(str path, arena_t scratch_arena, arena_t* arena) {
+    char *path_c_str = str_to_c(path, &scratch_arena);
+    const int fd = open(path_c_str, O_RDONLY);
+    if (fd == -1) {
+      fprintf(stderr, "Failed to open the file %s: %s\n", path_c_str,
+              strerror(errno));
+      return (ut_read_result_t){.error=errno};
+    }
+
+    struct stat st = {0};
+    if (stat(path_c_str, &st) == -1) {
+      fprintf(stderr, "Failed to get the file size %s: %s\n",
+              path_c_str, strerror(errno));
+      close(fd);
+      return (ut_read_result_t){.error=errno};
+    }
+
+    if (st.st_size == 0) {
+      close(fd);
+      return (ut_read_result_t){0};
+    }
+
+    ut_read_result_t res =
+        ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+    close(fd);
+    return res;
 }

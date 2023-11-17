@@ -2715,7 +2715,7 @@ cf_write_verification_info(FILE *file,
   file_write_u8(file, verification_info.kind);
 
   if (verification_info.kind >= 7) {
-    pg_assert(verification_info.extra_data>0);
+    pg_assert(verification_info.extra_data > 0);
     file_write_be_u16(file, verification_info.extra_data);
   }
 }
@@ -5490,32 +5490,14 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
-  char *path_c = str_to_c(path, &scratch_arena);
-  const int fd = open(path_c, O_RDONLY);
-  if (fd == -1) {
-    fprintf(stderr, "Failed to open the JMOD file %s: %s\n", path_c,
-            strerror(errno));
-    return false;
-  }
-
-  struct stat st = {0};
-  if (stat(path_c, &st) == -1) {
-    fprintf(stderr, "Failed to get the file size %s: %s\n", path_c,
-            strerror(errno));
-    return false;
-  }
-  if (st.st_size == 0) {
-    return false;
-  }
-
   ut_read_result_t read_res =
-      ut_read_all_from_fd(fd, sb_new(st.st_size, &scratch_arena));
+    // IMPORTANT: We store the content of JMOD files in the *scratch* arena, not the *main* arena.
+    // That's because most of the stuff in there is irrelevant.
+    // We pick afterwards just the few bits we want to retain and clone them into the main arena.
+      ut_read_all_from_file_name(path, scratch_arena, &scratch_arena);
   if (read_res.error) {
-    fprintf(stderr, "Failed to read the full file %s: %s\n", path_c,
-            strerror(read_res.error));
     return false;
   }
-  close(fd);
 
   str content = read_res.content;
   // Check magic number.
@@ -5536,32 +5518,11 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
-  char *path_c = str_to_c(path, &scratch_arena);
-  const int fd = open(path_c, O_RDONLY);
-  if (fd == -1) {
-    fprintf(stderr, "Failed to open the JAR file `%s`: %s\n", path_c,
-            strerror(errno));
-    return false;
-  }
-
-  struct stat st = {0};
-  if (stat(path_c, &st) == -1) {
-    fprintf(stderr, "Failed to get the file size %s: %s\n", path_c,
-            strerror(errno));
-    return false;
-  }
-  if (st.st_size == 0) {
-    return false;
-  }
-
   ut_read_result_t read_res =
-      ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+      ut_read_all_from_file_name(path, scratch_arena, arena);
   if (read_res.error) {
-    fprintf(stderr, "Failed to read the full file %s: %s\n", path_c,
-            strerror(read_res.error));
     return false;
   }
-  close(fd);
 
   return cf_buf_read_jar_file(resolver, read_res.content, path, scratch_arena,
                               arena);
@@ -8492,7 +8453,8 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         const par_ast_node_t *const argument =
             &gen->resolver->parser->nodes[argument_i];
 
-        // Each argument `a, b, c` is now on the stack in order: `[..] [this] a b c` with the corresponding verification info.
+        // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
+        // b c` with the corresponding verification info.
         const cf_verification_info_t verification_info =
             gen->frame->stack[stack_index];
         const cf_variable_t variable = {
@@ -9056,12 +9018,15 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const cf_constant_t string_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {
-            .java_class_name = cf_add_constant_string(&class_file->constant_pool, str_from_c("java/lang/String"), arena),
+            .java_class_name =
+                cf_add_constant_string(&class_file->constant_pool,
+                                       str_from_c("java/lang/String"), arena),
         }};
 
     const cf_verification_info_t verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data =cf_constant_array_push(&class_file->constant_pool, &string_class_info, arena),
+        .extra_data = cf_constant_array_push(&class_file->constant_pool,
+                                             &string_class_info, arena),
     };
     cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 

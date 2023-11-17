@@ -4,6 +4,7 @@
 #include <asm-generic/errno-base.h>
 #include <bits/getopt_core.h>
 #include <getopt.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,38 +137,17 @@ int main(int argc, char *argv[]) {
       exit(EINVAL);
     }
 
-    char *source_file_name_cstr = str_to_c(source_file_name, &scratch_arena);
-    const int fd = open(source_file_name_cstr, O_RDONLY);
-    if (fd == -1) {
-      fprintf(stderr, "Failed to open the file %s: %s\n", source_file_name_cstr,
-              strerror(errno));
-      return errno;
-    }
-
-    struct stat st = {0};
-    if (stat(source_file_name_cstr, &st) == -1) {
-      fprintf(stderr, "Failed to get the file size %s: %s\n",
-              source_file_name_cstr, strerror(errno));
-      return errno;
-    }
-    if (st.st_size == 0) {
-      return 0;
-    }
-    if (st.st_size > UINT16_MAX) {
-      fprintf(stderr,
-              "The file %s is too big (limit is %u, got: %ld), stopping.\n",
-              source_file_name_cstr, UINT16_MAX, st.st_size);
-      return E2BIG;
-    }
-
     ut_read_result_t source_file_read_res =
-        ut_read_all_from_fd(fd, sb_new(st.st_size, &arena));
+        ut_read_all_from_file_name(source_file_name, scratch_arena, &arena);
     if (source_file_read_res.error) {
-      fprintf(stderr, "Failed to read the full file %s: %s\n",
-              source_file_name_cstr, strerror(source_file_read_res.error));
-      return source_file_read_res.error;
+      exit(source_file_read_res.error);
     }
-    close(fd);
+    if (source_file_read_res.content.len > UINT32_MAX) {
+      fprintf(stderr, "The source file %.*s is too big: got %lu, max is %u\n",
+(int)              source_file_name.len, source_file_name.data,
+              source_file_read_res.content.len, UINT32_MAX);
+      exit(E2BIG);
+    }
 
     // Lex.
     lex_lexer_t lexer = {
