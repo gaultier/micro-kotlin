@@ -74,3 +74,7 @@ OPTIONS:
   -c, --classpath <classpath>    Load additional classpath entries, which are colon separated.
   -j, --java-home <java_home>    Java home (the root of the Java installation).
 ```
+
+## LICENSE
+
+BSD-3.
