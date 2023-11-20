@@ -5203,7 +5203,7 @@ static void resolver_load_methods_from_class_file(
 
     const u32 type_i = resolver_add_type(resolver, &type, arena);
 
-    if (log_verbose) {
+    if (cli_log_verbose) {
       arena_t tmp_arena = *arena;
       str human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
@@ -5728,7 +5728,7 @@ static u32 resolver_select_most_specific_candidate_function(
         const bool a_more_applicable_than_b = a_b & APPLICABILITY_MORE;
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
-        if (log_verbose) {
+        if (cli_log_verbose) {
           str a_human_type = resolver_function_to_human_string(
               resolver, a_type_i, &scratch_arena);
           str b_human_type = resolver_function_to_human_string(
@@ -5873,7 +5873,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
             pg_array_len(resolver->parser->lexer->tokens));
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
-  if (!log_verbose)
+  if (!cli_log_verbose)
     return;
 
   const par_ast_node_t *const node = &resolver->parser->nodes[node_i];

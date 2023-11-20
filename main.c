@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
                             &options_index)) != -1) {
     switch (opt) {
     case 'v':
-      log_verbose = true;
+      cli_log_verbose = true;
       break;
 
     case 'c':

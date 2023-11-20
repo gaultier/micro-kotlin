@@ -55,9 +55,9 @@ static str str_from_c(char *s) {
 
 // ------------------- Logs
 
-static bool log_verbose = false;
+static bool cli_log_verbose = false;
 #define LOG(fmt, ...)                                                          \
-  if (log_verbose)                                                             \
+  if (cli_log_verbose)                                                             \
   fprintf(stderr, fmt "\n", __VA_ARGS__)
 
 // ----------- Utility macros
