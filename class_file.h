@@ -6176,7 +6176,6 @@ static void resolver_load_standard_types(resolver_t *resolver, str java_home,
 
   const ty_type_t known_types[] = {
       [TYPE_ANY_I] = {.kind = TYPE_ANY},
-      [TYPE_UNIT_I] = {.kind = TYPE_UNIT},
       [TYPE_BOOLEAN_I] = {.kind = TYPE_BOOLEAN},
       [TYPE_BYTE_I] = {.kind = TYPE_BYTE},
       [TYPE_CHAR_I] = {.kind = TYPE_CHAR},
@@ -6186,6 +6185,7 @@ static void resolver_load_standard_types(resolver_t *resolver, str java_home,
       [TYPE_LONG_I] = {.kind = TYPE_LONG},
       [TYPE_SHORT_I] = {.kind = TYPE_SHORT},
       [TYPE_STRING_I] = {.kind = TYPE_STRING},
+      [TYPE_UNIT_I] = {.kind = TYPE_UNIT},
   };
 
   for (u64 i = 0; i < sizeof(known_types) / sizeof(known_types[0]); i++)
