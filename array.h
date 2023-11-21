@@ -17,9 +17,9 @@ typedef struct pg_array_header_t {
   do {                                                                         \
     u64 capacity = pg_max((u64)(arg_capacity), 8);                             \
     pg_array_header_t *pg__ah = (pg_array_header_t *)arena_alloc(              \
-        arg_arena, 1,                                                          \
+        arg_arena,                                                             \
         sizeof(pg_array_header_t) + sizeof(*(x)) * ((u64)(capacity)),          \
-        ALLOCATION_ARRAY);                                                     \
+        _Alignof(pg_array_header_t), 1);                                       \
     pg__ah->len = 0;                                                           \
     pg__ah->cap = capacity;                                                    \
     x = (void *)(pg__ah + 1);                                                  \
@@ -59,8 +59,8 @@ typedef struct pg_array_header_t {
           sizeof(pg_array_header_t) + sizeof(*(x)) * pg_array_cap(x);          \
       const u64 new_physical_len =                                             \
           sizeof(pg_array_header_t) + sizeof(*(x)) * new_cap;                  \
-      pg_array_header_t *const pg__ah =                                        \
-          arena_alloc(arena, 1, new_physical_len, ALLOCATION_ARRAY);           \
+      pg_array_header_t *const pg__ah = arena_alloc(                           \
+          arena, new_physical_len, _Alignof(pg_array_header_t), 1);            \
       LOG("grow: old_physical_len=%lu new_physical_len=%lu old_ptr=%p "        \
           "new_ptr=%p diff=%lu",                                               \
           old_physical_len, new_physical_len, (void *)pg_array_header(x),      \

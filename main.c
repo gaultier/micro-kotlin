@@ -72,6 +72,8 @@ int main(int argc, char *argv[]) {
 
     case 'm':
       cli_mem_debug = true;
+      fprintf(stderr, "Warning: memory allocation debugging is being reworked, "
+                      "this option does nothing.\n");
       break;
 
     case 'j':
@@ -121,10 +123,10 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  arena_t arena = arena_new(1L << 28, cli_mem_debug); // 256 MiB
+  arena_t arena = arena_new(1L << 28); // 256 MiB
 
   // This size should be at least the size of the biggest file we read.
-  arena_t scratch_arena = arena_new(1L << 28, cli_mem_debug); // 256 MiB
+  arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
@@ -140,13 +142,16 @@ int main(int argc, char *argv[]) {
     ut_read_result_t source_file_read_res =
         ut_read_all_from_file_path(source_file_name, scratch_arena, &arena);
     if (source_file_read_res.error) {
+      fprintf(stderr, "Failed to open the file %.*s: %s\n",
+              (int)source_file_name.len, source_file_name.data,
+              strerror(source_file_read_res.error));
       exit(source_file_read_res.error);
     }
     if (source_file_read_res.content.len > UINT32_MAX) {
       fprintf(stderr, "The source file %.*s is too big: got %lu, max is %u\n",
               (int)source_file_name.len, source_file_name.data,
               source_file_read_res.content.len, UINT32_MAX);
-    return false;
+      return false;
       exit(E2BIG);
     }
 
@@ -181,7 +186,8 @@ int main(int argc, char *argv[]) {
 
     resolver_load_standard_types(&resolver, cli_java_home, scratch_arena,
                                  &arena);
-    LOG("After loading known types: arena=%lu", arena.data.len);
+    LOG("After loading known types: arena_available=%lu",
+        arena.end - arena.start);
 
     resolver_collect_user_defined_function_signatures(&resolver, scratch_arena,
                                                       &arena);
@@ -231,39 +237,20 @@ int main(int argc, char *argv[]) {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
 
-      int fd = open(class_file_path_c_str, O_RDONLY);
-      if (fd == -1) {
+      ut_read_result_t read_res = ut_read_all_from_file_path(
+          class_file_path, scratch_arena, &tmp_arena);
+      if (read_res.error) {
         fprintf(stderr, "Failed to open the file %.*s: %s\n",
-                (int)source_file_name.len, (char *)source_file_name.data,
-                strerror(errno));
-        return errno;
+                (int)class_file_path.len, (char *)class_file_path.data,
+                strerror(read_res.error));
+        return read_res.error;
       }
-
-      struct stat st = {0};
-      if (stat(class_file_path_c_str, &st) == -1) {
-        fprintf(stderr, "Failed to get the file size %.*s: %s\n",
-                (int)source_file_name.len, (char *)source_file_name.data,
-                strerror(errno));
-        return errno;
-      }
-      pg_assert(st.st_size > 0);
-      pg_assert(st.st_size <= UINT32_MAX);
-
-      const u32 buf_len = st.st_size;
-      u8 *const buf =
-          arena_alloc(&tmp_arena, buf_len, sizeof(u8), ALLOCATION_BLOB);
-
-      pg_assert(read(fd, buf, buf_len) == buf_len);
-      close(fd);
 
       cf_class_file_t class_file_verify = {.class_file_path =
                                                class_file.class_file_path};
-      u8 *current = buf;
-      cf_buf_read_class_file(str_new(buf, buf_len), &current,
-                             &class_file_verify, &tmp_arena);
+      u8 *current = read_res.content.data;
+      cf_buf_read_class_file(read_res.content, &current, &class_file_verify,
+                             &tmp_arena);
     }
   }
-  LOG("arena=%lu", arena.data.len);
-  if (cli_mem_debug)
-    arena_heap_dump(arena);
 }

@@ -2,12 +2,13 @@
 
 #include "arena.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
@@ -39,7 +40,7 @@ static u64 ut_next_power_of_two(u64 n) {
 static str str_new(u8 *s, u64 n) { return (str){.data = s, .len = n}; }
 
 static str str_clone(str s, arena_t *arena) {
-  u8 *data = arena_alloc(arena, s.len, 1, ALLOCATION_STRING);
+  u8 *data = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len);
   memcpy(data, s.data, s.len);
   return (str){.data = data, .len = s.len};
 }
@@ -84,7 +85,7 @@ static bool str_eq(str a, str b) {
 static bool str_eq_c(str a, char *b) { return str_eq(a, str_from_c(b)); }
 
 static char *str_to_c(str s, arena_t *arena) {
-  char *c_str = arena_alloc(arena, s.len + 1, 1, ALLOCATION_STRING);
+  char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
   memcpy(c_str, s.data, s.len);
 
   c_str[s.len] = 0;
@@ -152,7 +153,7 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
     return sb;
 
   u64 new_cap = ut_next_power_of_two(sb_space(sb) + more);
-  u8 *new_data = arena_alloc(arena, new_cap, 1, ALLOCATION_STRING);
+  u8 *new_data = arena_alloc(arena, sizeof(u8), _Alignof(u8), new_cap);
   memcpy(new_data, sb.data, sb.len);
 
   return (str_builder){.len = sb.len, .cap = new_cap, .data = new_data};
@@ -181,7 +182,7 @@ static str_builder sb_append_char(str_builder sb, u8 c, arena_t *arena) {
 
 static str_builder sb_new(u64 initial_cap, arena_t *arena) {
   return (str_builder){
-      .data = arena_alloc(arena, initial_cap + 1, 1, ALLOCATION_STRING),
+      .data = arena_alloc(arena, sizeof(u8), _Alignof(u8), initial_cap + 1),
       .cap = initial_cap + 1,
   };
 }
@@ -255,30 +256,28 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
   return (ut_read_result_t){.content = sb_build(sb)};
 }
 
-static ut_read_result_t ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t* arena) {
-    char *path_c_str = str_to_c(path, &scratch_arena);
-    const int fd = open(path_c_str, O_RDONLY);
-    if (fd == -1) {
-      fprintf(stderr, "Failed to open the file %s: %s\n", path_c_str,
-              strerror(errno));
-      return (ut_read_result_t){.error=errno};
-    }
+static ut_read_result_t
+ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
+  char *path_c_str = str_to_c(path, &scratch_arena);
+  const int fd = open(path_c_str, O_RDONLY);
+  if (fd == -1) {
+    return (ut_read_result_t){.error = errno};
+  }
 
-    struct stat st = {0};
-    if (stat(path_c_str, &st) == -1) {
-      fprintf(stderr, "Failed to get the file size %s: %s\n",
-              path_c_str, strerror(errno));
-      close(fd);
-      return (ut_read_result_t){.error=errno};
-    }
-
-    if (st.st_size == 0) {
-      close(fd);
-      return (ut_read_result_t){0};
-    }
-
-    ut_read_result_t res =
-        ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+  struct stat st = {0};
+  if (stat(path_c_str, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path_c_str,
+            strerror(errno));
     close(fd);
-    return res;
+    return (ut_read_result_t){.error = errno};
+  }
+
+  if (st.st_size == 0) {
+    close(fd);
+    return (ut_read_result_t){0};
+  }
+
+  ut_read_result_t res = ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+  close(fd);
+  return res;
 }

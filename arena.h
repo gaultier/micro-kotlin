@@ -3,7 +3,6 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 500L
 #define _GNU_SOURCE
-#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,15 +18,8 @@
 #define i16 int16_t
 #define u8 uint8_t
 #define i8 int8_t
-
-#ifdef __linux__
-
-#ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS 0x20
-
-#endif
-
-#endif
+typedef size_t usize;
+typedef ssize_t isize;
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <elf.h>
@@ -57,7 +49,7 @@ static str str_from_c(char *s) {
 
 static bool cli_log_verbose = false;
 #define LOG(fmt, ...)                                                          \
-  if (cli_log_verbose)                                                             \
+  if (cli_log_verbose)                                                         \
   fprintf(stderr, fmt "\n", __VA_ARGS__)
 
 // ----------- Utility macros
@@ -122,46 +114,20 @@ end:
 }
 
 typedef struct {
-  str data;
-  u64 cap;
-  bool mem_debug;
-  pg_pad(7);
+  u8 *start;
+  u8 *end;
 } arena_t;
 
-typedef enum __attribute__((packed)) {
-  ALLOCATION_TOMBSTONE = 1 << 0,
-  ALLOCATION_OBJECT = 1 << 1,
-  ALLOCATION_STRING = 1 << 2,
-  ALLOCATION_ARRAY = 1 << 3,
-  ALLOCATION_CONSTANT_POOL = 1 << 4,
-  ALLOCATION_BLOB = 1 << 5,
-} allocation_kind_t;
+static arena_t arena_new(u64 cap) {
+  void *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE,
+                   MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  pg_assert(mem);
 
-typedef struct {
-  allocation_kind_t kind : 8;
-  u64 user_allocation_size : 48;
-  u8 call_stack_count : 8;
-} allocation_metadata_t;
-
-static arena_t arena_new(u64 cap, bool mem_debug) {
   arena_t arena = {
-      .cap = cap,
-      .data.data = mmap(NULL, cap, PROT_READ | PROT_WRITE,
-                        MAP_ANONYMOUS | MAP_PRIVATE, -1, 0),
-      .mem_debug = mem_debug,
+      .start = mem,
+      .end = mem + cap,
   };
-  pg_assert(((u64)arena.data.data % 16) == 0);
-
   return arena;
-}
-
-static u64 ut_align_forward_16(u64 n) {
-  const u64 modulo = n & (16 - 1);
-  if (modulo != 0)
-    n += 16 - modulo;
-
-  pg_assert((n % 16) == 0);
-  return n;
 }
 
 static u64 initial_rbp = 0;
@@ -188,99 +154,25 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-static void *arena_alloc(arena_t *arena, u64 len, u64 element_size,
-                         allocation_kind_t kind) {
-  // clang-format off
-  //                           Metadata to be able to do heap dumps.
-  //                           v
-  //                           .....................
-  // ....|--------------------|allocation_metadata_t|+++++|*************************|
-  //     ^                    ^                     ^     ^                         ^
-  //   base          old_offset                     ^     new_offset                cap
-  //                                                ^
-  //                                                res
-  // clang-format on
+__attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
+arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
+  pg_assert(a->start <= a->end);
 
-  pg_assert(arena != NULL);
-  pg_assert(arena->data.len < arena->cap);
-  pg_assert(((u64)((arena->data.data + arena->data.len)) % 16) == 0);
-  pg_assert(element_size > 0);
-
-  u64 call_stack[256] = {0};
-  const u8 call_stack_count =
-      arena->mem_debug
-          ? ut_record_call_stack(call_stack,
-                                 sizeof(call_stack) / sizeof(call_stack[0]))
-          : 0;
-
-  const u64 user_allocation_size = len * element_size; // TODO: check overflow.
-  pg_assert(user_allocation_size > 0);
-
-  const u64 metadata_size =
-      sizeof(allocation_metadata_t) + call_stack_count * sizeof(u64);
-  const u64 total_allocation_size = metadata_size + user_allocation_size;
-
-  if (arena->data.len + total_allocation_size > arena->cap) {
+  size_t available = a->end - a->start;
+  size_t padding = -(size_t)a->start & (align - 1);
+  // Ignore overflow for now.
+  size_t offset = padding + size * count;
+  if (available < offset) {
     fprintf(stderr,
-            "Out of memory: cap=%lu current_offset=%lu "
-            "user_allocation_size=%lu total_allocation_size=%lu\n",
-            arena->cap, arena->data.len, user_allocation_size,
-            total_allocation_size);
-
-    pg_assert(0);
+            "Out of memory: available=%lu"
+            "allocation_size=%lu\n",
+            available, offset);
+    abort();
   }
 
-  const u64 new_offset =
-      ut_align_forward_16(arena->data.len + total_allocation_size);
+  void *res = a->start + padding;
 
-  pg_assert((new_offset % 16) == 0);
-  pg_assert(arena->data.len + user_allocation_size <= new_offset);
+  a->start += offset;
 
-  u8 *const new_allocation = arena->data.data + arena->data.len;
-  pg_assert((((u64)new_allocation) % 16) == 0);
-  pg_assert((u64)(arena->data.data + arena->data.len) <= (u64)new_allocation);
-  pg_assert((u64)(new_allocation) + user_allocation_size <=
-            (u64)arena->data.data + new_offset);
-
-  allocation_metadata_t *metadata = (allocation_metadata_t *)new_allocation;
-  metadata->kind = kind;
-  metadata->user_allocation_size = user_allocation_size;
-  metadata->call_stack_count = call_stack_count;
-  memcpy(metadata + 1, call_stack, sizeof(call_stack[0]) * call_stack_count);
-
-  arena->data.len = new_offset;
-  pg_assert((((u64)arena->data.len) % 16) == 0);
-
-  return new_allocation + metadata_size;
+  return res;
 }
-
-static u32
-arena_get_user_allocation_offset(arena_t arena,
-                                 const allocation_metadata_t *metadata) {
-  pg_assert(arena.data.data <= (u8 *)metadata &&
-            (u8 *)metadata <= arena.data.data + arena.data.len);
-
-  return (u8 *)metadata - arena.data.data + sizeof(allocation_metadata_t) +
-         metadata->call_stack_count * sizeof(u64);
-}
-
-static str allocation_kind_to_string(allocation_kind_t kind) {
-  const u8 real_kind = kind & (~ALLOCATION_TOMBSTONE);
-
-  switch (real_kind) {
-  case ALLOCATION_OBJECT:
-    return str_from_c("ALLOCATION_OBJECT");
-  case ALLOCATION_STRING:
-    return str_from_c("ALLOCATION_STRING");
-  case ALLOCATION_ARRAY:
-    return str_from_c("ALLOCATION_ARRAY");
-  case ALLOCATION_CONSTANT_POOL:
-    return str_from_c("ALLOCATION_CONSTANT_POOL");
-  case ALLOCATION_BLOB:
-    return str_from_c("ALLOCATION_BLOB");
-  default:
-    pg_assert(0 && "unreachable");
-  }
-}
-
-

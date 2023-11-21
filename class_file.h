@@ -293,10 +293,10 @@ typedef struct {
   u32 type_i; // TODO: should it be separate?
   // TODO: should it be separate?
   u32 *nodes; // AST_KIND_LIST
-  par_ast_node_kind_t kind;
-  pg_pad(1);
+  u64 extra_data_i;
   u16 flags;
-  u32 extra_data_i;
+  par_ast_node_kind_t kind;
+  pg_pad(5);
 } par_ast_node_t;
 
 typedef enum __attribute__((packed)) {
@@ -818,8 +818,8 @@ static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
   return (cf_constant_array_t){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, cap, sizeof(cf_constant_t),
-                            ALLOCATION_CONSTANT_POOL),
+      .values = arena_alloc(arena, sizeof(cf_constant_t),
+                            _Alignof(cf_constant_t), cap),
   };
 }
 
@@ -835,7 +835,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
     cf_constant_t *const new_array = arena_alloc(
-        arena, new_cap, sizeof(cf_constant_t), ALLOCATION_CONSTANT_POOL);
+        arena, sizeof(cf_constant_t), _Alignof(cf_constant_t), new_cap);
     pg_assert(new_array != NULL);
     array->values =
         memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
@@ -868,7 +868,7 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
   pg_assert(arena != NULL);
 
   cg_frame_t *dst =
-      arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
+      arena_alloc(arena, sizeof(cg_frame_t), _Alignof(cg_frame_t), 1);
   cg_frame_init(dst, arena);
 
   dst->max_physical_stack = src->max_physical_stack;
@@ -892,11 +892,11 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
 static cf_constant_array_t *
 cf_constant_array_clone(const cf_constant_array_t *constant_pool,
                         arena_t *arena) {
-  cf_constant_array_t *res =
-      arena_alloc(arena, 1, sizeof(cf_constant_array_t), ALLOCATION_OBJECT);
+  cf_constant_array_t *res = arena_alloc(arena, sizeof(cf_constant_array_t),
+                                         _Alignof(cf_constant_array_t), 1);
   res->cap = res->len = constant_pool->len;
-  res->values = arena_alloc(arena, constant_pool->len, sizeof(cf_constant_t),
-                            ALLOCATION_CONSTANT_POOL);
+  res->values = arena_alloc(arena, sizeof(cf_constant_t),
+                            _Alignof(cf_constant_t), constant_pool->len);
 
   for (u64 i = 0; i < res->len; i++) {
     const cf_constant_t constant = constant_pool->values[i];
@@ -1349,21 +1349,6 @@ static u32 buf_read_le_u32(str buf, u8 **current) {
   return x;
 }
 
-static u32 buf_read_le_u64(str buf, u8 **current) {
-  pg_assert(!str_is_empty(buf));
-  pg_assert(current != NULL);
-  pg_assert(*current + sizeof(u64) <= buf.data + buf.len);
-
-  const u8 *const ptr = *current;
-  const u64 x = ((u64)(ptr[7] & 0xff) << 56) | (((u64)(ptr[6] & 0xff)) << 48) |
-                (((u64)(ptr[5] & 0xff)) << 40) |
-                (((u64)(ptr[4] & 0xff)) << 32) | ((u64)(ptr[3] & 0xff) << 24) |
-                (((u64)(ptr[2] & 0xff)) << 16) | (((u64)(ptr[1] & 0xff)) << 8) |
-                (((u64)(ptr[0] & 0xff)) << 0);
-  *current += sizeof(u64);
-  return x;
-}
-
 static str buf_read_n_u8(str buf, u64 n, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1383,69 +1368,6 @@ static u8 buf_read_u8(str buf, u8 **current) {
   const u8 x = (*current)[0];
   *current += 1;
   return x;
-}
-
-static void arena_heap_dump(arena_t arena) {
-
-  fprintf(stderr, "kind,size,len,cap,occupancy,deleted,call stack\n");
-
-  u8 *current = arena.data.data;
-  while (current < arena.data.data + arena.data.len) {
-    allocation_metadata_t metadata = {0};
-    const u8 *metadata_start = current;
-
-    str slice =
-        buf_read_n_u8(arena.data, sizeof(allocation_metadata_t), &current);
-
-    memcpy(&metadata, slice.data, slice.len);
-    pg_assert(metadata.user_allocation_size > 0);
-
-    str kind_string = allocation_kind_to_string(metadata.kind);
-
-    const u8 real_kind = metadata.kind & (~ALLOCATION_TOMBSTONE);
-    u64 len = 0;
-    u64 cap = 0;
-
-    switch (real_kind) {
-    case ALLOCATION_STRING:
-    case ALLOCATION_CONSTANT_POOL:
-    case ALLOCATION_OBJECT:
-    case ALLOCATION_BLOB:
-      len = cap = metadata.user_allocation_size;
-      break;
-    case ALLOCATION_ARRAY: {
-      pg_array_header_t *pg__ah = (pg_array_header_t *)current;
-      len = pg__ah->len;
-      cap = pg__ah->cap;
-      break;
-    }
-
-    default:
-      pg_assert(0 && "unreachable");
-    }
-
-    const float occupancy = (cap == 0) ? 0 : (float)len / (float)cap;
-    const bool deleted = !!(metadata.kind & ALLOCATION_TOMBSTONE);
-
-    fprintf(stderr, "%.*s,%lu,%lu,%lu,%.6f,%d,", (int)kind_string.len,
-            (char *)kind_string.data, (u64)metadata.user_allocation_size, len,
-            cap, occupancy, deleted);
-
-    for (u64 i = 0; i < metadata.call_stack_count; i++) {
-      fprintf(stderr, "%#x ", buf_read_le_u64(arena.data, &current));
-    }
-    fprintf(stderr, "\n");
-
-    const u64 metadata_size =
-        sizeof(allocation_metadata_t) + sizeof(u64) * metadata.call_stack_count;
-    pg_assert((u64)(current - metadata_start) == metadata_size);
-
-    // We need to 16 byte align the size to skip enough.
-    const u64 total_allocation_size =
-        ut_align_forward_16(metadata_size + metadata.user_allocation_size);
-
-    buf_read_n_u8(arena.data, total_allocation_size - metadata_size, &current);
-  }
 }
 
 static str
@@ -1868,8 +1790,8 @@ static void cf_buf_read_element_value(str buf, u8 **current,
     break;
 
   case '@': {
-    element_value->v.annotation_value =
-        arena_alloc(arena, 1, sizeof(cf_annotation_t), ALLOCATION_OBJECT);
+    element_value->v.annotation_value = arena_alloc(
+        arena, sizeof(cf_annotation_t), _Alignof(cf_annotation_t), 1);
 
     cf_buf_read_annotation(buf, current, class_file,
                            element_value->v.annotation_value, arena);
@@ -5423,16 +5345,14 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 && str_eq_c(file_name, ".class")) {
-        u8 *dst = arena_alloc(&scratch_arena,
-                              uncompressed_size_according_to_directory_entry,
-                              sizeof(u8), ALLOCATION_BLOB);
-        u64 dst_len = (u64)uncompressed_size_according_to_directory_entry;
+        str dst = sb_build(sb_new(
+            uncompressed_size_according_to_directory_entry, &scratch_arena));
 
         z_stream stream = {
             .next_in = (u8 *)local_file_header,
             .avail_in = compressed_size_according_to_directory_entry,
-            .next_out = dst,
-            .avail_out = dst_len,
+            .next_out = dst.data,
+            .avail_out = dst.len,
         };
 
         // `inflateInit2` is required instead of `inflateInit` because this is a
@@ -5444,9 +5364,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
         res = inflate(&stream, Z_SYNC_FLUSH);
         pg_assert(res == Z_STREAM_END);
 
-        u8 *dst_current = dst;
-        cf_buf_read_class_file(str_new(dst, dst_len), &dst_current, &class_file,
-                               &scratch_arena);
+        u8 *dst_current = dst.data;
+        cf_buf_read_class_file(dst, &dst_current, &class_file, &scratch_arena);
 
         ty_type_t type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
@@ -5497,6 +5416,8 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
       // clone them into the main arena.
       ut_read_all_from_file_path(path, scratch_arena, &scratch_arena);
   if (read_res.error) {
+    fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
+            path.data, strerror(read_res.error));
     return false;
   }
 
@@ -5522,6 +5443,8 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   ut_read_result_t read_res =
       ut_read_all_from_file_path(path, scratch_arena, arena);
   if (read_res.error) {
+    fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
+            path.data, strerror(read_res.error));
     return false;
   }
 
@@ -6055,54 +5978,42 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 
     str final_extension = str_from_c(".class");
 
-    str_builder tentative_class_file_path =
+    str_builder tentative_class_file_path_builder =
         sb_new(parent.len + 1 + fqn.len + final_extension.len, arena);
 
-    tentative_class_file_path =
-        sb_append(tentative_class_file_path, parent, arena);
-    tentative_class_file_path =
-        sb_append_char(tentative_class_file_path, '/', arena);
+    tentative_class_file_path_builder =
+        sb_append(tentative_class_file_path_builder, parent, arena);
+    tentative_class_file_path_builder =
+        sb_append_char(tentative_class_file_path_builder, '/', arena);
 
     {
-      u64 replace_start = tentative_class_file_path.len;
+      u64 replace_start = tentative_class_file_path_builder.len;
 
       // Transform e.g. `/a/b/kotlin.io.ConsoleKt` into
       // `/a/b/kotlin/io/ConsoleKt`.
-      tentative_class_file_path =
-          sb_append(tentative_class_file_path, fqn, arena);
+      tentative_class_file_path_builder =
+          sb_append(tentative_class_file_path_builder, fqn, arena);
 
-      tentative_class_file_path = sb_replace_element_starting_at(
-          tentative_class_file_path, replace_start, '.', '/');
+      tentative_class_file_path_builder = sb_replace_element_starting_at(
+          tentative_class_file_path_builder, replace_start, '.', '/');
     }
 
-    tentative_class_file_path =
-        sb_append(tentative_class_file_path, final_extension, arena);
+    tentative_class_file_path_builder =
+        sb_append(tentative_class_file_path_builder, final_extension, arena);
+    str tentative_class_file_path = sb_build(tentative_class_file_path_builder);
 
     {
-      const int fd = open((char *)tentative_class_file_path.data, O_RDONLY);
-      if (fd == -1)
+      // TODO: check if we can read the file content into `scratch_arena`
+      ut_read_result_t read_res = ut_read_all_from_file_path(
+          tentative_class_file_path, scratch_arena, arena);
+      if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 
-      struct stat st = {0};
-      if (stat((char *)tentative_class_file_path.data, &st) == -1)
-        continue;
-
-      if (st.st_size == 0)
-        continue;
-
-      if (!S_ISREG(st.st_mode))
-        continue;
-      u8 *buf = arena_alloc(arena, st.st_size, sizeof(u8), ALLOCATION_BLOB);
-      const ssize_t read_bytes = read(fd, buf, st.st_size);
-      pg_assert(read_bytes == st.st_size);
-      close(fd);
-
-      u8 *current = buf;
       cf_class_file_t class_file = {
-          .class_file_path = sb_build(tentative_class_file_path),
+          .class_file_path = tentative_class_file_path,
       };
-      cf_buf_read_class_file(str_new(buf, read_bytes), &current, &class_file,
-                             arena);
+      u8 *current = read_res.content.data;
+      cf_buf_read_class_file(read_res.content, &current, &class_file, arena);
 
       pg_assert(str_eq(fqn, class_file.class_name));
 
@@ -6448,13 +6359,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         node->type_i = TYPE_LONG_I;
       }
     }
-
-    const allocation_metadata_t *const metadata =
-        (allocation_metadata_t *)(arena->data.data + arena->data.len);
-    u64 *extra_data_number =
-        arena_alloc(arena, 1, sizeof(u64), ALLOCATION_OBJECT);
-    *extra_data_number = number;
-    node->extra_data_i = arena_get_user_allocation_offset(*arena, metadata);
+    node->extra_data_i = number;
 
     return node->type_i;
   }
@@ -8415,7 +8320,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     }
     // TODO: Float, Double, etc.
 
-    const u64 number = *(u64 *)(arena->data.data + node->extra_data_i);
+    const u64 number = node->extra_data_i;
     const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -9250,7 +9155,8 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     pg_array_init_reserve(code.code, 4, arena);
 
     gen->code = &code;
-    gen->frame = arena_alloc(arena, 1, sizeof(cg_frame_t), ALLOCATION_OBJECT);
+    gen->frame =
+        arena_alloc(arena, sizeof(cg_frame_t), _Alignof(cg_frame_t), 1);
     cg_frame_init(gen->frame, arena);
 
     // Fill locals (method arguments).
