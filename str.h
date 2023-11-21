@@ -353,6 +353,10 @@ typedef struct {
 } mem_frame_table_index;
 
 typedef struct {
+  u64 value;
+} mem_category_list_index;
+
+typedef struct {
   u64 length;
   mem_string_table_index *name;
   mem_resource_table_index *resource;
@@ -378,6 +382,7 @@ typedef struct {
 typedef struct {
   u64 length;
   mem_frame_table_index *frame;
+  mem_category_list_index *category;
   mem_stack_table_index *prefix;
 } mem_stack_table;
 
@@ -400,8 +405,7 @@ typedef struct {
 } mem_profile;
 
 mem_profile mem_profile_new(arena_t *arena) {
-  mem_profile res = {.meta = {
-                     }};
+  mem_profile res = {.meta = {}};
   return res;
 }
 // TODO: Maybe use varints to reduce the size.
@@ -453,6 +457,8 @@ void mem_profile_record(mem_profile *res, u64 bytes_count, arena_t *arena,
 
     pg_array_append(res->thread[0].stack_table.frame,
                     (mem_frame_table_index){frame_index}, arena);
+    pg_array_append(res->thread[0].stack_table.category,
+                    (mem_category_list_index){0}, arena); // FIXME?
     pg_array_append(res->thread[0].stack_table.prefix,
                     (mem_stack_table_index){0}, arena); // FIXME
     u64 stack_table_index = res->thread[0].stack_table.length++;
