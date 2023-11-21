@@ -483,7 +483,15 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
       {
         str length_key = str_from_c("\"length\":");
         fwrite(length_key.data, 1, length_key.len, out);
-        fprintf(out, "%lu", t->frame_table.length);
+        fprintf(out, "%lu,", t->frame_table.length);
+
+        str address_key = str_from_c("\"address\":[");
+        fwrite(address_key.data, 1, address_key.len, out);
+        for (u64 i = 0; i < t->frame_table.length; i++) {
+          fprintf(out, "%lu%c", t->frame_table.address[i].value,
+                  (i + 1) == t->frame_table.length ? ' ' : ',');
+        }
+        fwrite("]", 1, 1, out);
       }
 
       fwrite("}]", 1, 1, out);
