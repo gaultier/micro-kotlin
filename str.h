@@ -10,6 +10,26 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// String builder, like a dynamic array.
+typedef struct {
+  u8 *data;
+  u64 len;
+  u64 cap;
+} str_builder;
+
+// String view, immutable.
+typedef struct {
+  u8 *data;
+  u64 len;
+} str;
+
+static str str_from_c(char *s) {
+  return (str){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
+}
+
+#define str_from_c_literal(s)                                                  \
+  ((str){.data = (uint8_t *)s, .len = sizeof(s) - 1})
+
 static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);

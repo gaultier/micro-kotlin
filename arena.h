@@ -21,30 +21,6 @@ typedef int8_t i8;
 typedef size_t usize;
 typedef ssize_t isize;
 
-#if defined(__linux__) || defined(__FreeBSD__)
-#include <elf.h>
-#endif
-
-// String builder, like a dynamic array.
-typedef struct {
-  u8 *data;
-  u64 len;
-  u64 cap;
-} str_builder;
-
-// String view, immutable.
-typedef struct {
-  u8 *data;
-  u64 len;
-} str;
-
-static str str_from_c(char *s) {
-  return (str){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
-}
-
-#define str_from_c_literal(s)                                                  \
-  ((str){.data = (uint8_t *)s, .len = sizeof(s) - 1})
-
 // ------------------- Logs
 
 static bool cli_log_verbose = false;
@@ -81,8 +57,6 @@ static bool cli_log_verbose = false;
   } while (0)
 
 #define pg_max(a, b) (((a) > (b)) ? (a) : (b))
-#define pg_clamp(min, x, max)                                                  \
-  (((x) > (max)) ? (max) : ((x) < (min)) ? (min) : (x))
 
 // --------------------------- Arena
 

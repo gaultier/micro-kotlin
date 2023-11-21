@@ -7204,7 +7204,6 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
                       arena);
 }
 
-
 static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
                                arena_t *arena) {
   pg_assert(gen != NULL);
