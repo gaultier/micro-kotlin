@@ -104,15 +104,6 @@ static bool str_eq(str a, str b) {
 
 static bool str_eq_c(str a, char *b) { return str_eq(a, str_from_c(b)); }
 
-static char *str_to_c(str s, arena_t *arena) {
-  char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
-  memcpy(c_str, s.data, s.len);
-
-  c_str[s.len] = 0;
-
-  return c_str;
-}
-
 static bool str_contains_element(str haystack, u8 needle) {
   for (int64_t i = 0; i < (int64_t)haystack.len - 1; i++) {
     if (haystack.data[i] == needle)
@@ -276,6 +267,10 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
   return (ut_read_result_t){.content = sb_build(sb)};
 }
 
+static char *str_to_c(str s, arena_t *arena) {
+  return (char *)sb_build(sb_new(s.len, arena)).data;
+}
+
 static ut_read_result_t
 ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
   char *path_c_str = str_to_c(path, &scratch_arena);
@@ -301,3 +296,4 @@ ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
   close(fd);
   return res;
 }
+
