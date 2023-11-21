@@ -268,7 +268,12 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
 }
 
 static char *str_to_c(str s, arena_t *arena) {
-  return (char *)sb_build(sb_new(s.len, arena)).data;
+  char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
+  memcpy(c_str, s.data, s.len);
+
+  c_str[s.len] = 0;
+
+  return c_str;
 }
 
 static ut_read_result_t
