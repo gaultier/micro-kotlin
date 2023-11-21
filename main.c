@@ -46,9 +46,6 @@ static void print_usage_and_exit(const char *executable_name) {
 int main(int argc, char *argv[]) {
   pg_assert(argc > 0);
 
-  initial_rbp = *(u64 *)__builtin_frame_address(0);
-  pie_offset = ut_get_pie_displacement();
-
   int opt = 0;
   str cli_classpath = str_from_c(".");
   str cli_java_home = {0};

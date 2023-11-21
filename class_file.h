@@ -7204,29 +7204,6 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
                       arena);
 }
 
-static void cg_emit_load_variable(cg_generator_t *gen, u8 var_i,
-                                  arena_t *arena) {
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
-  pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_len(gen->frame->locals) > 0);
-
-  const cf_verification_info_kind_t kind =
-      gen->frame->locals[var_i].verification_info.kind;
-
-  switch (kind) {
-  case VERIFICATION_INFO_INT:
-    cg_emit_load_variable_int(gen, var_i, arena);
-    break;
-  case VERIFICATION_INFO_LONG:
-    cg_emit_load_variable_long(gen, var_i, arena);
-    break;
-  case VERIFICATION_INFO_OBJECT:
-    cg_emit_load_variable_object(gen, var_i, arena);
-    break;
-  default:
-    pg_assert(0 && "unimplemented");
-  }
-}
 
 static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
                                arena_t *arena) {

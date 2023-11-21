@@ -86,33 +86,6 @@ static bool cli_log_verbose = false;
 
 // --------------------------- Arena
 
-extern char _start;
-
-static u64 ut_get_pie_displacement() {
-#ifdef __linux__
-  FILE *file = fopen("/proc/self/exe", "r");
-  if (file == NULL)
-    return 0;
-
-  u64 res = 0;
-  Elf64_Ehdr header = {0};
-  const u64 read = fread(&header, 1, sizeof(header), file);
-  if (read != sizeof(header))
-    goto end;
-
-  if (memcmp(header.e_ident, ELFMAG, SELFMAG) == 0) {
-    const Elf64_Addr entry_point = header.e_entry;
-    res = (u64)(&_start - entry_point);
-  }
-
-end:
-  fclose(file);
-  return res;
-#endif
-  // TODO
-  return 0;
-}
-
 typedef struct {
   u8 *start;
   u8 *end;
@@ -128,30 +101,6 @@ static arena_t arena_new(u64 cap) {
       .end = mem + cap,
   };
   return arena;
-}
-
-static u64 initial_rbp = 0;
-static u64 pie_offset = 0;
-
-// TODO: Maybe use varints to reduce the size.
-static u8 ut_record_call_stack(u64 *dst, u64 cap) {
-  uintptr_t *rbp = __builtin_frame_address(0);
-
-  u64 len = 0;
-
-  while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
-    const uintptr_t rip = *(rbp + 1);
-    rbp = (uintptr_t *)*rbp;
-
-    if ((u64)rbp == initial_rbp)
-      break;
-
-    if (len >= cap)
-      break;
-
-    dst[len++] = (rip - pie_offset);
-  }
-  return len;
 }
 
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
