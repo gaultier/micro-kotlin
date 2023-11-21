@@ -4,7 +4,7 @@ WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
 LDFLAGS := -lz
 
-SRC := main.c class_file.h arena.h str.h
+SRC := main.c class_file.h arena.h str.h array.h
 
 all: micro-kotlin_debug_san micro-kotlin_debug micro-kotlin
 

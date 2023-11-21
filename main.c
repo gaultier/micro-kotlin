@@ -69,8 +69,6 @@ int main(int argc, char *argv[]) {
 
     case 'm':
       cli_mem_debug = true;
-      fprintf(stderr, "Warning: memory allocation debugging is being reworked, "
-                      "this option does nothing.\n");
       break;
 
     case 'j':
@@ -120,11 +118,16 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  arena_t arena = arena_new(1L << 26); // 64 MiB
+  mem_profile mem_profile = {
+      .arena = arena_new(1L << 26, NULL) // 64 MiB
+  };
+  arena_t arena =
+      arena_new(1L << 26, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
   LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
-  arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
+  arena_t scratch_arena =
+      arena_new(1L << 28, cli_mem_debug ? &mem_profile : NULL); // 256 MiB
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
@@ -254,5 +257,8 @@ int main(int argc, char *argv[]) {
       cf_buf_read_class_file(read_res.content, &current, &class_file_verify,
                              &tmp_arena);
     }
+  }
+  if (cli_mem_debug) {
+    mem_profile_write(&mem_profile, stderr);
   }
 }

@@ -399,75 +399,81 @@ typedef struct {
 typedef struct {
 } mem_meta;
 
-typedef struct {
+struct mem_profile {
+  arena_t arena;
   mem_meta meta;
   mem_thread thread[1];
-} mem_profile;
+};
 
-mem_profile mem_profile_new(arena_t *arena) {
-  mem_profile res = {.meta = {}};
-  return res;
-}
 // TODO: Maybe use varints to reduce the size.
-static u8 ut_record_call_stack(u64 *dst, arena_t *arena) {
-  static u64 initial_rbp = 0;
-  static u64 pie_offset = 0;
-
+static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
   u64 len = 0;
 
-  while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
+  while (rbp != 0 && *rbp != 0 && ((u64)rbp & 8) == 8) {
     const uintptr_t rip = *(rbp + 1);
     rbp = (uintptr_t *)*rbp;
 
-    if ((u64)rbp == initial_rbp)
-      break;
+    if (len >= cap)
+      return len;
 
-    pg_array_append(dst, rip - pie_offset, arena);
+    dst[len++] = rip;
   }
   return len;
 }
 
-void mem_profile_record(mem_profile *res, u64 bytes_count, arena_t *arena,
-                        arena_t scratch_arena) {
-
-  u64 *call_stack = NULL;
-  pg_array_init_reserve(call_stack, 64, &scratch_arena);
-  ut_record_call_stack(call_stack, &scratch_arena);
+void mem_profile_record(mem_profile *profile, u64 bytes_count) {
+  u64 call_stack[64] = {0};
+  u64 call_stack_len = ut_record_call_stack(call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
 
   mem_unbalanced_native_allocations_table *allocs =
-      &res->thread[0].native_allocations;
+      &profile->thread[0].native_allocations;
 
   struct timeval tv = {0};
   gettimeofday(&tv, NULL);
   u64 now = (float)tv.tv_sec + (float)tv.tv_usec / 1000.0f;
-  pg_array_append(allocs->time, (mem_milliseconds){now}, arena);
+  pg_array_append(allocs->time, (mem_milliseconds){now}, &profile->arena);
 
-  pg_array_append(allocs->weight, (mem_bytes){bytes_count}, arena);
+  pg_array_append(allocs->weight, (mem_bytes){bytes_count}, &profile->arena);
 
-  for (u64 i = 0; i < pg_array_len(call_stack); i++) {
+  for (u64 i = 0; i < call_stack_len; i++) {
     u64 address = call_stack[i];
 
-    pg_array_append(res->thread[0].frame_table.address, (mem_address){address},
-                    arena);
-    pg_array_append(res->thread[0].frame_table.func, (mem_func_table){0},
-                    arena); // FIXME
-    u64 frame_index = res->thread[0].frame_table.length++;
+    pg_array_append(profile->thread[0].frame_table.address,
+                    (mem_address){address}, &profile->arena);
+    pg_array_append(profile->thread[0].frame_table.func, (mem_func_table){0},
+                    &profile->arena); // FIXME
+    u64 frame_index = profile->thread[0].frame_table.length++;
 
-    pg_array_append(res->thread[0].stack_table.frame,
-                    (mem_frame_table_index){frame_index}, arena);
-    pg_array_append(res->thread[0].stack_table.category,
-                    (mem_category_list_index){0}, arena); // FIXME?
-    pg_array_append(res->thread[0].stack_table.prefix,
-                    (mem_stack_table_index){0}, arena); // FIXME
-    u64 stack_table_index = res->thread[0].stack_table.length++;
+    pg_array_append(profile->thread[0].stack_table.frame,
+                    (mem_frame_table_index){frame_index}, &profile->arena);
+    pg_array_append(profile->thread[0].stack_table.category,
+                    (mem_category_list_index){0}, &profile->arena); // FIXME?
+    pg_array_append(profile->thread[0].stack_table.prefix,
+                    (mem_stack_table_index){0}, &profile->arena); // FIXME
+    u64 stack_table_index = profile->thread[0].stack_table.length++;
 
     pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
-                    arena);
+                    &profile->arena);
   }
 
   allocs->length += 1;
 }
 
-void mem_profile_write(mem_profile *res, FILE *out) {}
+void mem_profile_write(mem_profile *profile, FILE *out) {
+  fwrite("{", 1, 1, out);
+
+  {
+    str meta_key = str_from_c("\"meta\":{},");
+    fwrite(meta_key.data, 1, meta_key.len, out);
+  }
+
+  {
+    str threads_key = str_from_c("\"threads\":[");
+    fwrite(threads_key.data, 1, threads_key.len, out);
+    fwrite("]", 1, 1, out);
+  }
+
+  fwrite("}", 1, 1, out);
+}

@@ -49,6 +49,8 @@ typedef struct pg_array_header_t {
 
 #define pg_array_append(x, item, arena)                                        \
   do {                                                                         \
+    if (x == NULL)                                                             \
+      pg_array_init_reserve(x, 64, arena);                                     \
     pg_assert(pg_array_len(x) <= pg_array_cap(x));                             \
     if (pg_array_len(x) == pg_array_cap(x)) {                                  \
       pg_assert(pg_array_cap(x) >= 8);                                         \
