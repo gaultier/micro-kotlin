@@ -423,6 +423,19 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
+u64 mem_frame_table_add_address(mem_frame_table *frame_table,
+                                mem_address address, arena_t *arena) {
+  for (u64 i = 0; i < frame_table->length; i++) {
+    if (frame_table->address[i].value == address.value)
+      return i;
+  }
+
+  pg_array_append(frame_table->address, address, arena);
+  pg_array_append(frame_table->func, (mem_func_table){0},
+                  arena); // FIXME
+  return frame_table->length++;
+}
+
 void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
@@ -441,12 +454,10 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   for (u64 i = 0; i < call_stack_len; i++) {
     u64 address = call_stack[i];
 
-    pg_array_append(t->frame_table.address, (mem_address){address},
-                    &profile->arena);
-    pg_array_append(t->frame_table.func, (mem_func_table){0},
-                    &profile->arena); // FIXME
-    u64 frame_index = t->frame_table.length++;
+    u64 frame_index = mem_frame_table_add_address(
+        &t->frame_table, (mem_address){address}, &profile->arena);
 
+    // TODO: dedup
     pg_array_append(t->stack_table.frame, (mem_frame_table_index){frame_index},
                     &profile->arena);
     pg_array_append(t->stack_table.category, (mem_category_list_index){0},
