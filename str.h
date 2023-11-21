@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arena.h"
+#include "array.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -8,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 // String builder, like a dynamic array.
@@ -303,3 +305,163 @@ ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
   close(fd);
   return res;
 }
+
+// --------------------------- Profile memory allocations
+
+typedef struct {
+  u64 value;
+} mem_address;
+
+/* typedef struct { */
+/* } mem_unique_string_array; */
+
+/* typedef struct { */
+/* } mem_native_symbol_table; */
+
+typedef struct {
+  str name, path, debug_name, debug_path, breakpad_id;
+} mem_lib;
+
+typedef struct {
+  u64 value;
+} mem_string_table_index;
+
+typedef struct {
+  u64 value;
+} mem_lib_index;
+
+typedef struct {
+  u64 value;
+} mem_bytes;
+
+typedef struct {
+  u64 length;
+  mem_lib_index *lib;
+  mem_string_table_index *name;
+} mem_resource_table;
+
+typedef struct {
+  u64 value;
+} mem_resource_table_index;
+
+typedef struct {
+  u64 value;
+} mem_stack_table_index;
+
+typedef struct {
+  u64 value;
+} mem_frame_table_index;
+
+typedef struct {
+  u64 length;
+  mem_string_table_index *name;
+  mem_resource_table_index *resource;
+} mem_func_table;
+
+typedef struct {
+  u64 length;
+  mem_address *address;
+  mem_func_table *func;
+} mem_frame_table;
+
+typedef struct {
+  float value;
+} mem_milliseconds;
+
+typedef struct {
+  mem_milliseconds *time;
+  mem_bytes *weight;
+  mem_stack_table_index *stack;
+  u64 length;
+} mem_unbalanced_native_allocations_table;
+
+typedef struct {
+  u64 length;
+  mem_frame_table_index *frame;
+  mem_stack_table_index *prefix;
+} mem_stack_table;
+
+typedef struct {
+  mem_unbalanced_native_allocations_table native_allocations;
+  mem_stack_table stack_table;
+  mem_frame_table frame_table;
+  /* mem_unique_string_array string_table; */
+  mem_func_table func_table;
+  mem_resource_table resource_table;
+  /* mem_native_symbol_table native_symbols; */
+} mem_thread;
+
+typedef struct {
+} mem_meta;
+
+typedef struct {
+  mem_meta meta;
+  mem_thread thread[1];
+} mem_profile;
+
+mem_profile mem_profile_new(arena_t *arena) {
+  mem_profile res = {.meta = {
+                     }};
+  return res;
+}
+// TODO: Maybe use varints to reduce the size.
+static u8 ut_record_call_stack(u64 *dst, arena_t *arena) {
+  static u64 initial_rbp = 0;
+  static u64 pie_offset = 0;
+
+  uintptr_t *rbp = __builtin_frame_address(0);
+
+  u64 len = 0;
+
+  while (rbp != 0 && (u64)rbp != initial_rbp && *rbp != 0) {
+    const uintptr_t rip = *(rbp + 1);
+    rbp = (uintptr_t *)*rbp;
+
+    if ((u64)rbp == initial_rbp)
+      break;
+
+    pg_array_append(dst, rip - pie_offset, arena);
+  }
+  return len;
+}
+
+void mem_profile_record(mem_profile *res, u64 bytes_count, arena_t *arena,
+                        arena_t scratch_arena) {
+
+  u64 *call_stack = NULL;
+  pg_array_init_reserve(call_stack, 64, &scratch_arena);
+  ut_record_call_stack(call_stack, &scratch_arena);
+
+  mem_unbalanced_native_allocations_table *allocs =
+      &res->thread[0].native_allocations;
+
+  struct timeval tv = {0};
+  gettimeofday(&tv, NULL);
+  u64 now = (float)tv.tv_sec + (float)tv.tv_usec / 1000.0f;
+  pg_array_append(allocs->time, (mem_milliseconds){now}, arena);
+
+  pg_array_append(allocs->weight, (mem_bytes){bytes_count}, arena);
+
+  for (u64 i = 0; i < pg_array_len(call_stack); i++) {
+    u64 address = call_stack[i];
+
+    pg_array_append(res->thread[0].frame_table.address, (mem_address){address},
+                    arena);
+    pg_array_append(res->thread[0].frame_table.func, (mem_func_table){0},
+                    arena); // FIXME
+    u64 frame_index = res->thread[0].frame_table.length++;
+
+    pg_array_append(res->thread[0].stack_table.frame,
+                    (mem_frame_table_index){frame_index}, arena);
+    pg_array_append(res->thread[0].stack_table.prefix,
+                    (mem_stack_table_index){0}, arena); // FIXME
+    u64 stack_table_index = res->thread[0].stack_table.length++;
+
+    pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
+                    arena);
+  }
+
+  allocs->length += 1;
+}
+
+void mem_profile_write(mem_profile *res, FILE *out) {}
