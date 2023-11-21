@@ -92,7 +92,7 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   size_t offset = padding + size * count;
   if (available < offset) {
     fprintf(stderr,
-            "Out of memory: available=%lu"
+            "Out of memory: available=%lu "
             "allocation_size=%lu\n",
             available, offset);
     abort();

@@ -411,7 +411,7 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
 
   u64 len = 0;
 
-  while (rbp != 0 && *rbp != 0 && ((u64)rbp & 8) == 8) {
+  while (rbp != 0 && ((u64)rbp & 7) == 0 && *rbp != 0) {
     const uintptr_t rip = *(rbp + 1);
     rbp = (uintptr_t *)*rbp;
 
@@ -425,10 +425,11 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
 
 void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   u64 call_stack[64] = {0};
-  u64 call_stack_len = ut_record_call_stack(call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+  u64 call_stack_len = ut_record_call_stack(
+      call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
 
-  mem_unbalanced_native_allocations_table *allocs =
-      &profile->thread[0].native_allocations;
+  mem_thread *t = &profile->thread[0];
+  mem_unbalanced_native_allocations_table *allocs = &t->native_allocations;
 
   struct timeval tv = {0};
   gettimeofday(&tv, NULL);
@@ -440,19 +441,19 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   for (u64 i = 0; i < call_stack_len; i++) {
     u64 address = call_stack[i];
 
-    pg_array_append(profile->thread[0].frame_table.address,
-                    (mem_address){address}, &profile->arena);
-    pg_array_append(profile->thread[0].frame_table.func, (mem_func_table){0},
+    pg_array_append(t->frame_table.address, (mem_address){address},
+                    &profile->arena);
+    pg_array_append(t->frame_table.func, (mem_func_table){0},
                     &profile->arena); // FIXME
-    u64 frame_index = profile->thread[0].frame_table.length++;
+    u64 frame_index = t->frame_table.length++;
 
-    pg_array_append(profile->thread[0].stack_table.frame,
-                    (mem_frame_table_index){frame_index}, &profile->arena);
-    pg_array_append(profile->thread[0].stack_table.category,
-                    (mem_category_list_index){0}, &profile->arena); // FIXME?
-    pg_array_append(profile->thread[0].stack_table.prefix,
-                    (mem_stack_table_index){0}, &profile->arena); // FIXME
-    u64 stack_table_index = profile->thread[0].stack_table.length++;
+    pg_array_append(t->stack_table.frame, (mem_frame_table_index){frame_index},
+                    &profile->arena);
+    pg_array_append(t->stack_table.category, (mem_category_list_index){0},
+                    &profile->arena); // FIXME?
+    pg_array_append(t->stack_table.prefix, (mem_stack_table_index){0},
+                    &profile->arena); // FIXME
+    u64 stack_table_index = t->stack_table.length++;
 
     pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
                     &profile->arena);
@@ -470,9 +471,26 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
   }
 
   {
-    str threads_key = str_from_c("\"threads\":[");
+    str threads_key = str_from_c("\"threads\":[{");
     fwrite(threads_key.data, 1, threads_key.len, out);
-    fwrite("]", 1, 1, out);
+
+    mem_thread *t = &profile->thread[0];
+
+    {
+      str frame_table_key = str_from_c("\"frameTable\":{");
+      fwrite(frame_table_key.data, 1, frame_table_key.len, out);
+
+      {
+        str length_key = str_from_c("\"length\":");
+        fwrite(length_key.data, 1, length_key.len, out);
+        fprintf(out, "%lu", t->frame_table.length);
+      }
+
+      fwrite("}]", 1, 1, out);
+    }
+    /* for (u64 i=0;i<pg_array_ */
+
+    fwrite("}]", 1, 1, out);
   }
 
   fwrite("}", 1, 1, out);
