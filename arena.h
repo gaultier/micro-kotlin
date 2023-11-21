@@ -171,6 +171,8 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   }
 
   void *res = a->start + padding;
+  // TODO: Consider adding a flag to skip this.
+  memset(res, 0, size * count);
 
   a->start += offset;
 
