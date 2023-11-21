@@ -54,6 +54,9 @@ static u64 ut_next_power_of_two(u64 n) {
   n |= n >> 16;
   n |= n >> 32;
   n++;
+
+  pg_assert(__builtin_popcount(n) == 1);
+
   return n;
 }
 
@@ -301,4 +304,3 @@ ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
   close(fd);
   return res;
 }
-
