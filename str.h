@@ -436,10 +436,22 @@ u64 mem_frame_table_add_address(mem_frame_table *frame_table,
   return frame_table->length++;
 }
 
+i64 mem_find_prefix_with_address(mem_thread *t, u64 address) {
+  for (u64 i = 0; i < t->stack_table.length; i++) {
+    mem_frame_table_index frame_table_index = t->stack_table.frame[i];
+    u64 frame_address = t->frame_table.address[frame_table_index.value].value;
+
+    if (frame_address == address)
+      return i;
+  }
+  return -1;
+}
+
 void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+  pg_assert(call_stack_len >= 2);
 
   mem_thread *t = &profile->thread[0];
   mem_unbalanced_native_allocations_table *allocs = &t->native_allocations;
@@ -451,24 +463,29 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 
   pg_array_append(allocs->weight, (mem_bytes){bytes_count}, &profile->arena);
 
-  for (u64 i = 0; i < call_stack_len; i++) {
-    u64 address = call_stack[i];
+  u64 caller_address = call_stack[1];
+  u64 callee_address = call_stack[0];
 
-    u64 frame_index = mem_frame_table_add_address(
-        &t->frame_table, (mem_address){address}, &profile->arena);
+  i64 prefix = mem_find_prefix_with_address(t, caller_address);
+  if (prefix==-1) { // Root
+  } else {
 
-    // TODO: dedup
-    pg_array_append(t->stack_table.frame, (mem_frame_table_index){frame_index},
-                    &profile->arena);
-    pg_array_append(t->stack_table.category, (mem_category_list_index){0},
-                    &profile->arena); // FIXME?
-    pg_array_append(t->stack_table.prefix, (mem_stack_table_index){0},
-                    &profile->arena); // FIXME
-    u64 stack_table_index = t->stack_table.length++;
-
-    pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
-                    &profile->arena);
   }
+
+
+  u64 frame_index = mem_frame_table_add_address(
+      &t->frame_table, (mem_address){callee_address}, &profile->arena);
+
+  pg_array_append(t->stack_table.frame, (mem_frame_table_index){frame_index},
+                  &profile->arena);
+  pg_array_append(t->stack_table.category, (mem_category_list_index){0},
+                  &profile->arena); // FIXME?
+  pg_array_append(t->stack_table.prefix, (mem_stack_table_index){0},
+                  &profile->arena); // FIXME
+  u64 stack_table_index = t->stack_table.length++;
+
+  pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
+                  &profile->arena);
 
   allocs->length += 1;
 }
