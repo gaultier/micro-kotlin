@@ -24,11 +24,10 @@ typedef struct {
 } str;
 
 static str str_from_c(char *s) {
-  return (str){.data = (uint8_t *)s, .len = s == NULL ? 0 : strlen(s)};
+  return (str){.data = (u8 *)s, .len = s == NULL ? 0 : strlen(s)};
 }
 
-#define str_from_c_literal(s)                                                  \
-  ((str){.data = (uint8_t *)s, .len = sizeof(s) - 1})
+#define str_from_c_literal(s) ((str){.data = (u8 *)s, .len = sizeof(s) - 1})
 
 static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
@@ -80,7 +79,7 @@ static bool str_ends_with(str haystack, str needle) {
   if (needle.len > haystack.len)
     return false;
 
-  uint64_t start = haystack.len - needle.len;
+  u64 start = haystack.len - needle.len;
   return memcmp(&haystack.data[start], needle.data, needle.len) == 0;
 }
 
@@ -108,7 +107,7 @@ static bool str_eq(str a, str b) {
 static bool str_eq_c(str a, char *b) { return str_eq(a, str_from_c(b)); }
 
 static bool str_contains_element(str haystack, u8 needle) {
-  for (int64_t i = 0; i < (int64_t)haystack.len - 1; i++) {
+  for (i64 i = 0; i < (i64)haystack.len - 1; i++) {
     if (haystack.data[i] == needle)
       return true;
   }
@@ -123,11 +122,11 @@ typedef struct {
 } str_split_result_t;
 
 static str_split_result_t str_split(str haystack, u8 needle) {
-  uint8_t *at = memchr(haystack.data, needle, haystack.len);
+  u8 *at = memchr(haystack.data, needle, haystack.len);
   if (at == NULL)
     return (str_split_result_t){.left = haystack, .right = haystack};
 
-  uint64_t found_pos = at - haystack.data;
+  u64 found_pos = at - haystack.data;
 
   return (str_split_result_t){
       .left = (str){.data = haystack.data, .len = found_pos},
@@ -138,11 +137,11 @@ static str_split_result_t str_split(str haystack, u8 needle) {
 }
 
 static str_split_result_t str_rsplit(str haystack, u8 needle) {
-  uint8_t *at = ut_memrchr(haystack.data, needle, haystack.len);
+  u8 *at = ut_memrchr(haystack.data, needle, haystack.len);
   if (at == NULL)
     return (str_split_result_t){.left = haystack, .right = haystack};
 
-  uint64_t found_pos = at - haystack.data;
+  u64 found_pos = at - haystack.data;
 
   return (str_split_result_t){
       .left = (str){.data = haystack.data, .len = found_pos},

@@ -2979,7 +2979,7 @@ static u32 lex_get_current_offset(str buf, u8 *const *current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
-  pg_assert((uint64_t)(*current - buf.data) <= buf.len);
+  pg_assert((u64)(*current - buf.data) <= buf.len);
 
   return *current - buf.data;
 }
@@ -2988,7 +2988,7 @@ static bool lex_is_at_end(str buf, u8 *const *current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
-  pg_assert((uint64_t)(*current - buf.data) <= buf.len);
+  pg_assert((u64)(*current - buf.data) <= buf.len);
 
   return lex_get_current_offset(buf, current) == buf.len;
 }
@@ -3142,7 +3142,7 @@ static void lex_identifier(lex_lexer_t *lexer, str buf, u8 **current,
   pg_assert(lexer->tokens != NULL);
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
-  pg_assert((uint64_t)(*current - buf.data) <= buf.len);
+  pg_assert((u64)(*current - buf.data) <= buf.len);
   pg_assert(ut_char_is_alphabetic(**current));
 
   const u32 start_offset = lex_get_current_offset(buf, current);

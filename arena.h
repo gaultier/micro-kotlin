@@ -43,7 +43,7 @@ static bool cli_log_verbose = false;
 #define pg_private_name(n) pg_private_concat(n, PG_PRIVATE_UNIQUE_ID)
 #define pg_private_concat(a, b) pg_private_concat2(a, b)
 #define pg_private_concat2(a, b) a##b
-#define pg_pad(n) uint8_t pg_private_name(_padding)[n]
+#define pg_pad(n) u8 pg_private_name(_padding)[n]
 
 #define pg_unused(x) (void)(x)
 
