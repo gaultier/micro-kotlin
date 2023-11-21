@@ -6005,7 +6005,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
     {
       // TODO: check if we can read the file content into `scratch_arena`
       ut_read_result_t read_res = ut_read_all_from_file_path(
-          tentative_class_file_path, scratch_arena, arena);
+          tentative_class_file_path, scratch_arena, &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 

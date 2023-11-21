@@ -123,7 +123,8 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  arena_t arena = arena_new(1L << 28); // 256 MiB
+  arena_t arena = arena_new(1L << 26); // 64 MiB
+  LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena = arena_new(1L << 28); // 256 MiB
@@ -196,6 +197,8 @@ int main(int argc, char *argv[]) {
     // Debug types.
     {
       LOG("------ After type checking%s", "");
+      LOG("After type checking: arena_available=%lu", arena.end - arena.start);
+
       arena_t tmp_arena = arena;
       resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
@@ -233,6 +236,8 @@ int main(int argc, char *argv[]) {
         pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
     LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
         sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
+
+    LOG("After codegen: arena_available=%lu", arena.end - arena.start);
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
