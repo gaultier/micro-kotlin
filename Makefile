@@ -2,7 +2,7 @@
 
 WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
-LDFLAGS := -lz -lprotobuf-c
+LDFLAGS := -lz ~/not-my-code/protobuf-c/protobuf-c/.libs/libprotobuf-c.a
 
 SRC := main.c class_file.h arena.h str.h array.h
 

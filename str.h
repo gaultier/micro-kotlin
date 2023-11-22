@@ -350,15 +350,22 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
   u64 string_bytes_index = 0;
   u64 string_space_index = 0;
   u64 string_allocations_index = 0;
+  u64 string_heap_index = 0;
 
   profile->profile =
       (Perftools__Profiles__Profile)PERFTOOLS__PROFILES__PROFILE__INIT;
-#if 0
+  // string_table
   {
     u64 index = 0;
+
+    profile->profile.n_string_table = 6;
     profile->profile.string_table =
         arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
                     profile->profile.n_string_table);
+
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal(""), &profile->arena);
+    string_allocations_index = index++;
 
     profile->profile.string_table[index] =
         str_to_c(str_from_c_literal("allocations"), &profile->arena);
@@ -376,9 +383,12 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         str_to_c(str_from_c_literal("bytes"), &profile->arena);
     string_bytes_index = index++;
 
-    profile->profile.n_string_table = index;
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal("heap"), &profile->arena);
+    string_heap_index = index++;
   }
 
+  // sample_type
   {
     profile->profile.n_sample_type = 2;
     profile->profile.sample_type =
@@ -403,23 +413,99 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
 
       *value_type =
           (Perftools__Profiles__ValueType)PERFTOOLS__PROFILES__VALUE_TYPE__INIT;
-      value_type->unit = string_space_index;
-      value_type->type = string_bytes_index;
+      value_type->unit = string_bytes_index;
+      value_type->type = string_space_index;
       profile->profile.sample_type[1] = value_type;
     }
   }
-#endif
+  // TODO: time_nanos, duration_nanos
 
-  u64 pack_size =
-      perftools__profiles__profile__get_packed_size(&profile->profile);
-  u8 *buf = arena_alloc(&profile->arena, sizeof(u8), _Alignof(u8), pack_size);
-  perftools__profiles__profile__pack(&profile->profile, buf);
+  // period_type
+  {
+    Perftools__Profiles__ValueType *value_type =
+        arena_alloc(&profile->arena, sizeof(Perftools__Profiles__ValueType),
+                    _Alignof(Perftools__Profiles__ValueType), 1);
+    *value_type =
+        (Perftools__Profiles__ValueType)PERFTOOLS__PROFILES__VALUE_TYPE__INIT;
 
-  int fd = open("profile.pb", O_WRONLY | O_CREAT | O_TRUNC, 0700);
-  if (fd == -1) {
-    abort();
+    value_type->type = string_space_index;
+    value_type->unit = string_bytes_index;
+
+    profile->profile.period_type = value_type;
   }
-  pg_assert(write(fd, buf, pack_size) == (isize)pack_size);
 
-  close(fd);
+  // sample
+  {
+    profile->profile.n_sample = 1; // FIXME
+    profile->profile.sample =
+        arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
+                    profile->profile.n_sample_type);
+
+    {
+
+      Perftools__Profiles__Sample *sample =
+          arena_alloc(&profile->arena, sizeof(Perftools__Profiles__Sample),
+                      _Alignof(Perftools__Profiles__Sample), 1);
+
+      *sample = (Perftools__Profiles__Sample)PERFTOOLS__PROFILES__SAMPLE__INIT;
+
+      sample->n_value = profile->profile.n_sample_type;
+      sample->value = arena_alloc(&profile->arena, sizeof(i64), _Alignof(i64),
+                                  sample->n_value);
+
+      sample->value[0] = 1;
+      sample->value[1] = 42; // FIXME
+
+      // FIXME
+      {
+        u64 call_stack[64] = {0};
+        u64 call_stack_len = ut_record_call_stack(
+            call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+        pg_assert(call_stack_len >= 2);
+
+        sample->n_location_id = call_stack_len;
+        sample->location_id = arena_alloc(&profile->arena, sizeof(u64),
+                                          _Alignof(u64), sample->n_location_id);
+
+        profile->profile.n_location = call_stack_len;
+        profile->profile.location =
+            arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
+                        profile->profile.n_location);
+
+        u64 glocation_id = 0;
+        for (u64 i = 0; i < call_stack_len; i++) {
+          u64 address = call_stack[i];
+
+          Perftools__Profiles__Location *location = arena_alloc(
+              &profile->arena, sizeof(Perftools__Profiles__Location),
+              _Alignof(Perftools__Profiles__Location), 1);
+          *location = (Perftools__Profiles__Location)
+              PERFTOOLS__PROFILES__LOCATION__INIT;
+          location->id = glocation_id++;
+          location->address = address;
+          profile->profile.location[i] = location;
+
+          sample->location_id[i] = location->id;
+        }
+      }
+
+      profile->profile.sample[0] = sample;
+    }
+  }
+
+  // Serialize.
+  {
+    u64 pack_size =
+        perftools__profiles__profile__get_packed_size(&profile->profile);
+    u8 *buf = arena_alloc(&profile->arena, sizeof(u8), _Alignof(u8), pack_size);
+    perftools__profiles__profile__pack(&profile->profile, buf);
+
+    int fd = open("profile.pb", O_WRONLY | O_CREAT | O_TRUNC, 0700);
+    if (fd == -1) {
+      abort();
+    }
+    pg_assert(write(fd, buf, pack_size) == (isize)pack_size);
+
+    close(fd);
+  }
 }
