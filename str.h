@@ -828,6 +828,72 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "0%s",
                     (i + 1) == t->stack_table.length ? "\n" : ",\n");
           }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"nativeSymbol\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"innerWindowID\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"implementation\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"line\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"column\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"optimizations\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
           fwrite("]\n", 1, 2, out);
         }
 
