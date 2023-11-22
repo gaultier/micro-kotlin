@@ -354,6 +354,10 @@ typedef struct {
 
 typedef struct {
   u64 value;
+} mem_func_table_index;
+
+typedef struct {
+  u64 value;
 } mem_category_list_index;
 
 typedef struct {
@@ -365,7 +369,7 @@ typedef struct {
 typedef struct {
   u64 length;
   mem_address *address;
-  mem_func_table *func;
+  mem_func_table_index *func;
 } mem_frame_table;
 
 typedef struct {
@@ -431,7 +435,7 @@ u64 mem_frame_table_add_address(mem_frame_table *frame_table,
   }
 
   pg_array_append(frame_table->address, address, arena);
-  pg_array_append(frame_table->func, (mem_func_table){0},
+  pg_array_append(frame_table->func, (mem_func_table_index){0},
                   arena); // FIXME
   return frame_table->length++;
 }
@@ -456,7 +460,7 @@ mem_stack_table_index mem_add_or_find_address(mem_thread *t,
   // No parent: This is the root. Insert the relevant entries.
 
   pg_array_append(t->frame_table.address, address, arena);
-  pg_array_append(t->frame_table.func, (mem_func_table){0}, arena);
+  pg_array_append(t->frame_table.func, (mem_func_table_index){0}, arena);
   mem_frame_table_index frame_table_index =
       (mem_frame_table_index){t->frame_table.length};
   t->frame_table.length += 1;
@@ -519,27 +523,42 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
 
     mem_thread *t = &profile->thread[0];
 
+    // thread
     {
       str frame_table_key = str_from_c("\"frameTable\":{");
       fwrite(frame_table_key.data, 1, frame_table_key.len, out);
 
+      // frameTable
       {
-        str length_key = str_from_c("\"length\":");
-        fwrite(length_key.data, 1, length_key.len, out);
-        fprintf(out, "%lu,", t->frame_table.length);
-
-        str address_key = str_from_c("\"address\":[");
-        fwrite(address_key.data, 1, address_key.len, out);
-        for (u64 i = 0; i < t->frame_table.length; i++) {
-          fprintf(out, "%lu%c", t->frame_table.address[i].value,
-                  (i + 1) == t->frame_table.length ? ' ' : ',');
+        {
+          str key = str_from_c("\"length\":");
+          fwrite(key.data, 1, key.len, out);
+          fprintf(out, "%lu,", t->frame_table.length);
         }
+
+        {
+          str key = str_from_c("\"address\":[");
+          fwrite(key.data, 1, key.len, out);
+          for (u64 i = 0; i < t->frame_table.length; i++) {
+            fprintf(out, "%lu%c", t->frame_table.address[i].value,
+                    (i + 1) == t->frame_table.length ? ' ' : ',');
+          }
+        }
+        {
+          str key = str_from_c("\"func\":[");
+          fwrite(key.data, 1, key.len, out);
+          for (u64 i = 0; i < t->frame_table.length; i++) {
+            fprintf(out, "%lu%c", t->frame_table.func[i].value,
+                    (i + 1) == t->frame_table.length ? ' ' : ',');
+          }
+        }
+
         fwrite("]", 1, 1, out);
       }
+      // TODO: funcTable ?
 
       fwrite("}]", 1, 1, out);
     }
-    /* for (u64 i=0;i<pg_array_ */
 
     fwrite("}]", 1, 1, out);
   }
