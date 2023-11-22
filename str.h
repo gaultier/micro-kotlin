@@ -324,7 +324,7 @@ typedef struct {
 } mem_lib;
 
 typedef struct {
-  u64 value;
+  i64 value;
 } mem_string_table_index;
 
 typedef struct {
@@ -342,7 +342,7 @@ typedef struct {
 } mem_resource_table;
 
 typedef struct {
-  u64 value;
+  i64 value;
 } mem_resource_table_index;
 
 typedef struct {
@@ -511,6 +511,16 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {
+  pg_assert(profile->thread[0].func_table.length == 0);
+  pg_assert(profile->thread[0].resource_table.length == 0);
+
+  profile->thread[0].func_table.length = 1;
+
+  pg_array_append(profile->thread[0].func_table.name,
+                  (mem_string_table_index){-1}, &profile->arena);
+  pg_array_append(profile->thread[0].func_table.resource,
+                  (mem_resource_table_index){-1}, &profile->arena);
+
   fwrite("{\n", 1, 2, out);
 
   // meta
@@ -629,11 +639,11 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         }
 
         {
-          str key = str_from_c("\"length\":[");
+          str key = str_from_c("\"name\":[");
           fwrite(key.data, 1, key.len, out);
 
           for (u64 i = 0; i < t->func_table.length; i++) {
-            fprintf(out, "%lu%s", t->func_table.name[i].value,
+            fprintf(out, "%ld%s", t->func_table.name[i].value,
                     (i + 1) == t->func_table.length ? "\n" : ",\n");
           }
 
@@ -669,7 +679,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fwrite(key.data, 1, key.len, out);
 
           for (u64 i = 0; i < t->func_table.length; i++) {
-            fprintf(out, "%lu%s", t->func_table.resource[i].value,
+            fprintf(out, "%ld%s", t->func_table.resource[i].value,
                     (i + 1) == t->func_table.length ? "\n" : ",\n");
           }
 
