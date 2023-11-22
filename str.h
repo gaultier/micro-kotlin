@@ -309,7 +309,13 @@ ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
 
 // --------------------------- Profile memory allocations
 
+typedef struct {
+  u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
+  u64 *call_stack;
+} mem_record;
+
 struct mem_profile {
+  mem_record *records;
   arena_t arena;
 };
 
@@ -340,6 +346,16 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
   pg_assert(call_stack_len >= 2);
+
+  // TODO: Upsert record with same call stack.
 }
 
-void mem_profile_write(mem_profile *profile, FILE *out) {}
+void mem_profile_write(mem_profile *profile, FILE *out) {
+  // heap profile:    <in_use>:  <nbytes1> [   <space>:  <nbytes2>] @
+  // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
+  // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
+  // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
+  //
+  // MAPPED_LIBRARIES:
+  // [...]
+}
