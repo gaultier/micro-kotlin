@@ -472,7 +472,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
                         profile->profile.n_location);
 
-        u64 glocation_id = 0;
+        u64 glocation_id = 1;
         for (u64 i = 0; i < call_stack_len; i++) {
           u64 address = call_stack[i];
 
