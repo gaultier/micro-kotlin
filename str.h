@@ -655,6 +655,11 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
 
         fwrite("]\n", 1, 1, out);
       }
+      
+      // stringsArray
+      {
+
+      }
 
       fwrite("}]\n", 1, 1, out);
     }
