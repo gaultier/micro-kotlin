@@ -711,6 +711,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
 
           fwrite("]\n", 1, 2, out);
         }
+        fwrite("},\n", 1, 3, out);
       }
 
       // nativeAllocations
@@ -826,7 +827,10 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
       }
 
       // stringsArray
-      {}
+      {
+        str strings = str_from_c("\"stringArray\":[],\n");
+        fwrite(strings.data, 1, strings.len, out);
+      }
 
       str thread_trailer =
           str_from_c("\"markers\": {\n"
