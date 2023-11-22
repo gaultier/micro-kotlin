@@ -817,10 +817,21 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->stack_table.category[i].value,
                     (i + 1) == t->stack_table.length ? "\n" : ",\n");
           }
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"subcategory\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "0%s",
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
           fwrite("]\n", 1, 2, out);
         }
 
-        fwrite("},\n", 1, 2, out);
+        fwrite("},\n", 1, 3, out);
       }
 
       // samples (empty)
@@ -840,6 +851,19 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
       {
         str strings = str_from_c("\"stringArray\":[],\n");
         fwrite(strings.data, 1, strings.len, out);
+      }
+
+      // resourceTable
+      {
+        str key = str_from_c("\"resourceTable\":{\n");
+        fwrite(key.data, 1, key.len, out);
+
+        {
+          str key = str_from_c("\"length\":0");
+          fwrite(key.data, 1, key.len, out);
+        }
+
+        fwrite("},\n", 1, 3, out);
       }
 
       str thread_trailer =
@@ -868,8 +892,6 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
                      "\"processType\": \"default\",\n"
                      "\"registerTime\": 0\n");
       fwrite(thread_trailer.data, 1, thread_trailer.len, out);
-
-      // TODO: resource table?
     }
 
     fwrite("}]\n", 1, 3, out);
