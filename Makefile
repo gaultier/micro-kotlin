@@ -2,7 +2,7 @@
 
 WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
-LDFLAGS := -lz
+LDFLAGS := -lz -lprotobuf-c
 
 SRC := main.c class_file.h arena.h str.h array.h
 

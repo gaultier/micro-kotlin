@@ -2,12 +2,15 @@
 
 #include "arena.h"
 #include "array.h"
+#include "pprof.pb-c.c"
+#include "pprof.pb-c.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -308,110 +311,13 @@ ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
 }
 
 // --------------------------- Profile memory allocations
-
-typedef struct {
-  u64 value;
-} mem_address;
-
-/* typedef struct { */
-/* } mem_unique_string_array; */
-
-/* typedef struct { */
-/* } mem_native_symbol_table; */
-
-typedef struct {
-  str name, path, debug_name, debug_path, breakpad_id;
-} mem_lib;
-
-typedef struct {
-  i64 value;
-} mem_string_table_index;
-
-typedef struct {
-  u64 value;
-} mem_lib_index;
-
-typedef struct {
-  u64 value;
-} mem_bytes;
-
-typedef struct {
-  u64 length;
-  mem_lib_index *lib;
-  mem_string_table_index *name;
-} mem_resource_table;
-
-typedef struct {
-  i64 value;
-} mem_resource_table_index;
-
-typedef struct {
-  i64 value;
-} mem_stack_table_index;
-
-typedef struct {
-  u64 value;
-} mem_frame_table_index;
-
-typedef struct {
-  u64 value;
-} mem_func_table_index;
-
-typedef struct {
-  u64 value;
-} mem_category_list_index;
-
-typedef struct {
-  u64 length;
-  mem_string_table_index *name;
-  mem_resource_table_index *resource;
-} mem_func_table;
-
-typedef struct {
-  u64 length;
-  mem_address *address;
-  mem_func_table_index *func;
-} mem_frame_table;
-
-typedef struct {
-  float value;
-} mem_milliseconds;
-
-typedef struct {
-  mem_milliseconds *time;
-  mem_bytes *weight;
-  mem_stack_table_index *stack;
-  u64 length;
-} mem_unbalanced_native_allocations_table;
-
-typedef struct {
-  u64 length;
-  mem_frame_table_index *frame;
-  mem_category_list_index *category;
-  mem_stack_table_index *prefix;
-} mem_stack_table;
-
-typedef struct {
-  mem_unbalanced_native_allocations_table native_allocations;
-  mem_stack_table stack_table;
-  mem_frame_table frame_table;
-  str *string_table;
-  mem_func_table func_table;
-  mem_resource_table resource_table;
-  /* mem_native_symbol_table native_symbols; */
-} mem_thread;
-
-typedef struct {
-} mem_meta;
-
 struct mem_profile {
+  struct Perftools__Profiles__Profile profile;
   arena_t arena;
-  mem_meta meta;
-  mem_thread thread[1];
 };
 
 // TODO: Maybe use varints to reduce the size.
-static u8 ut_record_call_stack(u64 *dst, u64 cap) {
+inline static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
   u64 len = 0;
@@ -423,62 +329,13 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
     if (len >= cap)
       return len;
 
-    // `rip` points to the return instruction in the caller, once this call is done.
-    // But: We want the location of the call i.e. the `call xxx` instruction,
-    // so we subtract one byte to point inside it, 
-    // which is not quite 'at it' but good enough.
-    dst[len++] = rip - 1; 
+    // `rip` points to the return instruction in the caller, once this call is
+    // done. But: We want the location of the call i.e. the `call xxx`
+    // instruction, so we subtract one byte to point inside it, which is not
+    // quite 'at it' but good enough.
+    dst[len++] = rip - 1;
   }
   return len;
-}
-
-u64 mem_frame_table_add_address(mem_frame_table *frame_table,
-                                mem_address address, arena_t *arena) {
-  for (u64 i = 0; i < frame_table->length; i++) {
-    if (frame_table->address[i].value == address.value)
-      return i;
-  }
-
-  pg_array_append(frame_table->address, address, arena);
-  pg_array_append(frame_table->func, (mem_func_table_index){0},
-                  arena); // FIXME
-  return frame_table->length++;
-}
-
-mem_stack_table_index mem_add_or_find_address(mem_thread *t,
-                                              mem_address address,
-                                              mem_stack_table_index parent,
-                                              arena_t *arena) {
-  // Either we don't know who is the parent, or we know there is none.
-  // TODO: Optimize the latter by skipping the search?
-  if (parent.value == -1) {
-    for (i64 i = t->stack_table.length - 1; i >= 0; i--) {
-      mem_frame_table_index frame_table_index = t->stack_table.frame[i];
-      mem_address frame_address =
-          t->frame_table.address[frame_table_index.value];
-
-      if (frame_address.value == address.value)
-        return (mem_stack_table_index){i};
-    }
-  }
-
-  // No parent: This is the root. Insert the relevant entries.
-
-  pg_array_append(t->frame_table.address, address, arena);
-  pg_array_append(t->frame_table.func, (mem_func_table_index){0}, arena);
-  mem_frame_table_index frame_table_index =
-      (mem_frame_table_index){t->frame_table.length};
-  t->frame_table.length += 1;
-
-  pg_array_append(t->stack_table.frame, frame_table_index, arena);
-  pg_array_append(t->stack_table.category, (mem_category_list_index){0},
-                  arena); // FIXME?
-  pg_array_append(t->stack_table.prefix, (mem_stack_table_index){-1}, arena);
-
-  mem_stack_table_index res = {t->stack_table.length};
-  t->stack_table.length += 1;
-
-  return res;
 }
 
 void mem_profile_record(mem_profile *profile, u64 bytes_count) {
@@ -486,32 +343,79 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
   pg_assert(call_stack_len >= 2);
-
-  mem_thread *t = &profile->thread[0];
-  mem_unbalanced_native_allocations_table *allocs = &t->native_allocations;
-
-  struct timeval tv = {0};
-  gettimeofday(&tv, NULL);
-  u64 now = (float)tv.tv_sec + (float)tv.tv_usec / 1000.0f;
-  pg_array_append(allocs->time, (mem_milliseconds){now}, &profile->arena);
-
-  pg_array_append(allocs->weight, (mem_bytes){bytes_count}, &profile->arena);
-
-  mem_stack_table_index stack_table_index = {-1};
-  // Insert whole call chain starting from the root caller to be used then in
-  // its callee, and so on.
-  for (i64 i = call_stack_len - 1; i >= 0; i--) {
-    mem_address address = (mem_address){call_stack[i]};
-    // TODO: Potential optimization: if we just inserted the parent, pass
-    // `stack_table_index` as prefix!
-    stack_table_index =
-        mem_add_or_find_address(t, address, stack_table_index, &profile->arena);
-  }
-  pg_assert(stack_table_index.value != -1);
-
-  pg_array_append(allocs->stack, stack_table_index, &profile->arena);
-
-  allocs->length += 1;
 }
 
-void mem_profile_write(mem_profile *profile, FILE *out) {}
+void mem_profile_write(mem_profile *profile, FILE *out) {
+  u64 string_count_index = 0;
+  u64 string_bytes_index = 0;
+  u64 string_space_index = 0;
+  u64 string_allocations_index = 0;
+
+  {
+    u64 index = 0;
+    profile->profile.string_table =
+        arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
+                    profile->profile.n_string_table);
+
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal("allocations"), &profile->arena);
+    string_allocations_index = index++;
+
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal("count"), &profile->arena);
+    string_count_index = index++;
+
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal("space"), &profile->arena);
+    string_space_index = index++;
+
+    profile->profile.string_table[index] =
+        str_to_c(str_from_c_literal("bytes"), &profile->arena);
+    string_bytes_index = index++;
+
+    profile->profile.n_string_table = index;
+  }
+
+  {
+    profile->profile.n_sample_type = 2;
+    profile->profile.sample_type =
+        arena_alloc(&profile->arena, sizeof(uintptr_t), _Alignof(uintptr_t),
+                    profile->profile.n_sample_type);
+
+    {
+      Perftools__Profiles__ValueType *value_type =
+          arena_alloc(&profile->arena, sizeof(Perftools__Profiles__ValueType),
+                      _Alignof(Perftools__Profiles__ValueType), 1);
+      *value_type =
+          (Perftools__Profiles__ValueType)PERFTOOLS__PROFILES__VALUE_TYPE__INIT;
+
+      value_type->type = string_allocations_index;
+      value_type->unit = string_count_index;
+      profile->profile.sample_type[0] = value_type;
+    }
+    {
+      Perftools__Profiles__ValueType *value_type =
+          arena_alloc(&profile->arena, sizeof(Perftools__Profiles__ValueType),
+                      _Alignof(Perftools__Profiles__ValueType), 1);
+
+      *value_type =
+          (Perftools__Profiles__ValueType)PERFTOOLS__PROFILES__VALUE_TYPE__INIT;
+      value_type->unit = string_space_index;
+      value_type->type = string_bytes_index;
+      profile->profile.sample_type[1] = value_type;
+    }
+  }
+
+  u64 pack_size =
+      perftools__profiles__profile__get_packed_size(&profile->profile);
+  u8 *buf = arena_alloc(&profile->arena, sizeof(u8), _Alignof(u8), pack_size);
+  perftools__profiles__profile__pack(&profile->profile, buf);
+
+  int fd = open("profile.pb", O_WRONLY | O_CREAT);
+  if (fd == -1) {
+    abort();
+  }
+  pg_assert(write(fd, buf, pack_size) == (isize)pack_size);
+
+  close(fd);
+}
