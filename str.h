@@ -371,7 +371,7 @@ void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
       .in_use_space = bytes_count,
   };
   pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
-  memcpy(record.call_stack, call_stack, call_stack_len*sizeof(u64));
+  memcpy(record.call_stack, call_stack, call_stack_len * sizeof(u64));
   pg_array_header(record.call_stack)->len = call_stack_len;
 
   pg_array_append(profile->records, record, &profile->arena);
@@ -412,5 +412,17 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
     }
     fputc('\n', out);
   }
+
+  fputs("\nMAPPED_LIBRARIES:\n", out);
+
+  static u8 mem[4096] = {0};
+  int fd = open("/proc/self/maps", O_RDONLY);
+  pg_assert(fd != -1);
+  isize read_bytes = read(fd, mem, sizeof(mem));
+  pg_assert(read_bytes != -1);
+  close(fd);
+
+  fwrite(mem, 1, read_bytes, out);
+
   fflush(out);
 }
