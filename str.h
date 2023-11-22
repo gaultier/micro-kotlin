@@ -614,6 +614,17 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           }
           fwrite("],\n", 1, 3, out);
         }
+
+        {
+          str key = str_from_c("\"inlineDepth\":[\n");
+          fwrite(key.data, 1, key.len, out);
+          for (u64 i = 0; i < t->frame_table.length; i++) {
+            fprintf(out, "0%s",
+                    (i + 1) == t->frame_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 3, out);
+        }
+
         {
           str key = str_from_c("\"func\":[\n");
           fwrite(key.data, 1, key.len, out);
