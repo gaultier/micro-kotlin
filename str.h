@@ -531,25 +531,25 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
       // frameTable
       {
         {
-          str key = str_from_c("\"length\":\n");
+          str key = str_from_c("\"length\":");
           fwrite(key.data, 1, key.len, out);
-          fprintf(out, "%lu,", t->frame_table.length);
+          fprintf(out, "%lu,\n", t->frame_table.length);
         }
 
         {
           str key = str_from_c("\"address\":[\n");
           fwrite(key.data, 1, key.len, out);
           for (u64 i = 0; i < t->frame_table.length; i++) {
-            fprintf(out, "%lu%c", t->frame_table.address[i].value,
-                    (i + 1) == t->frame_table.length ? ' ' : ',');
+            fprintf(out, "%lu%s", t->frame_table.address[i].value,
+                    (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
         }
         {
           str key = str_from_c("\"func\":[\n");
           fwrite(key.data, 1, key.len, out);
           for (u64 i = 0; i < t->frame_table.length; i++) {
-            fprintf(out, "%lu%c", t->frame_table.func[i].value,
-                    (i + 1) == t->frame_table.length ? ' ' : ',');
+            fprintf(out, "%lu%s", t->frame_table.func[i].value,
+                    (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
         }
 
@@ -564,9 +564,9 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         fwrite(key.data, 1, key.len, out);
 
         {
-          str key = str_from_c("\"length\":\n");
+          str key = str_from_c("\"length\":");
           fwrite(key.data, 1, key.len, out);
-          fprintf(out, "%lu,", t->native_allocations.length);
+          fprintf(out, "%lu,\n", t->native_allocations.length);
         }
 
         {
@@ -579,8 +579,8 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fwrite(key.data, 1, key.len, out);
 
           for (u64 i = 0; i < t->native_allocations.length; i++) {
-            fprintf(out, "%lu%c", t->native_allocations.stack[i].value,
-                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+            fprintf(out, "%lu%s", t->native_allocations.stack[i].value,
+                    (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
           fwrite("],\n", 1, 1, out);
         }
@@ -590,8 +590,8 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fwrite(key.data, 1, key.len, out);
 
           for (u64 i = 0; i < t->native_allocations.length; i++) {
-            fprintf(out, "%lu%c", t->native_allocations.weight[i].value,
-                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+            fprintf(out, "%lu%s", t->native_allocations.weight[i].value,
+                    (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
           fwrite("],\n", 1, 1, out);
         }
@@ -600,8 +600,8 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fwrite(key.data, 1, key.len, out);
 
           for (u64 i = 0; i < t->native_allocations.length; i++) {
-            fprintf(out, "%f%c", t->native_allocations.time[i].value,
-                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+            fprintf(out, "%f%s", t->native_allocations.time[i].value,
+                    (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
           fwrite("]\n", 1, 1, out);
         }
