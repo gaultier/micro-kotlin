@@ -351,6 +351,9 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
   u64 string_space_index = 0;
   u64 string_allocations_index = 0;
 
+  profile->profile =
+      (Perftools__Profiles__Profile)PERFTOOLS__PROFILES__PROFILE__INIT;
+#if 0
   {
     u64 index = 0;
     profile->profile.string_table =
@@ -405,13 +408,14 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
       profile->profile.sample_type[1] = value_type;
     }
   }
+#endif
 
   u64 pack_size =
       perftools__profiles__profile__get_packed_size(&profile->profile);
   u8 *buf = arena_alloc(&profile->arena, sizeof(u8), _Alignof(u8), pack_size);
   perftools__profiles__profile__pack(&profile->profile, buf);
 
-  int fd = open("profile.pb", O_WRONLY | O_CREAT);
+  int fd = open("profile.pb", O_WRONLY | O_CREAT | O_TRUNC, 0700);
   if (fd == -1) {
     abort();
   }
