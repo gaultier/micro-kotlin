@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -510,26 +511,84 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {
-  fwrite("{\n", 1, 1, out);
+  fwrite("{\n", 1, 2, out);
 
+  // meta
   {
-    str meta_key = str_from_c("\"meta\":{},\n");
+    str meta_key = str_from_c("\"meta\":{");
     fwrite(meta_key.data, 1, meta_key.len, out);
+
+    str categories = str_from_c(""
+                                "\"categories\": [\n"
+                                "{\n"
+                                "\"name\": \"Other\",\n"
+                                "\"color\": \"grey\",\n"
+                                "\"subcategories\": [\n"
+                                "\"Other\"\n"
+                                "]\n"
+                                "},\n"
+                                "{\n"
+                                "\"name\": \"User\",\n"
+                                "\"color\": \"yellow\",\n"
+                                "\"subcategories\": [\n"
+                                "\"Other\"\n"
+                                "]\n"
+                                "},\n"
+                                "{\n"
+                                "\"name\": \"Kernel\",\n"
+                                "\"color\": \"orange\",\n"
+                                "\"subcategories\": [\n"
+                                "\"Other\"\n"
+                                "]\n"
+                                "}\n"
+                                "],\n"
+                                "\"debug\": false,\n"
+                                "\"extensions\": {\n"
+                                "\"baseURL\": [],\n"
+                                "\"id\": [],\n"
+                                "\"length\": 0,\n"
+                                "\"name\": []\n"
+                                "}\n"
+                                ",\n"
+                                "\"interval\": 1,\n"
+                                "\"preprocessedProfileVersion\": 44,\n"
+                                "\"processType\": 0,\n"
+                                "\"product\": \"./micro-kotlin\",\n"
+                                "\"sampleUnits\": {\n"
+                                "\"eventDelay\": \"ms\",\n"
+                                "\"threadCPUDelta\": \"µs\",\n"
+                                "\"time\": \"ms\"\n"
+                                "},\n"
+                                "\"symbolicated\": false,\n"
+                                "\"pausedRanges\": [],\n"
+                                "\"version\": 24,\n"
+                                "\"usesOnlyOneStackType\": true,\n"
+                                "\"doesNotUseFrameImplementation\": true,\n"
+                                "\"sourceCodeIsNotOnSearchfox\": true,\n"
+                                "\"markerSchema\": []\n");
+    fwrite(categories.data, 1, categories.len, out);
+    // TODO: startup time?
+
+    fwrite("},\n", 1, 3, out);
   }
 
+  // libs ?
+  {}
+
+  // profile
   {
     str threads_key = str_from_c("\"threads\":[{\n");
     fwrite(threads_key.data, 1, threads_key.len, out);
 
     mem_thread *t = &profile->thread[0];
-
     // thread
     {
-      str frame_table_key = str_from_c("\"frameTable\":{\n");
-      fwrite(frame_table_key.data, 1, frame_table_key.len, out);
 
       // frameTable
       {
+        str frame_table_key = str_from_c("\"frameTable\":{\n");
+        fwrite(frame_table_key.data, 1, frame_table_key.len, out);
+
         {
           str key = str_from_c("\"length\":");
           fwrite(key.data, 1, key.len, out);
@@ -543,7 +602,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->frame_table.address[i].value,
                     (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
-          fwrite("],\n", 1, 1, out);
+          fwrite("],\n", 1, 3, out);
         }
         {
           str key = str_from_c("\"func\":[\n");
@@ -552,12 +611,107 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->frame_table.func[i].value,
                     (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
-          fwrite("]\n", 1, 1, out);
+          fwrite("]\n", 1, 2, out);
         }
 
-        fwrite("],\n", 1, 1, out);
+        fwrite("},\n", 1, 3, out);
       }
-      // TODO: funcTable ?
+
+      // funcTable
+      {
+        str key = str_from_c("\"funcTable\":{\n");
+        fwrite(key.data, 1, key.len, out);
+
+        {
+          str key = str_from_c("\"length\":");
+          fwrite(key.data, 1, key.len, out);
+          fprintf(out, "%lu,\n", t->func_table.length);
+        }
+
+        {
+          str key = str_from_c("\"length\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "%lu%s", t->func_table.name[i].value,
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"isJS\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "false%s",
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"relevantForJS\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "false%s",
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"resource\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "%lu%s", t->func_table.resource[i].value,
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"fileName\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"lineNumber\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("],\n", 1, 2, out);
+        }
+
+        {
+          str key = str_from_c("\"columnNumber\":[");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->func_table.length; i++) {
+            fprintf(out, "null%s",
+                    (i + 1) == t->func_table.length ? "\n" : ",\n");
+          }
+
+          fwrite("]\n", 1, 2, out);
+        }
+      }
 
       // nativeAllocations
       {
@@ -584,7 +738,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->native_allocations.stack[i].value,
                     (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
-          fwrite("],\n", 1, 1, out);
+          fwrite("],\n", 1, 3, out);
         }
 
         {
@@ -595,7 +749,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->native_allocations.weight[i].value,
                     (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
-          fwrite("],\n", 1, 1, out);
+          fwrite("],\n", 1, 3, out);
         }
         {
           str key = str_from_c("\"time\":[\n");
@@ -605,15 +759,15 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%f%s", t->native_allocations.time[i].value,
                     (i + 1) == t->native_allocations.length ? "\n" : ",\n");
           }
-          fwrite("]\n", 1, 1, out);
+          fwrite("]\n", 1, 2, out);
         }
 
-        fwrite("],\n", 1, 1, out);
+        fwrite("},\n", 1, 3, out);
       }
 
       // stackTable
       {
-        str key = str_from_c("\"nativeAllocations\":{\n");
+        str key = str_from_c("\"stackTable\":{\n");
         fwrite(key.data, 1, key.len, out);
 
         {
@@ -630,7 +784,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->stack_table.prefix[i].value,
                     (i + 1) == t->stack_table.length ? "\n" : ",\n");
           }
-          fwrite("],\n", 1, 1, out);
+          fwrite("],\n", 1, 3, out);
         }
 
         {
@@ -641,7 +795,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->stack_table.frame[i].value,
                     (i + 1) == t->stack_table.length ? "\n" : ",\n");
           }
-          fwrite("],\n", 1, 1, out);
+          fwrite("],\n", 1, 3, out);
         }
 
         {
@@ -652,19 +806,59 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->stack_table.category[i].value,
                     (i + 1) == t->stack_table.length ? "\n" : ",\n");
           }
-          fwrite("]\n", 1, 1, out);
+          fwrite("]\n", 1, 2, out);
         }
 
-        fwrite("]\n", 1, 1, out);
+        fwrite("},\n", 1, 2, out);
+      }
+
+      // samples (empty)
+      {
+        str samples = str_from_c("\"samples\":{\n"
+                                 "  \"length\": 0,\n"
+                                 "  \"stack\":[],\n"
+                                 "  \"time\":[],\n"
+                                 "  \"weight\":[],\n"
+                                 "  \"weighttype\": \"samples\",\n"
+                                 "  \"threadcpudelta\": []\n"
+                                 "},\n");
+        fwrite(samples.data, 1, samples.len, out);
       }
 
       // stringsArray
       {}
 
-      fwrite("}]\n", 1, 1, out);
+      str thread_trailer =
+          str_from_c("\"markers\": {\n"
+                     "  \"length\": 0,\n"
+                     "  \"category\": [],\n"
+                     "  \"data\": [],\n"
+                     "  \"endTime\": [],\n"
+                     "  \"name\": [],\n"
+                     "  \"phase\": [],\n"
+                     "  \"startTime\": []\n"
+                     "},\n"
+                     "\"name\": \"GeckoMain\",\n"
+                     "\"nativeSymbols\": {\n"
+                     "\"length\": 0,\n"
+                     "\"address\": [],\n"
+                     "\"functionSize\": [],\n"
+                     "\"libIndex\": [],\n"
+                     "\"name\": []\n"
+                     "},\n"
+                     "\"pausedRanges\": [],\n"
+                     // "\"pid\": 3676029,\n"
+                     // "\"processName\": \"<3676029>\",\n"
+                     // "\"processShutdownTime\": 186843702.162049,\n"
+                     "\"processStartupTime\": 0,\n"
+                     "\"processType\": \"default\",\n"
+                     "\"registerTime\": 0\n");
+      fwrite(thread_trailer.data, 1, thread_trailer.len, out);
+
+      // TODO: resource table?
     }
 
-    fwrite("}]\n", 1, 1, out);
+    fwrite("}]\n", 1, 3, out);
   }
 
   fwrite("}", 1, 1, out);
