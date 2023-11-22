@@ -543,6 +543,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->frame_table.address[i].value,
                     (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
+          fwrite("],\n", 1, 1, out);
         }
         {
           str key = str_from_c("\"func\":[\n");
@@ -551,9 +552,10 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             fprintf(out, "%lu%s", t->frame_table.func[i].value,
                     (i + 1) == t->frame_table.length ? "\n" : ",\n");
           }
+          fwrite("]\n", 1, 1, out);
         }
 
-        fwrite("]\n", 1, 1, out);
+        fwrite("],\n", 1, 1, out);
       }
       // TODO: funcTable ?
 
@@ -606,7 +608,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fwrite("]\n", 1, 1, out);
         }
 
-        fwrite("]\n", 1, 1, out);
+        fwrite("],\n", 1, 1, out);
       }
 
       // stackTable
@@ -655,11 +657,9 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
 
         fwrite("]\n", 1, 1, out);
       }
-      
-      // stringsArray
-      {
 
-      }
+      // stringsArray
+      {}
 
       fwrite("}]\n", 1, 1, out);
     }
