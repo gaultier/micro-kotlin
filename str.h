@@ -345,7 +345,7 @@ typedef struct {
 } mem_resource_table_index;
 
 typedef struct {
-  u64 value;
+  i64 value;
 } mem_stack_table_index;
 
 typedef struct {
@@ -436,15 +436,40 @@ u64 mem_frame_table_add_address(mem_frame_table *frame_table,
   return frame_table->length++;
 }
 
-i64 mem_find_prefix_with_address(mem_thread *t, u64 address) {
-  for (u64 i = 0; i < t->stack_table.length; i++) {
-    mem_frame_table_index frame_table_index = t->stack_table.frame[i];
-    u64 frame_address = t->frame_table.address[frame_table_index.value].value;
+mem_stack_table_index mem_add_or_find_address(mem_thread *t,
+                                              mem_address address,
+                                              mem_stack_table_index parent,
+                                              arena_t *arena) {
+  // Either we don't know who is the parent, or we know there is none.
+  // TODO: Optimize the latter by skipping the search?
+  if (parent.value == -1) {
+    for (i64 i = t->stack_table.length - 1; i >= 0; i--) {
+      mem_frame_table_index frame_table_index = t->stack_table.frame[i];
+      mem_address frame_address =
+          t->frame_table.address[frame_table_index.value];
 
-    if (frame_address == address)
-      return i;
+      if (frame_address.value == address.value)
+        return (mem_stack_table_index){i};
+    }
   }
-  return -1;
+
+  // No parent: This is the root. Insert the relevant entries.
+
+  pg_array_append(t->frame_table.address, address, arena);
+  pg_array_append(t->frame_table.func, (mem_func_table){0}, arena);
+  mem_frame_table_index frame_table_index =
+      (mem_frame_table_index){t->frame_table.length};
+  t->frame_table.length += 1;
+
+  pg_array_append(t->stack_table.frame, frame_table_index, arena);
+  pg_array_append(t->stack_table.category, (mem_category_list_index){0},
+                  arena); // FIXME?
+  pg_array_append(t->stack_table.prefix, (mem_stack_table_index){-1}, arena);
+
+  mem_stack_table_index res = {t->stack_table.length};
+  t->stack_table.length += 1;
+
+  return res;
 }
 
 void mem_profile_record(mem_profile *profile, u64 bytes_count) {
@@ -463,29 +488,19 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 
   pg_array_append(allocs->weight, (mem_bytes){bytes_count}, &profile->arena);
 
-  u64 caller_address = call_stack[1];
-  u64 callee_address = call_stack[0];
-
-  i64 prefix = mem_find_prefix_with_address(t, caller_address);
-  if (prefix==-1) { // Root
-  } else {
-
+  mem_stack_table_index stack_table_index = {-1};
+  // Insert whole call chain starting from the root caller to be used then in
+  // its callee, and so on.
+  for (i64 i = call_stack_len - 1; i >= 0; i--) {
+    mem_address address = (mem_address){call_stack[i]};
+    // TODO: Potential optimization: if we just inserted the parent, pass
+    // `stack_table_index` as prefix!
+    stack_table_index =
+        mem_add_or_find_address(t, address, stack_table_index, &profile->arena);
   }
+  pg_assert(stack_table_index.value != -1);
 
-
-  u64 frame_index = mem_frame_table_add_address(
-      &t->frame_table, (mem_address){callee_address}, &profile->arena);
-
-  pg_array_append(t->stack_table.frame, (mem_frame_table_index){frame_index},
-                  &profile->arena);
-  pg_array_append(t->stack_table.category, (mem_category_list_index){0},
-                  &profile->arena); // FIXME?
-  pg_array_append(t->stack_table.prefix, (mem_stack_table_index){0},
-                  &profile->arena); // FIXME
-  u64 stack_table_index = t->stack_table.length++;
-
-  pg_array_append(allocs->stack, (mem_stack_table_index){stack_table_index},
-                  &profile->arena);
+  pg_array_append(allocs->stack, stack_table_index, &profile->arena);
 
   allocs->length += 1;
 }
