@@ -510,34 +510,34 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {
-  fwrite("{", 1, 1, out);
+  fwrite("{\n", 1, 1, out);
 
   {
-    str meta_key = str_from_c("\"meta\":{},");
+    str meta_key = str_from_c("\"meta\":{},\n");
     fwrite(meta_key.data, 1, meta_key.len, out);
   }
 
   {
-    str threads_key = str_from_c("\"threads\":[{");
+    str threads_key = str_from_c("\"threads\":[{\n");
     fwrite(threads_key.data, 1, threads_key.len, out);
 
     mem_thread *t = &profile->thread[0];
 
     // thread
     {
-      str frame_table_key = str_from_c("\"frameTable\":{");
+      str frame_table_key = str_from_c("\"frameTable\":{\n");
       fwrite(frame_table_key.data, 1, frame_table_key.len, out);
 
       // frameTable
       {
         {
-          str key = str_from_c("\"length\":");
+          str key = str_from_c("\"length\":\n");
           fwrite(key.data, 1, key.len, out);
           fprintf(out, "%lu,", t->frame_table.length);
         }
 
         {
-          str key = str_from_c("\"address\":[");
+          str key = str_from_c("\"address\":[\n");
           fwrite(key.data, 1, key.len, out);
           for (u64 i = 0; i < t->frame_table.length; i++) {
             fprintf(out, "%lu%c", t->frame_table.address[i].value,
@@ -545,7 +545,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           }
         }
         {
-          str key = str_from_c("\"func\":[");
+          str key = str_from_c("\"func\":[\n");
           fwrite(key.data, 1, key.len, out);
           for (u64 i = 0; i < t->frame_table.length; i++) {
             fprintf(out, "%lu%c", t->frame_table.func[i].value,
@@ -553,14 +553,66 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           }
         }
 
-        fwrite("]", 1, 1, out);
+        fwrite("]\n", 1, 1, out);
       }
       // TODO: funcTable ?
 
-      fwrite("}]", 1, 1, out);
+      // nativeAllocations
+      {
+
+        str key = str_from_c("\"nativeAllocations\":{\n");
+        fwrite(key.data, 1, key.len, out);
+
+        {
+          str key = str_from_c("\"length\":\n");
+          fwrite(key.data, 1, key.len, out);
+          fprintf(out, "%lu,", t->native_allocations.length);
+        }
+
+        {
+          str key = str_from_c("\"weigthType\":\"bytes\",\n");
+          fwrite(key.data, 1, key.len, out);
+        }
+
+        {
+          str key = str_from_c("\"stack\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->native_allocations.length; i++) {
+            fprintf(out, "%lu%c", t->native_allocations.stack[i].value,
+                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+          }
+          fwrite("],\n", 1, 1, out);
+        }
+
+        {
+          str key = str_from_c("\"weight\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->native_allocations.length; i++) {
+            fprintf(out, "%lu%c", t->native_allocations.weight[i].value,
+                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+          }
+          fwrite("],\n", 1, 1, out);
+        }
+        {
+          str key = str_from_c("\"time\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->native_allocations.length; i++) {
+            fprintf(out, "%f%c", t->native_allocations.time[i].value,
+                    (i + 1) == t->native_allocations.length ? ' ' : ',');
+          }
+          fwrite("]\n", 1, 1, out);
+        }
+
+        fwrite("]\n", 1, 1, out);
+      }
+
+      fwrite("}]\n", 1, 1, out);
     }
 
-    fwrite("}]", 1, 1, out);
+    fwrite("}]\n", 1, 1, out);
   }
 
   fwrite("}", 1, 1, out);
