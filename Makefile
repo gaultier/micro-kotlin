@@ -18,7 +18,7 @@ micro-kotlin: $(SRC)
 	$(CC) $(CFLAGS) -Ofast -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native main.c -o $@ $(LDFLAGS)
 
 micro-kotlin_san: $(SRC)
-	$(CC) $(CFLAGS) -Ofast -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native -fsanitize=address,undefined main.c -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -Og -g3 -fno-omit-frame-pointer -fpie $(WARNINGS) -std=c99 -march=native -fsanitize=address,undefined main.c -o $@ $(LDFLAGS)
 
 
 clean:

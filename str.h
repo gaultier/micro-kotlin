@@ -620,6 +620,39 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
           fprintf(out, "%lu,\n", t->stack_table.length);
         }
 
+        {
+          str key = str_from_c("\"prefix\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "%lu%s", t->stack_table.prefix[i].value,
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 1, out);
+        }
+
+        {
+          str key = str_from_c("\"frame\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "%lu%s", t->stack_table.frame[i].value,
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("],\n", 1, 1, out);
+        }
+
+        {
+          str key = str_from_c("\"category\":[\n");
+          fwrite(key.data, 1, key.len, out);
+
+          for (u64 i = 0; i < t->stack_table.length; i++) {
+            fprintf(out, "%lu%s", t->stack_table.category[i].value,
+                    (i + 1) == t->stack_table.length ? "\n" : ",\n");
+          }
+          fwrite("]\n", 1, 1, out);
+        }
+
         fwrite("]\n", 1, 1, out);
       }
 
