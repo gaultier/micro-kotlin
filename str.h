@@ -969,7 +969,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         for (u64 i = 0; i < pg_array_len(t->string_table); i++) {
           str s = t->string_table[i];
           fprintf(out, "\"%.*s\"%s", (int)s.len, s.data,
-                  (i + 1) == t->stack_table.length ? "\n" : ",\n");
+                  (i + 1) == pg_array_len(t->string_table) ? "\n" : ",\n");
         }
         fwrite("],\n", 1, 3, out);
       }
