@@ -395,7 +395,7 @@ typedef struct {
   mem_unbalanced_native_allocations_table native_allocations;
   mem_stack_table stack_table;
   mem_frame_table frame_table;
-  /* mem_unique_string_array string_table; */
+  str *string_table;
   mem_func_table func_table;
   mem_resource_table resource_table;
   /* mem_native_symbol_table native_symbols; */
@@ -513,11 +513,15 @@ void mem_profile_record(mem_profile *profile, u64 bytes_count) {
 void mem_profile_write(mem_profile *profile, FILE *out) {
   pg_assert(profile->thread[0].func_table.length == 0);
   pg_assert(profile->thread[0].resource_table.length == 0);
+  pg_assert(pg_array_len(profile->thread[0].string_table) == 0);
+
+  pg_array_append(profile->thread[0].string_table, str_from_c("fixme"),
+                  &profile->arena);
 
   profile->thread[0].func_table.length = 1;
 
   pg_array_append(profile->thread[0].func_table.name,
-                  (mem_string_table_index){-1}, &profile->arena);
+                  (mem_string_table_index){0}, &profile->arena);
   pg_array_append(profile->thread[0].func_table.resource,
                   (mem_resource_table_index){-1}, &profile->arena);
 
@@ -957,10 +961,17 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         fwrite(samples.data, 1, samples.len, out);
       }
 
-      // stringsArray
+      // stringArray
       {
-        str strings = str_from_c("\"stringArray\":[],\n");
+        str strings = str_from_c("\"stringArray\":[\n");
         fwrite(strings.data, 1, strings.len, out);
+
+        for (u64 i = 0; i < pg_array_len(t->string_table); i++) {
+          str s = t->string_table[i];
+          fprintf(out, "\"%.*s\"%s", (int)s.len, s.data,
+                  (i + 1) == t->stack_table.length ? "\n" : ",\n");
+        }
+        fwrite("],\n", 1, 3, out);
       }
 
       // resourceTable
