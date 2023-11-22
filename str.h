@@ -609,6 +609,20 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
         fwrite("]\n", 1, 1, out);
       }
 
+      // stackTable
+      {
+        str key = str_from_c("\"nativeAllocations\":{\n");
+        fwrite(key.data, 1, key.len, out);
+
+        {
+          str key = str_from_c("\"length\":");
+          fwrite(key.data, 1, key.len, out);
+          fprintf(out, "%lu,\n", t->stack_table.length);
+        }
+
+        fwrite("]\n", 1, 1, out);
+      }
+
       fwrite("}]\n", 1, 1, out);
     }
 
