@@ -80,7 +80,8 @@ static arena_t arena_new(u64 cap, mem_profile *profile) {
   return arena;
 }
 
-void mem_profile_record(mem_profile *profile, u64 bytes_count);
+void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
+                              u64 bytes_count);
 
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
 arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
@@ -103,7 +104,7 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   a->start += offset;
 
   if (a->profile) {
-    mem_profile_record(a->profile, offset);
+    mem_profile_record_alloc(a->profile, count, offset);
   }
 
   return res;

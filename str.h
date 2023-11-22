@@ -316,6 +316,7 @@ typedef struct {
 
 struct mem_profile {
   mem_record *records;
+  u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
   arena_t arena;
 };
 
@@ -341,13 +342,49 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-void mem_profile_record(mem_profile *profile, u64 bytes_count) {
+void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
+                                u64 call_stack_len, u64 objects_count,
+                                u64 bytes_count) {
+  profile->alloc_objects += objects_count;
+  profile->alloc_space += bytes_count;
+  profile->in_use_objects += objects_count;
+  profile->in_use_space += bytes_count;
+
+  for (u64 i = 0; i < pg_array_len(profile->records); i++) {
+    mem_record *r = &profile->records[i];
+
+    if (pg_array_len(r->call_stack) == call_stack_len &&
+        memcmp(r->call_stack, call_stack, call_stack_len * sizeof(u64)) == 0) {
+      r->alloc_objects += objects_count;
+      r->alloc_space += bytes_count;
+      r->in_use_objects += objects_count;
+      r->in_use_space += bytes_count;
+      return;
+    }
+  }
+
+  mem_record record = {
+      .alloc_objects = objects_count,
+      .alloc_space = bytes_count,
+      .in_use_objects = objects_count,
+      .in_use_space = bytes_count,
+  };
+  pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
+  memcpy(record.call_stack, call_stack, call_stack_len);
+  pg_array_header(record.call_stack)->len = call_stack_len;
+
+  pg_array_append(profile->records, record, &profile->arena);
+}
+
+void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
+                              u64 bytes_count) {
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
   pg_assert(call_stack_len >= 2);
 
-  // TODO: Upsert record with same call stack.
+  mem_upsert_record_on_alloc(profile, call_stack, call_stack_len, objects_count,
+                             bytes_count);
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {
@@ -358,4 +395,21 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
   //
   // MAPPED_LIBRARIES:
   // [...]
+
+  fprintf(out, "heap profile: %lu: %lu [     %lu:    %lu] @ heapprofile\n",
+          profile->in_use_objects, profile->in_use_space,
+          profile->alloc_objects, profile->alloc_space);
+
+  for (u64 i = 0; i < pg_array_len(profile->records); i++) {
+    mem_record r = profile->records[i];
+
+    fprintf(out, "%lu: %lu [%lu: %lu] @ ", r.in_use_objects, r.in_use_space,
+            r.alloc_objects, r.alloc_space);
+
+    for (u64 j = 0; j < pg_array_len(r.call_stack); j++) {
+      fprintf(out, "%lu ", r.call_stack[j]);
+    }
+    fputc('\n', out);
+  }
+  fflush(out);
 }
