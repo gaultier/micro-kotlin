@@ -337,6 +337,7 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
     // done. But: We want the location of the call i.e. the `call xxx`
     // instruction, so we subtract one byte to point inside it, which is not
     // quite 'at it' but good enough.
+    pg_assert(rip > 0);
     dst[len++] = rip - 1;
   }
   return len;
@@ -370,7 +371,7 @@ void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
       .in_use_space = bytes_count,
   };
   pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
-  memcpy(record.call_stack, call_stack, call_stack_len);
+  memcpy(record.call_stack, call_stack, call_stack_len*sizeof(u64));
   pg_array_header(record.call_stack)->len = call_stack_len;
 
   pg_array_append(profile->records, record, &profile->arena);
@@ -407,7 +408,7 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
             r.alloc_objects, r.alloc_space);
 
     for (u64 j = 0; j < pg_array_len(r.call_stack); j++) {
-      fprintf(out, "%lu ", r.call_stack[j]);
+      fprintf(out, "%#lx ", r.call_stack[j]);
     }
     fputc('\n', out);
   }
