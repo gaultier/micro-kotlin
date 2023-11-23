@@ -71,7 +71,7 @@ EXAMPLES:
 
 OPTIONS:
   -v, --verbose                  Verbose.
-  -m, --memory-usage             Debug memory usage by printing a heap dump in CSV form.
+  -m, --memory-usage             Debug memory usage by printing a heap dump in the pprof format.
   -h, --help                     Print this help message and exit.
   -c, --classpath <classpath>    Load additional classpath entries, which are colon separated.
   -j, --java-home <java_home>    Java home (the root of the Java installation).

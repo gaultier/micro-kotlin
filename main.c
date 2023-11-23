@@ -20,7 +20,7 @@ static const char *usage =
 "\n"
 "\nOPTIONS:"
 "\n  -v, --verbose                  Verbose."
-"\n  -m, --memory-usage             Debug memory usage by printing a heap dump in CSV form."
+"\n  -m, --memory-usage             Debug memory usage by printing a heap dump in the pprof format."
 "\n  -h, --help                     Print this help message and exit."
 "\n  -c, --classpath <classpath>    Load additional classpath entries, which are colon separated."
 "\n  -j, --java-home <java_home>    Java home (the root of the Java installation)."
