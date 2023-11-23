@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <sys/mman.h>
 
 typedef uint64_t u64;
@@ -55,7 +56,7 @@ static bool cli_log_verbose = false;
     if (!(condition)) {                                                        \
       fflush(stdout);                                                          \
       fflush(stderr);                                                          \
-      __builtin_trap();                                                        \
+      assert(condition);                                                       \
     }                                                                          \
   } while (0)
 
@@ -71,8 +72,8 @@ typedef struct {
 } arena_t;
 
 static arena_t arena_new(u64 cap, mem_profile *profile) {
-  u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE,
-                   MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
+                 -1, 0);
   pg_assert(mem);
 
   arena_t arena = {
@@ -89,9 +90,11 @@ void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
 arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   pg_assert(a->start <= a->end);
+  pg_assert(align == 1 || align == 2 || align == 4 || align == 8);
 
   size_t available = a->end - a->start;
   size_t padding = -(size_t)a->start & (align - 1);
+
   // Ignore overflow for now.
   size_t offset = padding + size * count;
   if (available < offset) {
@@ -102,8 +105,8 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
     abort();
   }
 
-  void *res = a->start + padding;
-  pg_assert((u8 *)res + count * size <= a->end);
+  u8 *res = a->start + padding;
+  pg_assert(res + count * size <= a->end);
 
   a->start += offset;
   pg_assert(a->start <= a->end);
@@ -112,5 +115,5 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
     mem_profile_record_alloc(a->profile, count, offset);
   }
 
-  return res;
+  return (void *)res;
 }

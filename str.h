@@ -392,7 +392,7 @@ void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
-  pg_assert(call_stack_len > 2);
+  pg_assert(call_stack_len > 1);
 
   // Skip the first entry since that's this current function.
   mem_upsert_record_on_alloc(profile, call_stack + 1, call_stack_len - 1,
