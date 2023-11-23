@@ -337,15 +337,15 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
     const uintptr_t rip = *(rbp + 1);
     rbp = (uintptr_t *)*rbp;
 
-    if (len >= cap)
-      return len;
-
     // `rip` points to the return instruction in the caller, once this call is
     // done. But: We want the location of the call i.e. the `call xxx`
     // instruction, so we subtract one byte to point inside it, which is not
     // quite 'at it' but good enough.
     pg_assert(rip > 0);
     dst[len++] = rip - 1;
+
+    if (len >= cap)
+      return len;
   }
   return len;
 }

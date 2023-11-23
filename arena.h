@@ -106,7 +106,7 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   pg_assert((u8 *)res + count * size <= a->end);
 
   a->start += offset;
-  pg_assert(a->start<=a->end);
+  pg_assert(a->start <= a->end);
 
   if (a->profile) {
     mem_profile_record_alloc(a->profile, count, offset);
