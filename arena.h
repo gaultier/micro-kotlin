@@ -22,7 +22,7 @@ typedef size_t usize;
 typedef ssize_t isize;
 
 #define KiB 1024UL
-#define MiB ((KiB) * 1024UL)
+#define MiB ((KiB)*1024UL)
 
 // ------------------- Logs
 
@@ -103,8 +103,10 @@ arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   }
 
   void *res = a->start + padding;
+  pg_assert((u8 *)res + count * size <= a->end);
 
   a->start += offset;
+  pg_assert(a->start<=a->end);
 
   if (a->profile) {
     mem_profile_record_alloc(a->profile, count, offset);

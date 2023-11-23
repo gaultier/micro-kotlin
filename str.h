@@ -162,6 +162,7 @@ static u64 sb_space(str_builder sb) {
 
 static str_builder sb_reserve_at_least(str_builder sb, u64 more,
                                        arena_t *arena) {
+  pg_assert(sb.len <= sb.cap);
 
   more += 1; // Null terminator.
 
@@ -169,7 +170,11 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
     return sb;
 
   u64 new_cap = ut_next_power_of_two(sb_space(sb) + more);
+  pg_assert(new_cap > sb.len);
+
   u8 *new_data = arena_alloc(arena, sizeof(u8), _Alignof(u8), new_cap);
+  pg_assert(new_data);
+  pg_assert(sb.data);
   memcpy(new_data, sb.data, sb.len);
 
   return (str_builder){.len = sb.len, .cap = new_cap, .data = new_data};
@@ -228,6 +233,10 @@ static str_builder sb_capitalize_at(str_builder sb, u64 pos) {
 
 static str_builder sb_clone(str src, arena_t *arena) {
   str_builder res = sb_new(src.len, arena);
+  pg_assert(res.data);
+  pg_assert(src.len <= res.cap);
+  pg_assert(src.data);
+
   memcpy(res.data, src.data, src.len);
   res.len = src.len;
   return res;
@@ -397,7 +406,6 @@ void mem_profile_write(mem_profile *profile, FILE *out) {
   // MAPPED_LIBRARIES:
   // [...]
   // clang-format on
-
 
   fprintf(out, "heap profile: %lu: %lu [     %lu:    %lu] @ heapprofile\n",
           profile->in_use_objects, profile->in_use_space,
