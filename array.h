@@ -44,7 +44,7 @@ typedef struct pg_array_header_t {
     pg_array_init_reserve(dst, pg_array_len(src), arena);                      \
     pg_array_header(dst)->len = pg_array_len(src);                             \
     if (pg_array_len(src) > 0)                                                 \
-      memcpy(dst, src, pg_array_len(src) * sizeof(src[0]));                    \
+      memmove(dst, src, pg_array_len(src) * sizeof(src[0]));                   \
   } while (0)
 
 #define pg_array_append(x, item, arena)                                        \
@@ -68,7 +68,7 @@ typedef struct pg_array_header_t {
           old_physical_len, new_physical_len, (void *)pg_array_header(x),      \
           (void *)pg__ah, (u64)pg__ah - (u64)pg_array_header(x));              \
       pg_assert((u64)pg__ah >= (u64)pg_array_header(x) + old_physical_len);    \
-      memcpy(pg__ah, pg_array_header(x), old_physical_len);                    \
+      memmove(pg__ah, pg_array_header(x), old_physical_len);                   \
       x = (void *)(pg__ah + 1);                                                \
       pg_array_header(x)->cap = new_cap;                                       \
     }                                                                          \

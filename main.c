@@ -144,8 +144,7 @@ int main(int argc, char *argv[]) {
     ut_read_result_t source_file_read_res =
         ut_read_all_from_file_path(source_file_name_cstr, &arena);
     if (source_file_read_res.error) {
-      fprintf(stderr, "Failed to open the file %s: %s\n",
-               source_file_name_cstr,
+      fprintf(stderr, "Failed to read the file %s: %s\n", source_file_name_cstr,
               strerror(source_file_read_res.error));
       exit(source_file_read_res.error);
     }
@@ -246,7 +245,7 @@ int main(int argc, char *argv[]) {
       ut_read_result_t read_res =
           ut_read_all_from_file_path(class_file_path_c_str, &scratch_arena);
       if (read_res.error) {
-        fprintf(stderr, "Failed to open the file %.*s: %s\n",
+        fprintf(stderr, "Failed to read the file %.*s: %s\n",
                 (int)class_file_path.len, (char *)class_file_path.data,
                 strerror(read_res.error));
         return read_res.error;

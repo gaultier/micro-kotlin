@@ -71,7 +71,7 @@ typedef struct {
 } arena_t;
 
 static arena_t arena_new(u64 cap, mem_profile *profile) {
-  void *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE,
+  u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE,
                    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   pg_assert(mem);
 

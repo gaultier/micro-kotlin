@@ -838,7 +838,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
         arena, sizeof(cf_constant_t), _Alignof(cf_constant_t), new_cap);
     pg_assert(new_array != NULL);
     array->values =
-        memcpy(new_array, array->values, array->len * sizeof(cf_constant_t));
+        memmove(new_array, array->values, array->len * sizeof(cf_constant_t));
     pg_assert(array->values != NULL);
     pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
@@ -1463,7 +1463,7 @@ static void cf_buf_read_code_attribute(str buf, u8 **current,
 
   pg_array_init_reserve(code.code, code_len, arena);
   str code_slice = buf_read_n_u8(buf, code_len, current);
-  memcpy(code.code, code_slice.data, code_slice.len);
+  memmove(code.code, code_slice.data, code_slice.len);
   pg_array_header(code.code)->len = code_len;
 
   cf_buf_read_code_attribute_exceptions(buf, current, class_file,
@@ -5409,15 +5409,15 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
+  char *path_cstr = str_to_c(path, &scratch_arena);
   ut_read_result_t read_res =
       // IMPORTANT: We store the content of JMOD files in the *scratch* arena,
       // not the *main* arena. That's because most of the stuff in there is
       // irrelevant. We pick afterwards just the few bits we want to retain and
       // clone them into the main arena.
-      ut_read_all_from_file_path(str_to_c(path, &scratch_arena),
-                                 &scratch_arena);
+      ut_read_all_from_file_path(path_cstr, &scratch_arena);
   if (read_res.error) {
-    fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
+    fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
     return false;
   }
@@ -5441,10 +5441,11 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
-  ut_read_result_t read_res = ut_read_all_from_file_path(
-      str_to_c(path, &scratch_arena), &scratch_arena);
+  char *path_cstr = str_to_c(path, &scratch_arena);
+  ut_read_result_t read_res =
+      ut_read_all_from_file_path(path_cstr, &scratch_arena);
   if (read_res.error) {
-    fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
+    fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
     return false;
   }
@@ -6005,8 +6006,10 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 
     {
       // TODO: check if we can read the file content into `scratch_arena`
+      char *tentative_class_file_path_cstr =
+          str_to_c(tentative_class_file_path, &scratch_arena);
       ut_read_result_t read_res = ut_read_all_from_file_path(
-          str_to_c(tentative_class_file_path, &scratch_arena), &scratch_arena);
+          tentative_class_file_path_cstr, &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 

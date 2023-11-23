@@ -66,8 +66,10 @@ static str str_new(u8 *s, u64 n) { return (str){.data = s, .len = n}; }
 
 static str str_clone(str s, arena_t *arena) {
   u8 *data = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len);
-  memcpy(data, s.data, s.len);
-  return (str){.data = data, .len = s.len};
+  pg_assert(data);
+  pg_assert(s.data);
+
+  return (str){.data = memmove(data, s.data, s.len), .len = s.len};
 }
 
 static str str_advance(str s, u64 n) {
@@ -173,7 +175,7 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
   u8 *new_data = arena_alloc(arena, sizeof(u8), _Alignof(u8), new_cap);
   pg_assert(new_data);
   pg_assert(sb.data);
-  memcpy(new_data, sb.data, sb.len);
+  memmove(new_data, sb.data, sb.len);
 
   pg_assert(sb.data[sb.len] == 0);
   pg_assert(new_data[sb.len] == 0);
@@ -185,7 +187,7 @@ static u8 *sb_end_c(str_builder sb) { return sb.data + sb.len; }
 
 static str_builder sb_append(str_builder sb, str more, arena_t *arena) {
   sb = sb_reserve_at_least(sb, more.len, arena);
-  memcpy(sb_end_c(sb), more.data, more.len);
+  memmove(sb_end_c(sb), more.data, more.len);
   sb.data[sb.len + more.len] = 0;
   return (str_builder){
       .len = sb.len + more.len, .data = sb.data, .cap = sb.cap};
@@ -238,7 +240,7 @@ static str_builder sb_clone(str src, arena_t *arena) {
   pg_assert(src.len <= res.cap);
   pg_assert(src.data);
 
-  memcpy(res.data, src.data, src.len);
+  memmove(res.data, src.data, src.len);
   res.len = src.len;
   return res;
 }
@@ -284,7 +286,7 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
 
 static char *str_to_c(str s, arena_t *arena) {
   char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
-  memcpy(c_str, s.data, s.len);
+  memmove(c_str, s.data, s.len);
 
   c_str[s.len] = 0;
 
@@ -379,7 +381,7 @@ void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
       .in_use_space = bytes_count,
   };
   pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
-  memcpy(record.call_stack, call_stack, call_stack_len * sizeof(u64));
+  memmove(record.call_stack, call_stack, call_stack_len * sizeof(u64));
   pg_array_header(record.call_stack)->len = call_stack_len;
 
   pg_array_append(profile->records, record, &profile->arena);
