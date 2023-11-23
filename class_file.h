@@ -401,7 +401,7 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
       cg_make_class_name_from_path(class_file_path, arena);
 
   pg_array_init_reserve(resolver->variables, 512, arena);
-  pg_array_init_reserve(resolver->types, 1 << 18, arena);
+  pg_array_init_reserve(resolver->types, 1 << 16, arena);
   pg_array_init_reserve(resolver->imported_package_names, 256, arena);
 
   pg_array_append(resolver->imported_package_names, str_from_c("kotlin"),

@@ -3,6 +3,7 @@
 #include "str.h"
 #include <asm-generic/errno-base.h>
 #include <bits/getopt_core.h>
+#include <bits/types/FILE.h>
 #include <getopt.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -127,7 +128,7 @@ int main(int argc, char *argv[]) {
 
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena =
-      arena_new(1L << 28, cli_mem_debug ? &mem_profile : NULL); // 256 MiB
+      arena_new(1L << 28,  NULL); // 256 MiB
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
@@ -238,6 +239,7 @@ int main(int argc, char *argv[]) {
         sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
 
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
+
     {
       arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
@@ -259,6 +261,9 @@ int main(int argc, char *argv[]) {
     }
   }
   if (cli_mem_debug) {
-    mem_profile_write(&mem_profile, stderr);
+    FILE* f = fopen("profile.heap","w");
+    pg_assert(f);
+    mem_profile_write(&mem_profile, f);
+    fclose(f);
   }
 }
