@@ -164,18 +164,19 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
                                        arena_t *arena) {
   pg_assert(sb.len <= sb.cap);
 
-  more += 1; // Null terminator.
-
-  if (sb_space(sb) >= more)
+  if (more <= sb_space(sb))
     return sb;
 
-  u64 new_cap = ut_next_power_of_two(sb_space(sb) + more);
+  u64 new_cap = ut_next_power_of_two(sb.cap + more + 1 /* NUL terminator */);
   pg_assert(new_cap > sb.len);
 
   u8 *new_data = arena_alloc(arena, sizeof(u8), _Alignof(u8), new_cap);
   pg_assert(new_data);
   pg_assert(sb.data);
   memcpy(new_data, sb.data, sb.len);
+
+  pg_assert(sb.data[sb.len] == 0);
+  pg_assert(new_data[sb.len] == 0);
 
   return (str_builder){.len = sb.len, .cap = new_cap, .data = new_data};
 }

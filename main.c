@@ -144,8 +144,8 @@ int main(int argc, char *argv[]) {
     ut_read_result_t source_file_read_res =
         ut_read_all_from_file_path(source_file_name_cstr, &arena);
     if (source_file_read_res.error) {
-      fprintf(stderr, "Failed to open the file %.*s: %s\n",
-              (int)source_file_name.len, source_file_name.data,
+      fprintf(stderr, "Failed to open the file %s: %s\n",
+               source_file_name_cstr,
               strerror(source_file_read_res.error));
       exit(source_file_read_res.error);
     }
