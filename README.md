@@ -1,6 +1,6 @@
 # A fast, small Kotlin compiler written in C
 
-A statically linked, dependencyless, 356 Kib executable using < 256 MiB of memory, with pprof memory profiling included.
+A statically linked, dependencyless, 200 Kib executable using < 256 MiB of memory, with pprof memory profiling included.
 
 **Caution: Not production grade! Not ready!**
 
