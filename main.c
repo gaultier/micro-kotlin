@@ -1,9 +1,6 @@
 #include "arena.h"
 #include "class_file.h"
 #include "str.h"
-#include <asm-generic/errno-base.h>
-#include <bits/getopt_core.h>
-#include <bits/types/FILE.h>
 #include <getopt.h>
 #include <stdint.h>
 #include <stdio.h>

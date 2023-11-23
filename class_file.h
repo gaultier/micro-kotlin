@@ -14,7 +14,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifdef WITH_ZLIB
 #include <zlib.h>
+#endif
 
 str *class_path_string_to_class_path_entries(str class_path, arena_t *arena) {
   pg_assert(!str_is_empty(class_path));
