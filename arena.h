@@ -22,7 +22,7 @@ typedef size_t usize;
 typedef ssize_t isize;
 
 #define KiB 1024UL
-#define MiB ((KiB)*1024UL)
+#define MiB ((KiB) * 1024UL)
 
 // ------------------- Logs
 

@@ -120,14 +120,14 @@ int main(int argc, char *argv[]) {
   }
 
   mem_profile mem_profile = {
-      .arena = arena_new(32*KiB, NULL),
+      .arena = arena_new(32 * KiB, NULL),
   };
   arena_t arena =
-      arena_new(32*MiB, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
+      arena_new(32 * MiB, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
   LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
-  arena_t scratch_arena = arena_new(256*MiB, NULL);
+  arena_t scratch_arena = arena_new(256 * MiB, NULL);
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
@@ -260,7 +260,7 @@ int main(int argc, char *argv[]) {
     }
   }
   if (cli_mem_debug) {
-    FILE* f = fopen("profile.heap","w");
+    FILE *f = fopen("profile.heap", "w");
     pg_assert(f);
     mem_profile_write(&mem_profile, f);
     fclose(f);
