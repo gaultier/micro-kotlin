@@ -23,7 +23,7 @@ typedef size_t usize;
 typedef ssize_t isize;
 
 #define KiB 1024UL
-#define MiB ((KiB)*1024UL)
+#define MiB ((KiB) * 1024UL)
 
 // ------------------- Logs
 
@@ -85,7 +85,7 @@ static arena_t arena_new(u64 cap, mem_profile *profile) {
 }
 
 static void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
-                              u64 bytes_count);
+                                     u64 bytes_count);
 
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
 arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {

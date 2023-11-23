@@ -354,8 +354,8 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
 }
 
 static void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
-                                u64 call_stack_len, u64 objects_count,
-                                u64 bytes_count) {
+                                       u64 call_stack_len, u64 objects_count,
+                                       u64 bytes_count) {
   profile->alloc_objects += objects_count;
   profile->alloc_space += bytes_count;
   profile->in_use_objects += objects_count;
