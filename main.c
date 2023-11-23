@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
 
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena =
-      arena_new(256*MiB,  NULL);
+      arena_new(256*MiB, NULL);
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
