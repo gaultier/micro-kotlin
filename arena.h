@@ -23,7 +23,7 @@ typedef size_t usize;
 typedef ssize_t isize;
 
 #define KiB 1024UL
-#define MiB ((KiB)*1024UL)
+#define MiB ((KiB) * 1024UL)
 
 // ------------------- Logs
 
@@ -56,7 +56,7 @@ static bool cli_log_verbose = false;
     if (!(condition)) {                                                        \
       fflush(stdout);                                                          \
       fflush(stderr);                                                          \
-      fprintf(stderr, "Pre-condition failed, aborting.\n");                \
+      fprintf(stderr, "Pre-condition failed, aborting.\n");                    \
       abort();                                                                 \
     }                                                                          \
   } while (0)

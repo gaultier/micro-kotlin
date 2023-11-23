@@ -2905,7 +2905,9 @@ static str cf_make_class_file_path_kt(str source_file_name, arena_t *arena) {
     str_split_result_t last_path_component_split =
         str_rsplit(source_file_name, '/');
 
-    u64 pos = last_path_component_split.found?last_path_component_split.found_pos+1 : 0;
+    u64 pos = last_path_component_split.found
+                  ? last_path_component_split.found_pos + 1
+                  : 0;
     res = sb_capitalize_at(res, pos);
   }
 
