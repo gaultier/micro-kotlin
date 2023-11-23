@@ -22,6 +22,22 @@ See [TODO.md](TODO.md) for details.
 Such code works:
 
 ```kotlin
+fun fibonacci(n: Long) {
+  println("fibonacci")
+
+  var a : Long = 0L
+  var b : Long = 1L
+
+  var i : Long = 1L
+  while (i < n) {
+      b = b + a
+      a = b - a
+      i = i + 1L
+
+      println(b)
+  }
+}
+
 fun fibonacci_rec(n: Int) : Int {
   if (n == 1) {
     return 1
