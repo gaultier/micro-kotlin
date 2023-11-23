@@ -1,5 +1,7 @@
 # A fast, small Kotlin compiler written in C
 
+A statically linked, dependencyless, 356 Kib executable using < 256 MiB of memory, with pprof memory profiling included.
+
 **Caution: Not production grade! Not ready!**
 
 
@@ -22,22 +24,6 @@ See [TODO.md](TODO.md) for details.
 Such code works:
 
 ```kotlin
-fun fibonacci(n: Long) {
-  println("fibonacci")
-
-  var a : Long = 0L
-  var b : Long = 1L
-
-  var i : Long = 1L
-  while (i < n) {
-      b = b + a
-      a = b - a
-      i = i + 1L
-
-      println(b)
-  }
-}
-
 fun fibonacci_rec(n: Int) : Int {
   if (n == 1) {
     return 1
@@ -53,13 +39,13 @@ fun main() {
 
 ## Quickstart
 
-*Requirements: A C99 compiler, zlib (to read jar files that have compression), the Kotlin standard library, the Java standard library.*
+*Requirements: A C99 compiler, the Kotlin standard library, the Java standard library, optionally: zlib (to read jar files that have compression).*
 
 ```sh
 # Pick whatever variant and version of the JDK you like here. We only need to get the Kotlin & Java standard library files.
-$ sudo apt install zlib1g-dev kotlin openjdk-21-jdk 
+$ sudo apt install kotlin openjdk-21-jdk 
 $ make
-$ JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64/ ./main_release -c /usr/share/java/kotlin-stdlib.jar demo.kt  
+$ ./micro-kotlin --java-home /usr/lib/jvm/java-21-openjdk-amd64/ -c /usr/share/java/kotlin-stdlib.jar demo.kt
 $ java DemoKt
 Hello, world!
 12
@@ -94,3 +80,4 @@ OPTIONS:
 ## LICENSE
 
 BSD-3.
+
