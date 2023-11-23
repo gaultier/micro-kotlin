@@ -281,7 +281,7 @@ static char *str_to_c(str s, arena_t *arena) {
   return c_str;
 }
 
-static ut_read_result_t ut_read_all_from_file_path(char* path, arena_t *arena) {
+static ut_read_result_t ut_read_all_from_file_path(char *path, arena_t *arena) {
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     return (ut_read_result_t){.error = errno};
@@ -380,10 +380,11 @@ void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
-  pg_assert(call_stack_len >= 2);
+  pg_assert(call_stack_len > 2);
 
-  mem_upsert_record_on_alloc(profile, call_stack, call_stack_len, objects_count,
-                             bytes_count);
+  // Skip the first entry since that's this current function.
+  mem_upsert_record_on_alloc(profile, call_stack + 1, call_stack_len - 1,
+                             objects_count, bytes_count);
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {

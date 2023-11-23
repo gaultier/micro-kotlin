@@ -5441,8 +5441,8 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
-  ut_read_result_t read_res =
-      ut_read_all_from_file_path(str_to_c(path, &scratch_arena), &scratch_arena);
+  ut_read_result_t read_res = ut_read_all_from_file_path(
+      str_to_c(path, &scratch_arena), &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
