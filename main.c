@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
   }
 
   mem_profile mem_profile = {
-      .arena = arena_new(32 * KiB, NULL),
+      .arena = arena_new(8*MiB, NULL),
   };
   arena_t arena =
       arena_new(32 * MiB, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
