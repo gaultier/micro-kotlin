@@ -120,15 +120,15 @@ int main(int argc, char *argv[]) {
   }
 
   mem_profile mem_profile = {
-      .arena = arena_new(1L << 29, NULL) // 512 MiB
+      .arena = arena_new(32*KiB, NULL),
   };
   arena_t arena =
-      arena_new(1L << 26, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
+      arena_new(32*MiB, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
   LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena =
-      arena_new(1L << 28,  NULL); // 256 MiB
+      arena_new(256*MiB,  NULL);
 
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);

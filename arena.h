@@ -21,6 +21,9 @@ typedef int8_t i8;
 typedef size_t usize;
 typedef ssize_t isize;
 
+#define KiB 1024UL
+#define MiB ((KiB)*1024UL)
+
 // ------------------- Logs
 
 static bool cli_log_verbose = false;
