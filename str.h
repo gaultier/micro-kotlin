@@ -388,13 +388,16 @@ void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
 }
 
 void mem_profile_write(mem_profile *profile, FILE *out) {
-  // heap profile:    <in_use>:  <nbytes1> [   <space>:  <nbytes2>] @
+  // clang-format off
+  // heap profile:    <in_use>:  <nbytes1> [   <space>:  <nbytes2>] @ heapprofile
   // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
   // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
   // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
   //
   // MAPPED_LIBRARIES:
   // [...]
+  // clang-format on
+
 
   fprintf(out, "heap profile: %lu: %lu [     %lu:    %lu] @ heapprofile\n",
           profile->in_use_objects, profile->in_use_space,
