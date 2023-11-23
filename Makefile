@@ -2,7 +2,10 @@
 
 WARNINGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment
 
-LDFLAGS := -lz
+WITH_ZLIB ?= 0
+LDFLAGS_WITH_ZLIB_0 = 
+LDFLAGS_WITH_ZLIB_1 = -lz
+LDFLAGS := $(LDFLAGS_WITH_ZLIB_$(WITH_ZLIB))
 
 SRC := main.c class_file.h arena.h str.h array.h
 

@@ -5345,6 +5345,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
 
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 && str_eq_c(file_name, ".class")) {
+#if WITH_ZLIB
         str dst = sb_build(sb_new(
             uncompressed_size_according_to_directory_entry, &scratch_arena));
 
@@ -5399,6 +5400,9 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
             type.this_class_name.data);
 
         inflateEnd(&stream);
+#else
+        pg_assert(0 && "WITH_ZLIB not set, no zlib decompression support");
+#endif
       }
     }
   }
