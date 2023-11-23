@@ -134,14 +134,15 @@ int main(int argc, char *argv[]) {
 
   {
     // TODO: when parsing multiple files, need to allocate that.
-    str source_file_name = str_from_c(argv[optind]);
+    char *source_file_name_cstr = argv[optind];
+    str source_file_name = str_from_c(source_file_name_cstr);
     if (!str_ends_with(source_file_name, str_from_c(".kt"))) {
       fprintf(stderr, "Expected an input file ending with .kt\n");
       exit(EINVAL);
     }
 
     ut_read_result_t source_file_read_res =
-        ut_read_all_from_file_path(source_file_name, scratch_arena, &arena);
+        ut_read_all_from_file_path(source_file_name_cstr, &arena);
     if (source_file_read_res.error) {
       fprintf(stderr, "Failed to open the file %.*s: %s\n",
               (int)source_file_name.len, source_file_name.data,
@@ -240,11 +241,10 @@ int main(int argc, char *argv[]) {
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
 
     {
-      arena_t tmp_arena = arena;
       LOG("\n----------- Verifiying%s", "");
 
-      ut_read_result_t read_res = ut_read_all_from_file_path(
-          class_file_path, scratch_arena, &tmp_arena);
+      ut_read_result_t read_res =
+          ut_read_all_from_file_path(class_file_path_c_str, &scratch_arena);
       if (read_res.error) {
         fprintf(stderr, "Failed to open the file %.*s: %s\n",
                 (int)class_file_path.len, (char *)class_file_path.data,
@@ -256,7 +256,7 @@ int main(int argc, char *argv[]) {
                                                class_file.class_file_path};
       u8 *current = read_res.content.data;
       cf_buf_read_class_file(read_res.content, &current, &class_file_verify,
-                             &tmp_arena);
+                             &scratch_arena);
     }
   }
   if (cli_mem_debug) {

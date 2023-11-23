@@ -5414,7 +5414,8 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
       // not the *main* arena. That's because most of the stuff in there is
       // irrelevant. We pick afterwards just the few bits we want to retain and
       // clone them into the main arena.
-      ut_read_all_from_file_path(path, scratch_arena, &scratch_arena);
+      ut_read_all_from_file_path(str_to_c(path, &scratch_arena),
+                                 &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
@@ -5441,7 +5442,7 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
   pg_assert(arena != NULL);
 
   ut_read_result_t read_res =
-      ut_read_all_from_file_path(path, scratch_arena, arena);
+      ut_read_all_from_file_path(str_to_c(path, &scratch_arena), &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to open the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
@@ -6005,7 +6006,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
     {
       // TODO: check if we can read the file content into `scratch_arena`
       ut_read_result_t read_res = ut_read_all_from_file_path(
-          tentative_class_file_path, scratch_arena, &scratch_arena);
+          str_to_c(tentative_class_file_path, &scratch_arena), &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 

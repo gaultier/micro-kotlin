@@ -281,17 +281,15 @@ static char *str_to_c(str s, arena_t *arena) {
   return c_str;
 }
 
-static ut_read_result_t
-ut_read_all_from_file_path(str path, arena_t scratch_arena, arena_t *arena) {
-  char *path_c_str = str_to_c(path, &scratch_arena);
-  const int fd = open(path_c_str, O_RDONLY);
+static ut_read_result_t ut_read_all_from_file_path(char* path, arena_t *arena) {
+  const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     return (ut_read_result_t){.error = errno};
   }
 
   struct stat st = {0};
-  if (stat(path_c_str, &st) == -1) {
-    fprintf(stderr, "Failed to get the file size %s: %s\n", path_c_str,
+  if (stat(path, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
             strerror(errno));
     close(fd);
     return (ut_read_result_t){.error = errno};
