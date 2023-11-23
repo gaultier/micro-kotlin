@@ -353,7 +353,7 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
+static void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
                                 u64 call_stack_len, u64 objects_count,
                                 u64 bytes_count) {
   profile->alloc_objects += objects_count;
@@ -387,8 +387,8 @@ void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
   pg_array_append(profile->records, record, &profile->arena);
 }
 
-void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
-                              u64 bytes_count) {
+static void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
+                                     u64 bytes_count) {
   u64 call_stack[64] = {0};
   u64 call_stack_len = ut_record_call_stack(
       call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
@@ -399,7 +399,7 @@ void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
                              objects_count, bytes_count);
 }
 
-void mem_profile_write(mem_profile *profile, FILE *out) {
+static void mem_profile_write(mem_profile *profile, FILE *out) {
   // clang-format off
   // heap profile:    <in_use>:  <nbytes1> [   <space>:  <nbytes2>] @ heapprofile
   // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
