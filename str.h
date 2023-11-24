@@ -26,13 +26,13 @@ typedef struct {
   u64 len;
 } str;
 
-static str str_from_c(char *s) {
+__attribute__((warn_unused_result)) static str str_from_c(char *s) {
   return (str){.data = (u8 *)s, .len = s == NULL ? 0 : strlen(s)};
 }
 
 #define str_from_c_literal(s) ((str){.data = (u8 *)s, .len = sizeof(s) - 1})
 
-static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
+__attribute__((warn_unused_result)) static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
   pg_assert(s != NULL);
   pg_assert(n > 0);
 
@@ -45,7 +45,7 @@ static u8 *ut_memrchr(u8 *s, u8 c, u64 n) {
 }
 
 // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
-static u64 ut_next_power_of_two(u64 n) {
+__attribute__((warn_unused_result)) static u64 ut_next_power_of_two(u64 n) {
   n += !n; // Ensure n>0
 
   n--;
@@ -62,25 +62,38 @@ static u64 ut_next_power_of_two(u64 n) {
   return n;
 }
 
-static str str_new(u8 *s, u64 n) { return (str){.data = s, .len = n}; }
+__attribute__((warn_unused_result)) static str str_new(u8 *s, u64 n) {
+  return (str){.data = s, .len = n};
+}
 
-static str str_clone(str s, arena_t *arena) {
+__attribute__((warn_unused_result)) static str str_clone(str s,
+                                                         arena_t *arena) {
+  // Optimization: no alloc.
+  if (s.len == 0)
+    return s;
+
   u8 *data = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len);
   pg_assert(data);
   pg_assert(s.data);
 
-  return (str){.data = memmove(data, s.data, s.len), .len = s.len};
+  pg_assert (s.data);
+    memmove(data, s.data, s.len);
+
+  return (str){.data = data, .len = s.len};
 }
 
-static str str_advance(str s, u64 n) {
+__attribute__((warn_unused_result)) static str str_advance(str s, u64 n) {
   if (n > s.len)
     return (str){0};
   return (str){.data = s.data + n, .len = s.len - n};
 }
 
-static u8 str_first(str s) { return s.len > 0 ? s.data[0] : 0; }
+__attribute__((warn_unused_result)) static u8 str_first(str s) {
+  return s.len > 0 ? s.data[0] : 0;
+}
 
-static bool str_ends_with(str haystack, str needle) {
+__attribute__((warn_unused_result)) static bool str_ends_with(str haystack,
+                                                              str needle) {
   if (needle.len > haystack.len)
     return false;
 
@@ -88,13 +101,16 @@ static bool str_ends_with(str haystack, str needle) {
   return memcmp(&haystack.data[start], needle.data, needle.len) == 0;
 }
 
-static bool str_ends_with_c(str haystack, char *needle) {
+__attribute__((warn_unused_result)) static bool str_ends_with_c(str haystack,
+                                                                char *needle) {
   return str_ends_with(haystack, str_from_c(needle));
 }
 
-static bool str_is_empty(str s) { return s.len == 0; }
+__attribute__((warn_unused_result)) static bool str_is_empty(str s) {
+  return s.len == 0;
+}
 
-static bool str_eq(str a, str b) {
+__attribute__((warn_unused_result)) static bool str_eq(str a, str b) {
   if (a.len == 0 && b.len != 0)
     return false;
   if (b.len == 0 && a.len != 0)
@@ -109,9 +125,12 @@ static bool str_eq(str a, str b) {
   return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 }
 
-static bool str_eq_c(str a, char *b) { return str_eq(a, str_from_c(b)); }
+__attribute__((warn_unused_result)) static bool str_eq_c(str a, char *b) {
+  return str_eq(a, str_from_c(b));
+}
 
-static bool str_contains_element(str haystack, u8 needle) {
+__attribute__((warn_unused_result)) static bool
+str_contains_element(str haystack, u8 needle) {
   for (i64 i = 0; i < (i64)haystack.len - 1; i++) {
     if (haystack.data[i] == needle)
       return true;
@@ -126,7 +145,8 @@ typedef struct {
   pg_pad(7);
 } str_split_result_t;
 
-static str_split_result_t str_split(str haystack, u8 needle) {
+__attribute__((warn_unused_result)) static str_split_result_t
+str_split(str haystack, u8 needle) {
   u8 *at = memchr(haystack.data, needle, haystack.len);
   if (at == NULL)
     return (str_split_result_t){.left = haystack, .right = haystack};
@@ -141,7 +161,8 @@ static str_split_result_t str_split(str haystack, u8 needle) {
   };
 }
 
-static str_split_result_t str_rsplit(str haystack, u8 needle) {
+__attribute__((warn_unused_result)) static str_split_result_t
+str_rsplit(str haystack, u8 needle) {
   u8 *at = ut_memrchr(haystack.data, needle, haystack.len);
   if (at == NULL)
     return (str_split_result_t){.left = haystack, .right = haystack};
@@ -156,14 +177,14 @@ static str_split_result_t str_rsplit(str haystack, u8 needle) {
   };
 }
 
-static u64 sb_space(str_builder sb) {
+__attribute__((warn_unused_result)) static u64 sb_space(str_builder sb) {
   pg_assert(sb.len < sb.cap);
 
   return sb.cap - sb.len - 1;
 }
 
-static str_builder sb_reserve_at_least(str_builder sb, u64 more,
-                                       arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_reserve_at_least(str_builder sb, u64 more, arena_t *arena) {
   pg_assert(sb.len <= sb.cap);
 
   if (more <= sb_space(sb))
@@ -175,7 +196,9 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
   u8 *new_data = arena_alloc(arena, sizeof(u8), _Alignof(u8), new_cap);
   pg_assert(new_data);
   pg_assert(sb.data);
-  memmove(new_data, sb.data, sb.len);
+
+  if (sb.data)
+    memmove(new_data, sb.data, sb.len);
 
   pg_assert(sb.data[sb.len] == 0);
   pg_assert(new_data[sb.len] == 0);
@@ -183,49 +206,65 @@ static str_builder sb_reserve_at_least(str_builder sb, u64 more,
   return (str_builder){.len = sb.len, .cap = new_cap, .data = new_data};
 }
 
-static u8 *sb_end_c(str_builder sb) { return sb.data + sb.len; }
+__attribute__((warn_unused_result)) static u8 *sb_end_c(str_builder sb) {
+  return sb.data + sb.len;
+}
 
-static str_builder sb_append(str_builder sb, str more, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_append(str_builder sb, str more, arena_t *arena) {
   sb = sb_reserve_at_least(sb, more.len, arena);
-  memmove(sb_end_c(sb), more.data, more.len);
+
+  if (more.data)
+    memmove(sb_end_c(sb), more.data, more.len);
+
   sb.data[sb.len + more.len] = 0;
   return (str_builder){
       .len = sb.len + more.len, .data = sb.data, .cap = sb.cap};
 }
 
-static str_builder sb_append_c(str_builder sb, char *more, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_append_c(str_builder sb, char *more, arena_t *arena) {
   return sb_append(sb, str_from_c(more), arena);
 }
 
-static str_builder sb_append_char(str_builder sb, u8 c, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_append_char(str_builder sb, u8 c, arena_t *arena) {
   sb = sb_reserve_at_least(sb, 1, arena);
   sb.data[sb.len] = c;
   sb.data[sb.len + 1] = 0;
   return (str_builder){.len = sb.len + 1, .data = sb.data, .cap = sb.cap};
 }
 
-static str_builder sb_new(u64 initial_cap, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder sb_new(u64 initial_cap,
+                                                              arena_t *arena) {
   return (str_builder){
       .data = arena_alloc(arena, sizeof(u8), _Alignof(u8), initial_cap + 1),
       .cap = initial_cap + 1,
   };
 }
 
-static str_builder sb_assume_appended_n(str_builder sb, u64 more) {
+__attribute__((warn_unused_result)) static str_builder
+sb_assume_appended_n(str_builder sb, u64 more) {
   return (str_builder){.len = sb.len + more, .data = sb.data, .cap = sb.cap};
 }
 
-static str sb_build(str_builder sb) {
+__attribute__((warn_unused_result)) static str sb_build(str_builder sb) {
+  pg_assert(sb.data);
+  pg_assert(sb.cap > 0);
+  pg_assert(sb.data[sb.len] == 0);
+
   return (str){.data = sb.data, .len = sb.len};
 }
 
-static str_builder sb_append_u64(str_builder sb, u64 n, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_append_u64(str_builder sb, u64 n, arena_t *arena) {
   char tmp[25] = "";
   snprintf(tmp, sizeof(tmp) - 1, "%lu", n);
   return sb_append_c(sb, tmp, arena);
 }
 
-static str_builder sb_capitalize_at(str_builder sb, u64 pos) {
+__attribute__((warn_unused_result)) static str_builder
+sb_capitalize_at(str_builder sb, u64 pos) {
   pg_assert(pos < sb.len);
 
   if ('a' <= sb.data[pos] && sb.data[pos] <= 'z')
@@ -234,19 +273,22 @@ static str_builder sb_capitalize_at(str_builder sb, u64 pos) {
   return sb;
 }
 
-static str_builder sb_clone(str src, arena_t *arena) {
+__attribute__((warn_unused_result)) static str_builder
+sb_clone(str src, arena_t *arena) {
   str_builder res = sb_new(src.len, arena);
   pg_assert(res.data);
   pg_assert(src.len <= res.cap);
   pg_assert(src.data);
 
-  memmove(res.data, src.data, src.len);
+  if (src.data)
+    memmove(res.data, src.data, src.len);
+
   res.len = src.len;
   return res;
 }
 
-static str_builder sb_replace_element_starting_at(str_builder sb, u64 start,
-                                                  u8 from, u8 to) {
+__attribute__((warn_unused_result)) static str_builder
+sb_replace_element_starting_at(str_builder sb, u64 start, u8 from, u8 to) {
   for (u64 i = start; i < sb.len; i++) {
     if (sb.data[i] == from)
       sb.data[i] = to;
@@ -256,7 +298,7 @@ static str_builder sb_replace_element_starting_at(str_builder sb, u64 start,
 
 // ------------------- Utils
 
-static bool ut_char_is_alphabetic(u8 c) {
+__attribute__((warn_unused_result)) static bool ut_char_is_alphabetic(u8 c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
@@ -266,7 +308,8 @@ typedef struct {
   pg_pad(4);
 } ut_read_result_t;
 
-static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
+__attribute__((warn_unused_result)) static ut_read_result_t
+ut_read_all_from_fd(int fd, str_builder sb) {
   pg_assert(fd > 0);
 
   while (sb_space(sb) > 0) {
@@ -284,16 +327,21 @@ static ut_read_result_t ut_read_all_from_fd(int fd, str_builder sb) {
   return (ut_read_result_t){.content = sb_build(sb)};
 }
 
-static char *str_to_c(str s, arena_t *arena) {
+__attribute__((warn_unused_result)) static char *str_to_c(str s,
+                                                          arena_t *arena) {
   char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
-  memmove(c_str, s.data, s.len);
+  if (s.data)
+    memmove(c_str, s.data, s.len);
+
+  pg_assert(strlen(c_str) == s.len);
 
   c_str[s.len] = 0;
 
   return c_str;
 }
 
-static ut_read_result_t ut_read_all_from_file_path(char *path, arena_t *arena) {
+__attribute__((warn_unused_result)) static ut_read_result_t
+ut_read_all_from_file_path(char *path, arena_t *arena) {
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     return (ut_read_result_t){.error = errno};

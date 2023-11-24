@@ -446,7 +446,8 @@ static void type_init_package_and_name(str fully_qualified_jvm_name,
   }
 
   str_builder package_name_builder = sb_clone(slash_rplit_res.left, arena);
-  sb_replace_element_starting_at(package_name_builder, 0, '/', '.');
+  package_name_builder =
+      sb_replace_element_starting_at(package_name_builder, 0, '/', '.');
   *package_name = sb_build(package_name_builder);
 
   *name = str_clone(slash_rplit_res.right, arena);

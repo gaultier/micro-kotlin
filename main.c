@@ -99,6 +99,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  pg_assert(optind <= argc);
+
   if (optind == argc) {
     fprintf(stderr, "Missing source file.\n");
     print_usage_and_exit(argv[0]);
