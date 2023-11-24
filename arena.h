@@ -65,14 +65,14 @@ static bool cli_log_verbose = false;
 
 // --------------------------- Arena
 
-typedef struct mem_profile mem_profile;
+typedef struct mem_profile mem_profile_t;
 typedef struct {
   u8 *start;
   u8 *end;
-  mem_profile *profile;
+  mem_profile_t *profile;
 } arena_t;
 
-static arena_t arena_new(u64 cap, mem_profile *profile) {
+static arena_t arena_new(u64 cap, mem_profile_t *profile) {
   u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
                  -1, 0);
   pg_assert(mem);
@@ -85,7 +85,7 @@ static arena_t arena_new(u64 cap, mem_profile *profile) {
   return arena;
 }
 
-static void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
+static void mem_profile_record_alloc(mem_profile_t *profile, u64 objects_count,
                                      u64 bytes_count);
 
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *

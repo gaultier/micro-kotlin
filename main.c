@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  mem_profile mem_profile = {
+  mem_profile_t mem_profile = {
       .arena = arena_new(8 * MiB, NULL),
   };
   arena_t arena =

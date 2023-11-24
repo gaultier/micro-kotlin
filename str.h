@@ -353,19 +353,26 @@ static u8 ut_record_call_stack(u64 *dst, u64 cap) {
   return len;
 }
 
-static void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
-                                       u64 call_stack_len, u64 objects_count,
-                                       u64 bytes_count) {
+static void mem_profile_record_alloc(mem_profile_t *profile, u64 objects_count,
+                                     u64 bytes_count) {
+  // Record the call stack by stack walking.
+  u64 call_stack[64] = {0};
+  u64 call_stack_len = ut_record_call_stack(
+      call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
+
+  // Update the sums.
   profile->alloc_objects += objects_count;
   profile->alloc_space += bytes_count;
   profile->in_use_objects += objects_count;
   profile->in_use_space += bytes_count;
 
+  // Upsert the record.
   for (u64 i = 0; i < pg_array_len(profile->records); i++) {
     mem_record *r = &profile->records[i];
 
     if (pg_array_len(r->call_stack) == call_stack_len &&
         memcmp(r->call_stack, call_stack, call_stack_len * sizeof(u64)) == 0) {
+      // Found an existing record, update it.
       r->alloc_objects += objects_count;
       r->alloc_space += bytes_count;
       r->in_use_objects += objects_count;
@@ -374,6 +381,7 @@ static void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
     }
   }
 
+  // Not found, insert a new record.
   mem_record record = {
       .alloc_objects = objects_count,
       .alloc_space = bytes_count,
@@ -381,25 +389,13 @@ static void mem_upsert_record_on_alloc(mem_profile *profile, u64 *call_stack,
       .in_use_space = bytes_count,
   };
   pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
-  memmove(record.call_stack, call_stack, call_stack_len * sizeof(u64));
+  memcpy(record.call_stack, call_stack, call_stack_len * sizeof(u64));
   pg_array_header(record.call_stack)->len = call_stack_len;
 
   pg_array_append(profile->records, record, &profile->arena);
 }
 
-static void mem_profile_record_alloc(mem_profile *profile, u64 objects_count,
-                                     u64 bytes_count) {
-  u64 call_stack[64] = {0};
-  u64 call_stack_len = ut_record_call_stack(
-      call_stack, sizeof(call_stack) / sizeof(call_stack[0]));
-  pg_assert(call_stack_len > 1);
-
-  // Skip the first entry since that's this current function.
-  mem_upsert_record_on_alloc(profile, call_stack + 1, call_stack_len - 1,
-                             objects_count, bytes_count);
-}
-
-static void mem_profile_write(mem_profile *profile, FILE *out) {
+static void mem_profile_write(mem_profile_t *profile, FILE *out) {
   // clang-format off
   // heap profile:    <in_use>:  <nbytes1> [   <space>:  <nbytes2>] @ heapprofile
   // <in_use>: <nbytes1> [<space>: <nbytes2>] @ <rip1> <rip2> <rip3> [...]
