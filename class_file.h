@@ -384,6 +384,7 @@ typedef struct {
   str this_class_name;
   str *class_path_entries;
   str *imported_package_names;
+  u64 class_file_loaded_count;
   ty_variable_t *variables;
   ty_type_t *types;
   u32 current_type_i;
@@ -5136,8 +5137,9 @@ static void resolver_load_methods_from_class_file(
       arena_t tmp_arena = *arena;
       str human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
-      LOG("Loaded %s: access_flags=%u type=%.*s",
-          ty_type_kind_string(resolver->types, type_i), method->access_flags,
+      LOG("Loaded method %s [%lu]: access_flags=%u type=%.*s",
+          ty_type_kind_string(resolver->types, type_i),
+          pg_array_len(resolver->types), method->access_flags,
           (int)human_type.len, human_type.data);
     }
   }
@@ -5341,10 +5343,11 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
         resolver_load_methods_from_class_file(resolver, this_class_type_i,
                                               &class_file, arena);
 
-        LOG("Loaded class_file_path=%.*s  archive_file_path=%.*s "
+        resolver->class_file_loaded_count += 1;
+        LOG("Loaded class_file_path=%.*s [%lu] archive_file_path=%.*s "
             "kind=uncompressed package_name=%.*s class_name=%.*s",
             (int)class_file.class_file_path.len,
-            class_file.class_file_path.data,
+            class_file.class_file_path.data, resolver->class_file_loaded_count,
             (int)class_file.archive_file_path.len,
             class_file.archive_file_path.data, (int)type.package_name.len,
             type.package_name.data, (int)type.this_class_name.len,

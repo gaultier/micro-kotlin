@@ -93,7 +93,7 @@ __attribute__((warn_unused_result))
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
 arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
   pg_assert(a->start <= a->end);
-  pg_assert(size>0);
+  pg_assert(size > 0);
   pg_assert(align == 1 || align == 2 || align == 4 || align == 8);
 
   size_t available = a->end - a->start;

@@ -76,8 +76,8 @@ __attribute__((warn_unused_result)) static str str_clone(str s,
   pg_assert(data);
   pg_assert(s.data);
 
-  pg_assert (s.data);
-    memmove(data, s.data, s.len);
+  pg_assert(s.data);
+  memmove(data, s.data, s.len);
 
   return (str){.data = data, .len = s.len};
 }
@@ -379,7 +379,8 @@ struct mem_profile {
 };
 
 // TODO: Maybe use varints to reduce the size.
-static u8 ut_record_call_stack(u64 *dst, u64 cap) {
+__attribute__((warn_unused_result)) static u8 ut_record_call_stack(u64 *dst,
+                                                                   u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
   u64 len = 0;
