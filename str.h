@@ -26,6 +26,50 @@ typedef struct {
   u64 len;
 } str;
 
+typedef struct str_set_t str_set_t;
+struct str_set_t {
+  str_set_t *child[4];
+  str key;
+};
+
+// FNV-1a
+__attribute__((warn_unused_result)) static u64 str_hash(str s) {
+  u64 h = 0x100;
+  for (u64 i = 0; i < s.len; i++) {
+    h ^= s.data[i];
+    h *= 1111111111111111111u;
+  }
+  return h;
+}
+
+__attribute__((warn_unused_result)) static bool str_eq(str a, str b) {
+  if (a.len == 0 && b.len != 0)
+    return false;
+  if (b.len == 0 && a.len != 0)
+    return false;
+
+  if (a.len == 0 && b.len == 0)
+    return true;
+
+  pg_assert(a.data != NULL);
+  pg_assert(b.data != NULL);
+
+  return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
+}
+
+static bool str_set_find_or_create(str_set_t **set, str s, arena_t *arena) {
+  for (u64 h = str_hash(s); *set; h <<= 2) {
+    if (str_eq(s, (*set)->key)) {
+      return false;
+    }
+    set = &(*set)->child[h >> 62];
+  }
+  *set = arena_alloc(arena, sizeof(str_set_t), _Alignof(str_set_t), 1);
+  (*set)->key = s;
+
+  return true;
+}
+
 __attribute__((warn_unused_result)) static str str_from_c(char *s) {
   return (str){.data = (u8 *)s, .len = s == NULL ? 0 : strlen(s)};
 }
@@ -108,21 +152,6 @@ __attribute__((warn_unused_result)) static bool str_ends_with_c(str haystack,
 
 __attribute__((warn_unused_result)) static bool str_is_empty(str s) {
   return s.len == 0;
-}
-
-__attribute__((warn_unused_result)) static bool str_eq(str a, str b) {
-  if (a.len == 0 && b.len != 0)
-    return false;
-  if (b.len == 0 && a.len != 0)
-    return false;
-
-  if (a.len == 0 && b.len == 0)
-    return true;
-
-  pg_assert(a.data != NULL);
-  pg_assert(b.data != NULL);
-
-  return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 }
 
 __attribute__((warn_unused_result)) static bool str_eq_c(str a, char *b) {
@@ -385,7 +414,7 @@ __attribute__((warn_unused_result)) static u8 ut_record_call_stack(u64 *dst,
 
   u64 len = 0;
 
-  while (rbp != 0 && ((u64)rbp & 7) == 0 && *rbp != 0) {
+  while (rbp != 0 && ((u64)rbp & 7) == 0 && (u64)rbp > 8 && *rbp != 0) {
     const uintptr_t rip = *(rbp + 1);
     rbp = (uintptr_t *)*rbp;
 

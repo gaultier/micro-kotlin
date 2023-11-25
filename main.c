@@ -128,6 +128,11 @@ int main(int argc, char *argv[]) {
   // This size should be at least the size of the biggest file we read.
   arena_t scratch_arena = arena_new(256 * MiB, NULL);
 
+  str_set_t *set = 0;
+  pg_assert(str_set_find_or_create(&set, str_from_c("foo"), &arena)==true);
+  pg_assert(str_set_find_or_create(&set, str_from_c("foo"), &arena)==false);
+  pg_assert(str_set_find_or_create(&set, str_from_c("bar"), &arena)==true);
+
   str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
 
