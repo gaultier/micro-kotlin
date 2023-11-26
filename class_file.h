@@ -193,20 +193,18 @@ struct cg_frame_t {
   pg_pad(4);
 };
 
-struct ty_type_t;
-
 struct cf_constant_array_t;
 typedef struct cf_constant_array_t cf_constant_array_t;
 
+typedef struct ty_type_t ty_type_t;
 typedef struct {
   str name;
   str source_file_name;
   u8 *code;                           // In case of InlineOnly.
   cf_constant_array_t *constant_pool; // In case of InlineOnly.
-  u32 *argument_types_i;
-  u32 return_type_i;
-  u32 this_class_type_i;
-  // TODO: Move to `type.flags` to reduce size?
+  ty_type_t **argument_types;
+  ty_type_t *return_type;
+  ty_type_t *this_class_type;
   u16 access_flags;
   u16 source_line;
   pg_pad(4);
@@ -220,17 +218,16 @@ struct ty_type_t {
   str this_class_name;
   str super_class_name;
   str package_name;
+  ty_type_t *super_type;
   union {
     ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;          // TYPE_ARRAY_REFERENCE
+    ty_type_t *array_type;     // TYPE_ARRAY_REFERENCE
     u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   ty_type_kind_t kind;
   u16 flags;
-  u32 super_type_i;
+  pg_pad(4);
 };
-
-typedef struct ty_type_t ty_type_t;
 
 typedef struct {
   u16 start_pc;
@@ -293,13 +290,13 @@ typedef struct {
   u32 main_token_i;
   u32 lhs;
   u32 rhs;
-  u32 type_i; // TODO: should it be separate?
-  // TODO: should it be separate?
-  u32 *nodes; // AST_KIND_LIST
-  u64 extra_data_i;
   u16 flags;
   par_ast_node_kind_t kind;
-  pg_pad(5);
+  pg_pad(1);
+  // TODO: should it be separate?
+  u32 *nodes; // AST_KIND_LIST
+  ty_type_t *type;
+  u64 extra_data_i;
 } par_ast_node_t;
 
 typedef enum __attribute__((packed)) {
@@ -386,7 +383,6 @@ typedef struct {
   str *imported_package_names;
   u64 class_file_loaded_count;
   ty_variable_t *variables;
-  ty_type_t *types;
   u32 current_type_i;
   u32 scope_depth;
   u32 current_function_i;
@@ -405,7 +401,6 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
       cg_make_class_name_from_path(class_file_path, arena);
 
   pg_array_init_reserve(resolver->variables, 512, arena);
-  pg_array_init_reserve(resolver->types, 1 << 16, arena);
   pg_array_init_reserve(resolver->imported_package_names, 256, arena);
 
   pg_array_append(resolver->imported_package_names, str_from_c("kotlin"),
@@ -459,9 +454,7 @@ static const ty_type_t *resolver_eval_type(resolver_t *resolver,
   if (in->kind != TYPE_METHOD)
     return in;
 
-  ty_type_t *const return_type = &resolver->types[in->v.method.return_type_i];
-
-  return resolver_eval_type(resolver, return_type);
+  return resolver_eval_type(resolver, in->v.method.return_type);
 }
 
 static bool resolver_is_type_integer(const ty_type_t *type) {
@@ -477,9 +470,8 @@ static bool resolver_is_type_integer(const ty_type_t *type) {
   }
 }
 
-static bool resolver_are_types_equal(const resolver_t *resolver,
-                                     const ty_type_t *lhs,
-                                     const ty_type_t *rhs) {
+static bool resolver_type_eq(const resolver_t *resolver, const ty_type_t *lhs,
+                             const ty_type_t *rhs) {
   if (lhs->kind != rhs->kind)
     return false;
 
@@ -497,21 +489,17 @@ static bool resolver_are_types_equal(const resolver_t *resolver,
     if (!str_eq(lhs->this_class_name, rhs->this_class_name))
       return false;
 
-    if (!resolver_are_types_equal(resolver,
-                                  &resolver->types[lhs_method->return_type_i],
-                                  &resolver->types[rhs_method->return_type_i]))
+    if (!resolver_type_eq(resolver, lhs_method->return_type,
+                          rhs_method->return_type))
       return false;
 
-    if (pg_array_len(lhs_method->argument_types_i) !=
-        pg_array_len(rhs_method->argument_types_i))
+    if (pg_array_len(lhs_method->argument_types) !=
+        pg_array_len(rhs_method->argument_types))
       return false;
 
-    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types_i); i++) {
-      const u32 lhs_arg_i = lhs_method->argument_types_i[i];
-      const u32 rhs_arg_i = rhs_method->argument_types_i[i];
-
-      if (!resolver_are_types_equal(resolver, &resolver->types[lhs_arg_i],
-                                    &resolver->types[rhs_arg_i]))
+    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types); i++) {
+      if (!resolver_type_eq(resolver, lhs_method->argument_types[i],
+                            rhs_method->argument_types[i]))
         return false;
     }
 
@@ -567,7 +555,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
                                         const ty_type_t *b,
                                         arena_t scratch_arena, arena_t *arena) {
   // `A <: A` always.
-  if (resolver_are_types_equal(resolver, a, b))
+  if (resolver_type_eq(resolver, a, b))
     return true;
 
   // Every type is a subtype of Any.
@@ -595,11 +583,11 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
       if (!resolver_resolve_super_lazily(resolver, it, scratch_arena, arena))
         return false;
 
-      if (it->super_type_i == 0)
+      if (it->super_type == 0)
         return false; // Reached the top
 
-      it = &resolver->types[it->super_type_i];
-      if (resolver_are_types_equal(resolver, it, b))
+      it = it->super_type;
+      if (resolver_type_eq(resolver, it, b))
         return true;
     }
     return false;
@@ -615,16 +603,15 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    resolver_t *resolver, const u32 *call_site_argument_types_i,
-    const ty_type_t *function_definition_type, arena_t scratch_arena,
+    resolver_t *resolver, ty_type_t **call_site_argument_types,
+    ty_type_t *function_definition_type, arena_t scratch_arena,
     arena_t *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
   const ty_type_method_t *definition = &function_definition_type->v.method;
 
-  const u8 call_argument_count = pg_array_len(call_site_argument_types_i);
-  const u8 definition_argument_count =
-      pg_array_len(definition->argument_types_i);
+  const u8 call_argument_count = pg_array_len(call_site_argument_types);
+  const u8 definition_argument_count = pg_array_len(definition->argument_types);
 
   // Technically there is no such check in the spec but since we do not
   // implement varargs or default arguments yet, this will do for now.
@@ -632,10 +619,8 @@ static bool resolver_is_function_candidate_applicable(
     return false;
 
   for (u8 i = 0; i < call_argument_count; i++) {
-    const u32 call_site_argument_type_i = call_site_argument_types_i[i];
-    ty_type_t *call_argument = &resolver->types[call_site_argument_type_i];
-    const ty_type_t *definition_argument =
-        &resolver->types[definition->argument_types_i[i]];
+    ty_type_t *call_argument = call_site_argument_types[i];
+    const ty_type_t *definition_argument = definition->argument_types[i];
 
     const bool is_call_argument_subtype_of_definition_argument =
         resolver_is_type_subtype_of(resolver, call_argument,
@@ -653,8 +638,7 @@ static bool resolver_is_function_candidate_applicable(
   return true;
 }
 
-static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
-                             arena_t *arena);
+static ty_type_t *resolver_lower_type(ty_type_t *new_type);
 
 static u16
 cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
@@ -926,13 +910,10 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-static str_builder cf_fill_descriptor_string(const ty_type_t *types,
-                                             str_builder sb, u32 type_i,
+static str_builder cf_fill_descriptor_string(str_builder sb,
+                                             const ty_type_t *type,
                                              arena_t *arena) {
-  pg_assert(types != NULL);
-  pg_assert(type_i < pg_array_len(types));
-
-  const ty_type_t *const type = &types[type_i];
+  pg_assert(type != NULL);
 
   switch (type->kind) {
   case TYPE_UNIT: {
@@ -974,22 +955,20 @@ static str_builder cf_fill_descriptor_string(const ty_type_t *types,
   }
   case TYPE_ARRAY: {
     sb = sb_append_char(sb, '[', arena);
-    return cf_fill_descriptor_string(types, sb, type->v.array_type_i, arena);
+    return cf_fill_descriptor_string(sb, type->v.array_type, arena);
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
     const ty_type_method_t *const method_type = &type->v.method;
     sb = sb_append_char(sb, '(', arena);
 
-    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
-      sb = cf_fill_descriptor_string(types, sb,
-                                     method_type->argument_types_i[i], arena);
+    for (u64 i = 0; i < pg_array_len(method_type->argument_types); i++) {
+      sb = cf_fill_descriptor_string(sb, method_type->argument_types[i], arena);
     }
 
     sb = sb_append_char(sb, ')', arena);
 
-    return cf_fill_descriptor_string(types, sb, method_type->return_type_i,
-                                     arena);
+    return cf_fill_descriptor_string(sb, method_type->return_type, arena);
   }
   default:
     pg_assert(0 && "unreachable");
@@ -1094,7 +1073,7 @@ static str cf_parse_descriptor(resolver_t *resolver, str descriptor,
                                  &type->this_class_name, arena);
     }
 
-    type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
+    type->v.array_type = resolver_lower_type(&item_type);
     return remaining;
   }
 
@@ -1105,31 +1084,32 @@ static str cf_parse_descriptor(resolver_t *resolver, str descriptor,
     type->kind = TYPE_METHOD;
     remaining = str_advance(remaining, 1);
 
-    u32 *argument_types_i = NULL;
-    pg_array_init_reserve(argument_types_i, remaining.len, arena);
+    ty_type_t **argument_types = NULL;
+    pg_array_init_reserve(argument_types, remaining.len, arena);
 
     for (u64 i = 0; i < 255; i++) {
       if (str_first(remaining) == ')')
         break;
 
-      ty_type_t argument_type = {0};
+      ty_type_t *argument_type =
+          arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
       remaining =
-          cf_parse_descriptor(resolver, remaining, &argument_type, arena);
-      const u32 argument_type_i =
-          resolver_add_type(resolver, &argument_type, arena);
-      pg_array_append(argument_types_i, argument_type_i, arena);
+          cf_parse_descriptor(resolver, remaining, argument_type, arena);
+      resolver_lower_type(argument_type);
+      pg_array_append(argument_types, argument_type, arena);
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] = ')');
     remaining = str_advance(remaining, 1);
 
-    ty_type_t return_type = {0};
-    remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
+    type->v.method.return_type =
+        arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
+    remaining = cf_parse_descriptor(resolver, remaining,
+                                    type->v.method.return_type, arena);
     // TODO: Check cache before adding the type.
 
-    type->v.method.argument_types_i = argument_types_i;
-    type->v.method.return_type_i =
-        resolver_add_type(resolver, &return_type, arena);
+    type->v.method.argument_types = argument_types;
+    resolver_lower_type(type->v.method.return_type);
 
     return remaining;
   }
@@ -3643,8 +3623,7 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   /* pg_assert(*column > 0); */
 }
 
-static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
-  const ty_type_t *const type = &types[type_i];
+static char *ty_type_kind_string(const ty_type_t *type) {
 
   switch (type->kind) {
   case TYPE_ANY:
@@ -3683,10 +3662,7 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   pg_assert(0 && "unreachable");
 }
 
-static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
-                                   arena_t *arena) {
-  const ty_type_t *const type = &types[type_i];
-
+static str ty_type_to_human_string(const ty_type_t *type, arena_t *arena) {
   switch (type->kind) {
   case TYPE_ANY:
     return str_from_c("kotlin.Any");
@@ -3713,8 +3689,7 @@ static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_ARRAY: {
     str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
-    res = sb_append(res,
-                    ty_type_to_human_string(types, type->v.array_type_i, arena),
+    res = sb_append(res, ty_type_to_human_string(type->v.array_type, arena),
                     arena);
     res = sb_append_char(res, '>', arena);
     return sb_build(res);
@@ -3728,18 +3703,17 @@ static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
 
     str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "(", arena);
-    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
-      const u32 argument_type_i = method_type->argument_types_i[i];
-      res = sb_append(
-          res, ty_type_to_human_string(types, argument_type_i, arena), arena);
+    for (u64 i = 0; i < pg_array_len(method_type->argument_types); i++) {
+      const ty_type_t *const argument_type = method_type->argument_types[i];
+      res =
+          sb_append(res, ty_type_to_human_string(argument_type, arena), arena);
 
-      if (i < pg_array_len(method_type->argument_types_i) - 1)
+      if (i < pg_array_len(method_type->argument_types) - 1)
         res = sb_append_c(res, ", ", arena);
     }
     res = sb_append_c(res, ") : ", arena);
     res = sb_append(
-        res, ty_type_to_human_string(types, method_type->return_type_i, arena),
-        arena);
+        res, ty_type_to_human_string(method_type->return_type, arena), arena);
     return sb_build(res);
   }
   case TYPE_INTEGER_LITERAL: {
@@ -5014,14 +4988,10 @@ static u32 par_parse(parser_t *parser, arena_t *arena) {
 
 // --------------------------------- Typing
 
-// TODO: Caching?
-static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
-                             arena_t *arena) {
-  pg_assert(resolver != NULL);
-  pg_assert(resolver->types != NULL);
+static void resolver_lower_type(ty_type_t *new_type) {
   pg_assert(new_type != NULL);
 
-  if (new_type->kind == TYPE_INSTANCE) { // Try to lower to a know type.
+  if (new_type->kind == TYPE_INSTANCE) { // Try to lower to a known type.
     if (str_eq_c(new_type->this_class_name, "java/lang/Boolean"))
       new_type->kind = TYPE_BOOLEAN;
     else if (str_eq_c(new_type->this_class_name, "java/lang/Char"))
@@ -5041,13 +5011,9 @@ static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
     else if (str_eq_c(new_type->this_class_name, "java/lang/String"))
       new_type->kind = TYPE_STRING;
   }
-
-  pg_array_append(resolver->types, *new_type, arena);
-  return pg_array_last_index(resolver->types);
 }
 
-static str resolver_function_to_human_string(const resolver_t *resolver,
-                                             u32 function_i, arena_t *arena);
+static str resolver_function_to_human_string(ty_type_t *type, arena_t *arena);
 
 static bool
 cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
@@ -5074,15 +5040,13 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
 }
 
 static void resolver_load_methods_from_class_file(
-    resolver_t *resolver, u32 this_class_type_i,
+    resolver_t *resolver, ty_type_t *this_class_type,
     const cf_class_file_t *class_file, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
   bool has_at_least_one_inline_only_method = false;
-  const u64 initial_types_count = pg_array_len(resolver->types);
-  const ty_type_t *const this_class_type = &resolver->types[this_class_type_i];
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5091,31 +5055,31 @@ static void resolver_load_methods_from_class_file(
     str name = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                method->name);
 
-    ty_type_t type = {
-        .this_class_name = this_class_type->this_class_name,
-        .package_name = this_class_type->package_name,
-    };
-    cf_parse_descriptor(resolver, descriptor, &type, arena);
-    pg_assert(type.kind == TYPE_METHOD);
+    ty_type_t *type =
+        arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
+    type->this_class_name = this_class_type->this_class_name;
+    type->package_name = this_class_type->package_name;
+    cf_parse_descriptor(resolver, descriptor, type, arena);
+    pg_assert(type->kind == TYPE_METHOD);
 
     if (str_eq_c(name, CONSTRUCTOR_JVM_NAME)) {
-      type.kind = TYPE_CONSTRUCTOR;
-      type.v.method.name = type.this_class_name;
+      type->kind = TYPE_CONSTRUCTOR;
+      type->v.method.name = type->this_class_name;
     } else {
-      type.v.method.name = name;
+      type->v.method.name = name;
     }
 
-    type.v.method.access_flags = method->access_flags;
-    type.v.method.this_class_type_i = this_class_type_i;
+    type->v.method.access_flags = method->access_flags;
+    type->v.method.this_class_type = this_class_type;
     cf_get_source_location_of_function(class_file, method,
-                                       &type.v.method.source_file_name,
-                                       &type.v.method.source_line, arena);
+                                       &type->v.method.source_file_name,
+                                       &type->v.method.source_line, arena);
 
     if (cf_method_has_inline_only_annotation(class_file, method)) {
       // Do as if the method was public, not private.
-      type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
-      type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
-      type.flags |= TYPE_FLAG_INLINE_ONLY;
+      type->v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
+      type->v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
+      type->flags |= TYPE_FLAG_INLINE_ONLY;
 
       has_at_least_one_inline_only_method = true;
 
@@ -5124,23 +5088,21 @@ static void resolver_load_methods_from_class_file(
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
         const cf_attribute_t *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
-          pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
+          pg_array_clone(type->v.method.code, attribute->v.code.code, arena);
           break;
         }
       }
-      pg_assert(pg_array_len(type.v.method.code) > 0);
+      pg_assert(pg_array_len(type->v.method.code) > 0);
     }
 
-    const u32 type_i = resolver_add_type(resolver, &type, arena);
+    resolver_lower_type(type);
 
     if (cli_log_verbose) {
       arena_t tmp_arena = *arena;
-      str human_type =
-          resolver_function_to_human_string(resolver, type_i, &tmp_arena);
-      LOG("Loaded method %s [%lu]: access_flags=%u type=%.*s",
-          ty_type_kind_string(resolver->types, type_i),
-          pg_array_len(resolver->types), method->access_flags,
-          (int)human_type.len, human_type.data);
+      str human_type = resolver_function_to_human_string(type, &tmp_arena);
+      LOG("Loaded method %s: access_flags=%u type=%.*s",
+          ty_type_kind_string(type), method->access_flags, (int)human_type.len,
+          human_type.data);
     }
   }
 
@@ -5149,6 +5111,7 @@ static void resolver_load_methods_from_class_file(
     // be able to fix-up the referred to constants.
     cf_constant_array_t *constant_pool_clone =
         cf_constant_array_clone(&class_file->constant_pool, arena);
+
     for (u64 i = initial_types_count; i < pg_array_len(resolver->types); i++) {
       ty_type_t *const type = &resolver->types[i];
       if (type->kind == TYPE_METHOD && (type->flags & TYPE_FLAG_INLINE_ONLY))
@@ -5328,10 +5291,12 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
             &local_file_header, &class_file, &scratch_arena);
 
         ty_type_t type = {.kind = TYPE_INSTANCE};
+        ty_type_t *this_class_type =
+            arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
-        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
+        resolver_lower_type(this_class_type);
 
         if (class_file.super_class != 0) {
           const cf_constant_t *const constant_super = cf_constant_array_get(
@@ -5340,7 +5305,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
         }
 
-        resolver_load_methods_from_class_file(resolver, this_class_type_i,
+        resolver_load_methods_from_class_file(resolver, this_class_type,
                                               &class_file, arena);
 
         resolver->class_file_loaded_count += 1;
@@ -5478,14 +5443,12 @@ static bool resolver_is_package_imported(const resolver_t *resolver,
   return false;
 }
 
-static void resolver_collect_callables_with_name(const resolver_t *resolver,
-                                                 str function_name,
-                                                 u32 **candidate_functions_i,
-                                                 arena_t *arena) {
+static void resolver_collect_callables_with_name(
+    const resolver_t *resolver, str function_name,
+    ty_type_t **candidate_functions, arena_t *arena) {
   pg_assert(resolver != NULL);
-  pg_assert(resolver->types != NULL);
-  pg_assert(candidate_functions_i != NULL);
-  pg_assert(*candidate_functions_i != NULL);
+  pg_assert(candidate_functions != NULL);
+  pg_assert(*candidate_functions != NULL);
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const ty_type_t *const type = &resolver->types[i];
@@ -5503,7 +5466,7 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
       if (!resolver_is_package_imported(resolver, type->package_name))
         continue;
 
-      pg_array_append(*candidate_functions_i, i, arena);
+      pg_array_append(*candidate_functions, type, arena);
     }
   }
 
@@ -5511,21 +5474,15 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
 }
 
 // TODO: Add to string: file:line
-static str resolver_function_to_human_string(const resolver_t *resolver,
-                                             u32 type_i, arena_t *arena) {
-
-  const ty_type_t *const type = &resolver->types[type_i];
-
+static str resolver_function_to_human_string(ty_type_t *type, arena_t *arena) {
   if (!(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR))
-    return ty_type_to_human_string(resolver->types, type_i, arena);
+    return ty_type_to_human_string(type, arena);
 
   const ty_type_method_t *const method = &type->v.method;
 
-  const ty_type_t *const this_class_type =
-      &resolver->types[method->this_class_type_i];
-
   str_builder res = sb_new(
-      method->name.len + this_class_type->this_class_name.len + 1024, arena);
+      method->name.len + method->this_class_type->this_class_name.len + 1024,
+      arena);
 
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
     res = sb_append_c(res, "private ", arena);
@@ -5538,17 +5495,17 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
   }
 
   if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0) {
-    res = sb_append(res, this_class_type->this_class_name, arena);
+    res = sb_append(res, method->this_class_type->this_class_name, arena);
     res = sb_append_c(res, ".", arena);
   }
 
   res = sb_append(res, method->name, arena);
   res = sb_append_c(res, "(", arena);
 
-  const u8 argument_count = pg_array_len(method->argument_types_i);
+  const u8 argument_count = pg_array_len(method->argument_types);
   for (u8 i = 0; i < argument_count; i++) {
-    str argument_type_string = ty_type_to_human_string(
-        resolver->types, method->argument_types_i[i], arena);
+    str argument_type_string =
+        ty_type_to_human_string(method->argument_types[i], arena);
 
     res = sb_append(res, argument_type_string, arena);
 
@@ -5557,14 +5514,13 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
   }
 
   res = sb_append_c(res, ") : ", arena);
-  str return_type_string =
-      ty_type_to_human_string(resolver->types, method->return_type_i, arena);
+  str return_type_string = ty_type_to_human_string(method->return_type, arena);
   res = sb_append(res, return_type_string, arena);
 
   res = sb_append_c(res, " from ", arena);
 
   if (str_is_empty(method->source_file_name)) {
-    res = sb_append(res, this_class_type->this_class_name, arena);
+    res = sb_append(res, method->this_class_type->this_class_name, arena);
   } else {
     res = sb_append(res, method->source_file_name, arena);
   }
@@ -5578,18 +5534,17 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
 }
 
 static void resolver_remove_non_applicable_function_candidates(
-    resolver_t *resolver, u32 *candidate_functions_i,
+    resolver_t *resolver, ty_type_t **candidate_functions,
     const u32 *call_site_argument_types_i, arena_t scratch_arena,
     arena_t *arena) {
 
   u64 i = 0;
-  while (i < pg_array_len(candidate_functions_i)) {
-    const ty_type_t *const candidate_type =
-        &resolver->types[candidate_functions_i[i]];
+  while (i < pg_array_len(candidate_functions)) {
+    const ty_type_t *const candidate_type = candidate_functions[i];
     if (!resolver_is_function_candidate_applicable(
             resolver, call_site_argument_types_i, candidate_type, scratch_arena,
             arena)) {
-      pg_array_swap_remove_at(candidate_functions_i, i);
+      pg_array_swap_remove_at(candidate_functions, i);
     } else {
       i++;
     }
@@ -5606,21 +5561,20 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
     resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
     arena_t scratch_arena, arena_t *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
-  pg_assert(a->v.method.argument_types_i != NULL);
+  pg_assert(a->v.method.argument_types != NULL);
   pg_assert(a->this_class_name.data != NULL);
   pg_assert(a->this_class_name.len > 0);
-  const u8 call_argument_count = pg_array_len(a->v.method.argument_types_i);
+  const u8 call_argument_count = pg_array_len(a->v.method.argument_types);
 
   pg_assert(b->kind == TYPE_METHOD || b->kind == TYPE_CONSTRUCTOR);
-  pg_assert(b->v.method.argument_types_i != NULL);
+  pg_assert(b->v.method.argument_types != NULL);
   pg_assert(b->this_class_name.data != NULL);
   pg_assert(b->this_class_name.len > 0);
-  pg_assert(pg_array_len(b->v.method.argument_types_i) == call_argument_count);
+  pg_assert(pg_array_len(b->v.method.argument_types) == call_argument_count);
 
   for (u64 k = 0; k < call_argument_count; k++) {
-    ty_type_t *argument_a = &resolver->types[a->v.method.argument_types_i[k]];
-    const ty_type_t *argument_b =
-        &resolver->types[b->v.method.argument_types_i[k]];
+    ty_type_t *argument_a = a->v.method.argument_types[k];
+    const ty_type_t *argument_b = b->v.method.argument_types[k];
 
     if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b,
                                      scratch_arena, arena)) {
@@ -5648,14 +5602,11 @@ static u32 resolver_select_most_specific_candidate_function(
       for (u64 j = 0; j < i; j++) {
         const u32 a_index = i;
         const u32 b_index = j;
-        const u32 a_type_i = candidates[a_index];
-        const u32 b_type_i = candidates[b_index];
+        ty_type_t *a = candidates[a_index];
+        ty_type_t *b = candidates[b_index];
 
         if (tombstones[a_index] || tombstones[b_index])
           continue;
-
-        const ty_type_t *const a = &resolver->types[a_type_i];
-        const ty_type_t *const b = &resolver->types[b_type_i];
 
         const type_applicability_t a_b =
             resolver_check_applicability_of_candidate_pair(
@@ -5668,10 +5619,10 @@ static u32 resolver_select_most_specific_candidate_function(
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
         if (cli_log_verbose) {
-          str a_human_type = resolver_function_to_human_string(
-              resolver, a_type_i, &scratch_arena);
-          str b_human_type = resolver_function_to_human_string(
-              resolver, b_type_i, &scratch_arena);
+          str a_human_type =
+              resolver_function_to_human_string(a, &scratch_arena);
+          str b_human_type =
+              resolver_function_to_human_string(b, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", (int)a_human_type.len,
               a_human_type.data, (int)b_human_type.len, b_human_type.data, a_b,
@@ -5716,34 +5667,34 @@ static u32 resolver_select_most_specific_candidate_function(
 // default).
 static bool resolver_resolve_free_function(
     resolver_t *resolver, str method_name,
-    const u32 *call_site_argument_types_i, u32 *picked_method_type_i,
-    u32 **candidate_functions_i, arena_t scratch_arena, arena_t *arena) {
+    const ty_type_t **call_site_argument_types, ty_type_t **picked_method_type,
+    ty_type_t ***candidate_functions, arena_t scratch_arena, arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
-  pg_assert(picked_method_type_i != NULL);
+  pg_assert(picked_method_type != NULL);
 
   resolver_collect_callables_with_name(resolver, method_name,
-                                       candidate_functions_i, arena);
+                                       candidate_functions, arena);
 
-  const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
+  const u64 original_candidates_len = pg_array_len(*candidate_functions);
 
   resolver_remove_non_applicable_function_candidates(
-      resolver, *candidate_functions_i, call_site_argument_types_i,
-      scratch_arena, arena);
+      resolver, *candidate_functions, call_site_argument_types, scratch_arena,
+      arena);
 
-  if (pg_array_len(*candidate_functions_i) == 0) {
+  if (pg_array_len(*candidate_functions) == 0) {
     // Restore the original length to display the possible candidates in the
     // error message.
-    pg_array_header(*candidate_functions_i)->len = original_candidates_len;
+    pg_array_header(*candidate_functions)->len = original_candidates_len;
     return false;
   }
-  if (pg_array_len(*candidate_functions_i) == 1) {
-    *picked_method_type_i = (*candidate_functions_i)[0];
+  if (pg_array_len(*candidate_functions) == 1) {
+    *picked_method_type = (*candidate_functions)[0];
     return true;
   }
 
-  *picked_method_type_i = resolver_select_most_specific_candidate_function(
-      resolver, *candidate_functions_i, scratch_arena, arena);
+  *picked_method_type = resolver_select_most_specific_candidate_function(
+      resolver, *candidate_functions, scratch_arena, arena);
 
   return true;
 }
@@ -5752,7 +5703,6 @@ static bool resolver_resolve_free_function(
 static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
                            u32 *result_i) {
   pg_assert(resolver != NULL);
-  pg_assert(resolver->types != NULL);
   pg_assert(lhs_i < pg_array_len(resolver->types));
   pg_assert(rhs_i < pg_array_len(resolver->types));
   pg_assert(result_i != NULL);
@@ -5760,7 +5710,7 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   const ty_type_t *const lhs_type = &resolver->types[lhs_i];
   const ty_type_t *const rhs_type = &resolver->types[rhs_i];
 
-  if (resolver_are_types_equal(resolver, lhs_type, rhs_type)) {
+  if (resolver_type_eq(resolver, lhs_type, rhs_type)) {
     *result_i = lhs_i;
     return true;
   }
@@ -5829,10 +5779,8 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
   ut_fwrite_indent(file, indent);
 
-  const char *const type_kind =
-      ty_type_kind_string(resolver->types, node->type_i);
-  str human_type =
-      ty_type_to_human_string(resolver->types, node->type_i, arena);
+  const char *const type_kind = ty_type_kind_string(node->type);
+  str human_type = ty_type_to_human_string(node->type, arena);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
@@ -5859,8 +5807,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
     break;
   case AST_KIND_CALL: {
 
-    human_type =
-        resolver_function_to_human_string(resolver, node->type_i, arena);
+    human_type = resolver_function_to_human_string(node->type, arena);
     LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
         node - resolver->parser->nodes, (int)kind_string.len, kind_string.data,
         (int)token_string.len, token_string.data, (int)human_type.len,
@@ -5886,18 +5833,6 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   }
 }
 
-#define TYPE_ANY_I ((u32)0)
-#define TYPE_UNIT_I ((u32)1)
-#define TYPE_BOOLEAN_I ((u32)2)
-#define TYPE_BYTE_I ((u32)3)
-#define TYPE_CHAR_I ((u32)4)
-#define TYPE_DOUBLE_I ((u32)5)
-#define TYPE_FLOAT_I ((u32)6)
-#define TYPE_INT_I ((u32)7)
-#define TYPE_LONG_I ((u32)8)
-#define TYPE_SHORT_I ((u32)9)
-#define TYPE_STRING_I ((u32)10)
-
 static bool type_fqn_equal_to_package_and_name(str a_fqn, str b_package_name,
                                                str b_class_name,
                                                arena_t scratch_arena) {
@@ -5916,12 +5851,12 @@ static bool type_fqn_equal_to_package_and_name(str a_fqn, str b_package_name,
 }
 
 static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
-                                                  u32 *type_i,
+                                                  ty_type_t **type,
                                                   arena_t scratch_arena,
                                                   arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(!str_is_empty(fqn));
-  pg_assert(type_i != NULL);
+  pg_assert(type != NULL);
   pg_assert(arena != NULL);
 
   // The JVM uses `/` but Java and Kotlin use `.` as separator.
@@ -5929,6 +5864,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 
   // TODO: Flag types coming from java as nullable.
 
+  *type = arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
   if (str_eq_c(fqn, "kotlin.Any")) {
     *type_i = TYPE_ANY_I;
     return true;
@@ -6035,11 +5971,14 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 
       pg_assert(str_eq(fqn, class_file.class_name));
 
-      ty_type_t this_type = {.kind = TYPE_INSTANCE};
-      type_init_package_and_name(class_file.class_name, &this_type.package_name,
-                                 &this_type.this_class_name, arena);
+      ty_type_t *this_type =
+          arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
+      this_type->kind = TYPE_INSTANCE;
+      type_init_package_and_name(class_file.class_name,
+                                 &this_type->package_name,
+                                 &this_type->this_class_name, arena);
 
-      *type_i = resolver_add_type(resolver, &this_type, arena);
+      resolver_lower_type(this_type);
 
       return true;
     }
@@ -6077,7 +6016,7 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
                                           arena_t *arena) {
 
   // Already done?
-  if (type->super_type_i > 0)
+  if (type->super_type > 0)
     return true;
 
   if (str_eq_c(type->this_class_name, "java/lang/Object"))
@@ -6087,13 +6026,13 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
   // for optimization purposes.
   if (str_is_empty(type->super_class_name)) {
     return resolver_resolve_fully_qualified_name(
-        resolver, str_from_c("java.lang.Object"), &type->super_type_i,
+        resolver, str_from_c("java.lang.Object"), &type->super_type,
         scratch_arena, arena);
   }
 
   return resolver_resolve_fully_qualified_name(resolver, type->super_class_name,
-                                               &type->super_type_i,
-                                               scratch_arena, arena);
+                                               &type->super_type, scratch_arena,
+                                               arena);
 }
 
 static void resolver_load_standard_types(resolver_t *resolver, str java_home,
@@ -6102,23 +6041,6 @@ static void resolver_load_standard_types(resolver_t *resolver, str java_home,
   pg_assert(resolver != NULL);
   pg_assert(!str_is_empty(java_home));
   pg_assert(arena != NULL);
-
-  const ty_type_t known_types[] = {
-      [TYPE_ANY_I] = {.kind = TYPE_ANY},
-      [TYPE_BOOLEAN_I] = {.kind = TYPE_BOOLEAN},
-      [TYPE_BYTE_I] = {.kind = TYPE_BYTE},
-      [TYPE_CHAR_I] = {.kind = TYPE_CHAR},
-      [TYPE_DOUBLE_I] = {.kind = TYPE_DOUBLE},
-      [TYPE_FLOAT_I] = {.kind = TYPE_FLOAT},
-      [TYPE_INT_I] = {.kind = TYPE_INT},
-      [TYPE_LONG_I] = {.kind = TYPE_LONG},
-      [TYPE_SHORT_I] = {.kind = TYPE_SHORT},
-      [TYPE_STRING_I] = {.kind = TYPE_STRING},
-      [TYPE_UNIT_I] = {.kind = TYPE_UNIT},
-  };
-
-  for (u64 i = 0; i < sizeof(known_types) / sizeof(known_types[0]); i++)
-    pg_array_append(resolver->types, known_types[i], arena);
 
   str relative_jmod_path = str_from_c("/jmods/java.base.jmod");
   str_builder path = sb_new(java_home.len + relative_jmod_path.len, arena);
@@ -6315,25 +6237,25 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     u32 picked_method_type_i = 0;
     {
-      u32 *candidate_functions_i = NULL;
-      pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
+      u32 *candidate_functions = NULL;
+      pg_array_init_reserve(candidate_functions, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
               resolver, name, call_site_argument_types_i, &picked_method_type_i,
-              &candidate_functions_i, tmp_arena, arena)) {
+              &candidate_functions, tmp_arena, arena)) {
 
         str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "failed to find matching function", arena);
 
-        if (pg_array_len(candidate_functions_i) == 0) {
+        if (pg_array_len(candidate_functions) == 0) {
           error = sb_append_c(
               error, ", could not find any function with this name: ", arena);
           error = sb_append(error, name, arena);
         } else {
           error = sb_append_c(error, ", possible candidates: ", arena);
 
-          for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
-            const u32 candidate_type_i = candidate_functions_i[i];
+          for (u64 i = 0; i < pg_array_len(candidate_functions); i++) {
+            const u32 candidate_type_i = candidate_functions[i];
 
             error = sb_append_c(error, "\n  ", arena);
             error = sb_append(error,
@@ -6355,7 +6277,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     node->type_i = picked_method_type_i;
 
-    return picked_method_type->v.method.return_type_i;
+    return picked_method_type->v.method.return_type;
   }
   case AST_KIND_NUMBER: {
     u8 flag = 0;
@@ -6758,10 +6680,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     pg_assert(function_type->kind == TYPE_METHOD ||
               function_type->kind == TYPE_CONSTRUCTOR);
-    const u32 return_type_i = function_type->v.method.return_type_i;
+    const u32 return_type_i = function_type->v.method.return_type;
 
-    if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
-                                  &resolver->types[return_type_i])) {
+    if (!resolver_type_eq(resolver, &resolver->types[node->type_i],
+                          &resolver->types[return_type_i])) {
       str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible return type in function `", arena);
@@ -6816,46 +6738,46 @@ static void resolver_collect_user_defined_function_signatures(
 
     const lex_token_t name_token =
         resolver->parser->lexer->tokens[node->main_token_i];
-    ty_type_t type = {
-        .kind = TYPE_METHOD,
-        .package_name = resolver->parser->current_package,
-        .this_class_name = resolver->this_class_name,
-        .v = {.method =
-                  {
-                      .return_type_i = return_type_i,
-                      .source_file_name = resolver->parser->lexer->file_path,
-                      .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
-                  }},
-    };
-    u32 column = 0;
-    u32 line = 0;
-    par_find_token_position(resolver->parser, name_token, &line, &column,
-                            &type.v.method.name);
-    pg_assert(line <= UINT16_MAX);
-    type.v.method.source_line = (u16)line;
+    node->type = arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
+    node->type->kind = TYPE_METHOD;
+    node->type->package_name = resolver->parser->current_package;
+    node->type->this_class_name = resolver->this_class_name;
+    node->type->v = {
+        .method = {
+            .return_type = return_type_i,
+            .source_file_name = resolver->parser->lexer->file_path,
+            .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+        }},
+  };
+  u32 column = 0;
+  u32 line = 0;
+  par_find_token_position(resolver->parser, name_token, &line, &column,
+                          &type.v.method.name);
+  pg_assert(line <= UINT16_MAX);
+  type.v.method.source_line = (u16)line;
 
-    if (node->lhs > 0) {
-      const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
-      pg_assert(lhs->kind == AST_KIND_LIST);
+  if (node->lhs > 0) {
+    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    pg_assert(lhs->kind == AST_KIND_LIST);
 
-      pg_array_init_reserve(type.v.method.argument_types_i,
-                            pg_array_len(lhs->nodes), arena);
-      for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
-        const u32 node_i = lhs->nodes[i];
-        const u32 type_i = resolver->parser->nodes[node_i].type_i;
-        pg_array_append(type.v.method.argument_types_i, type_i, arena);
-      }
+    pg_array_init_reserve(type.v.method.argument_types,
+                          pg_array_len(lhs->nodes), arena);
+    for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
+      const u32 node_i = lhs->nodes[i];
+      const u32 type_i = resolver->parser->nodes[node_i].type_i;
+      pg_array_append(type.v.method.argument_types, type_i, arena);
     }
-
-    node->type_i = resolver_add_type(resolver, &type, arena);
-
-    // NOTE: Skip function body by nature.
-    // But: Once we allow return type inference based on body, we need to also
-    // inspect the body.
-
-    resolver->current_function_i = 0;
-    ty_end_scope(resolver);
   }
+
+  resolver_lower_type(&type);
+
+  // NOTE: Skip function body by nature.
+  // But: Once we allow return type inference based on body, we need to also
+  // inspect the body.
+
+  resolver->current_function_i = 0;
+  ty_end_scope(resolver);
+}
 }
 
 // --------------------------------- Code generation
@@ -7259,11 +7181,11 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_VIRTUAL, arena);
   cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
-  for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types); i++)
     cg_frame_stack_pop(gen->frame);
 
   const ty_type_t *const return_type =
-      &gen->resolver->types[method_type->return_type_i];
+      &gen->resolver->types[method_type->return_type];
 
   if (return_type->kind == TYPE_UNIT)
     return;
@@ -7288,11 +7210,11 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_STATIC, arena);
   cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
-  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < pg_array_len(method_type->argument_types); i++)
     cg_frame_stack_pop(gen->frame);
 
   const ty_type_t *const return_type =
-      &gen->resolver->types[method_type->return_type_i];
+      &gen->resolver->types[method_type->return_type];
 
   if (return_type->kind == TYPE_UNIT)
     return;
@@ -7317,11 +7239,11 @@ static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
   cf_code_array_push_u8(&gen->code->code, BYTECODE_INVOKE_SPECIAL, arena);
   cf_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
-  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < pg_array_len(method_type->argument_types); i++)
     cg_frame_stack_pop(gen->frame);
 
   const ty_type_t *const return_type =
-      &gen->resolver->types[method_type->return_type_i];
+      &gen->resolver->types[method_type->return_type];
 
   pg_assert(return_type->kind != TYPE_UNIT);
 
@@ -7345,10 +7267,12 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
   str descriptor = cf_constant_array_get_as_string(
       &class_file->constant_pool, name_and_type->v.name_and_type.descriptor);
 
-  ty_type_t new_type = {0};
-  cf_parse_descriptor(gen->resolver, descriptor, &new_type, arena);
+  ty_type_t *new_type =
+      arena_alloc(arena, sizeof(ty_type_t), _Alignof(ty_type_t), 1);
+  cf_parse_descriptor(gen->resolver, descriptor, new_type, arena);
 
-  return resolver_add_type(gen->resolver, &new_type, arena);
+  resolver_lower_type(gen->resolver, new_type, arena);
+  return new_type;
 }
 
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
@@ -9143,7 +9067,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    const ty_type_method_t target_method_type = {.return_type_i = TYPE_UNIT_I};
+    const ty_type_method_t target_method_type = {.return_type = TYPE_UNIT_I};
 
     cf_attribute_code_t code = {0};
     pg_array_init_reserve(code.code, 4, arena);
@@ -9165,7 +9089,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       const ty_type_t source_method_argument_types = {
           .kind = TYPE_ARRAY,
           .this_class_name = str_from_c("FIXME"),
-          .v = {.array_type_i = string_type_i},
+          .v = {.array_type = string_type_i},
       };
       pg_array_append(gen->resolver->types, source_method_argument_types,
                       arena);
