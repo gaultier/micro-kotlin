@@ -5090,14 +5090,16 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
 
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, type_handle_t this_class_type_handle,
-    const cf_class_file_t *class_file, arena_t *arena) {
+    const cf_class_file_t *class_file,  arena_t *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  bool has_at_least_one_inline_only_method = false;
   const ty_type_t *const this_class_type =
       type_get(this_class_type_handle, *arena);
+
+  // Actually cloned if there is at least one inline only method.
+  cf_constant_array_t *constant_pool_clone = NULL;
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5132,7 +5134,11 @@ static void resolver_load_methods_from_class_file(
       type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
       type.flags |= TYPE_FLAG_INLINE_ONLY;
 
-      has_at_least_one_inline_only_method = true;
+      constant_pool_clone =
+          constant_pool_clone == NULL
+              ? cf_constant_array_clone(&class_file->constant_pool, arena)
+              : constant_pool_clone;
+      type.v.method.constant_pool = constant_pool_clone;
 
       // Clone code.
       // TODO: Clone exceptions, stack map frames, etc?
@@ -5155,18 +5161,6 @@ static void resolver_load_methods_from_class_file(
       LOG("Loaded method %s: access_flags=%u type=%.*s",
           ty_type_kind_string(type_handle, tmp_arena), method->access_flags,
           (int)human_type.len, human_type.data);
-    }
-  }
-
-  if (has_at_least_one_inline_only_method) {
-    // Need each inline-only method to point to a clone of the constant pool to
-    // be able to fix-up the referred to constants.
-    cf_constant_array_t *constant_pool_clone =
-        cf_constant_array_clone(&class_file->constant_pool, arena);
-    for (u64 i = initial_types_count; i < pg_array_len(resolver->types); i++) {
-      ty_type_t *const type = type_get(i, arena);
-      if (type->kind == TYPE_METHOD && (type->flags & TYPE_FLAG_INLINE_ONLY))
-        type->v.method.constant_pool = constant_pool_clone;
     }
   }
 }
