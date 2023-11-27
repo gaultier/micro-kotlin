@@ -25,7 +25,7 @@ Str *class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
   Str *entries = NULL;
   pg_array_init_reserve(entries, 16, arena);
 
-  str_split_result_t split = {.right = class_path};
+  Str_split_result split = {.right = class_path};
   do {
     split = str_split(split.right, ':');
     if (!str_is_empty(split.left))
@@ -437,7 +437,7 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
 static void type_init_package_and_name(Str fully_qualified_jvm_name,
                                        Str *package_name, Str *name,
                                        Arena *arena) {
-  str_split_result_t slash_rplit_res =
+  Str_split_result slash_rplit_res =
       str_rsplit(fully_qualified_jvm_name, '/');
 
   // No package component.
@@ -1063,7 +1063,7 @@ static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
 
   case 'L': {
     remaining = str_advance(remaining, 1);
-    str_split_result_t semicolon_split = str_split(remaining, ';');
+    Str_split_result semicolon_split = str_split(remaining, ';');
     pg_assert(semicolon_split.found);
     Str fqn = semicolon_split.left;
 
@@ -2894,7 +2894,7 @@ static Str cf_make_class_file_path_kt(Str source_file_name, Arena *arena) {
   pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
 
-  str_split_result_t file_extension_split = str_rsplit(source_file_name, '.');
+  Str_split_result file_extension_split = str_rsplit(source_file_name, '.');
   pg_assert(file_extension_split.found);
   pg_assert(str_eq_c(file_extension_split.right, "kt"));
 
@@ -2904,7 +2904,7 @@ static Str cf_make_class_file_path_kt(Str source_file_name, Arena *arena) {
 
   // Capitalize
   {
-    str_split_result_t last_path_component_split =
+    Str_split_result last_path_component_split =
         str_rsplit(source_file_name, '/');
 
     u64 pos = last_path_component_split.found
@@ -5424,7 +5424,7 @@ static bool cf_read_jmod_file(resolver_t *resolver, Str path,
   pg_assert(arena != NULL);
 
   char *path_cstr = str_to_c(path, &scratch_arena);
-  ut_read_result_t read_res =
+  Read_result read_res =
       // IMPORTANT: We store the content of JMOD files in the *scratch* arena,
       // not the *main* arena. That's because most of the stuff in there is
       // irrelevant. We pick afterwards just the few bits we want to retain and
@@ -5456,7 +5456,7 @@ static bool cf_read_jar_file(resolver_t *resolver, Str path,
   pg_assert(arena != NULL);
 
   char *path_cstr = str_to_c(path, &scratch_arena);
-  ut_read_result_t read_res =
+  Read_result read_res =
       ut_read_all_from_file_path(path_cstr, &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
@@ -5989,7 +5989,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
   // E.g.: `/usr/share/java/kotlin-stdlib.jar` -> `/usr/share/java/Fqn.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
     Str entry = resolver->class_path_entries[i];
-    str_split_result_t entry_last_slash_split = str_rsplit(entry, '/');
+    Str_split_result entry_last_slash_split = str_rsplit(entry, '/');
     Str parent = entry_last_slash_split.left;
 
     Str final_extension = str_from_c(".class");
@@ -6022,7 +6022,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
       // TODO: check if we can read the file content into `scratch_arena`
       char *tentative_class_file_path_cstr =
           str_to_c(tentative_class_file_path, &scratch_arena);
-      ut_read_result_t read_res = ut_read_all_from_file_path(
+      Read_result read_res = ut_read_all_from_file_path(
           tentative_class_file_path_cstr, &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
@@ -8992,10 +8992,10 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
 
 static Str cg_make_class_name_from_path(Str path, Arena *arena) {
 
-  str_split_result_t slash_split = str_rsplit(path, '/');
+  Str_split_result slash_split = str_rsplit(path, '/');
   pg_assert(!str_is_empty(slash_split.right));
 
-  str_split_result_t dot_split = str_rsplit(slash_split.right, '.');
+  Str_split_result dot_split = str_rsplit(slash_split.right, '.');
   pg_assert(dot_split.found);
   pg_assert(!str_is_empty(dot_split.left));
 

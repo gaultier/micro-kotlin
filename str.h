@@ -143,17 +143,17 @@ typedef struct {
   u64 found_pos;
   bool found;
   pg_pad(7);
-} str_split_result_t;
+} Str_split_result;
 
-__attribute__((warn_unused_result)) static str_split_result_t
+__attribute__((warn_unused_result)) static Str_split_result
 str_split(Str haystack, u8 needle) {
   u8 *at = memchr(haystack.data, needle, haystack.len);
   if (at == NULL)
-    return (str_split_result_t){.left = haystack, .right = haystack};
+    return (Str_split_result){.left = haystack, .right = haystack};
 
   u64 found_pos = at - haystack.data;
 
-  return (str_split_result_t){
+  return (Str_split_result){
       .left = (Str){.data = haystack.data, .len = found_pos},
       .right = (Str){.data = at + 1, .len = haystack.len - found_pos - 1},
       .found_pos = found_pos,
@@ -161,15 +161,15 @@ str_split(Str haystack, u8 needle) {
   };
 }
 
-__attribute__((warn_unused_result)) static str_split_result_t
+__attribute__((warn_unused_result)) static Str_split_result
 str_rsplit(Str haystack, u8 needle) {
   u8 *at = ut_memrchr(haystack.data, needle, haystack.len);
   if (at == NULL)
-    return (str_split_result_t){.left = haystack, .right = haystack};
+    return (Str_split_result){.left = haystack, .right = haystack};
 
   u64 found_pos = at - haystack.data;
 
-  return (str_split_result_t){
+  return (Str_split_result){
       .left = (Str){.data = haystack.data, .len = found_pos},
       .right = (Str){.data = at + 1, .len = haystack.len - found_pos - 1},
       .found_pos = found_pos,
@@ -306,9 +306,9 @@ typedef struct {
   Str content;
   int error;
   pg_pad(4);
-} ut_read_result_t;
+} Read_result;
 
-__attribute__((warn_unused_result)) static ut_read_result_t
+__attribute__((warn_unused_result)) static Read_result
 ut_read_all_from_fd(int fd, Str_builder sb) {
   pg_assert(fd > 0);
 
@@ -317,14 +317,14 @@ ut_read_all_from_fd(int fd, Str_builder sb) {
 
     const i64 read_bytes = read(fd, sb_end_c(sb), sb_space(sb));
     if (read_bytes == -1)
-      return (ut_read_result_t){.error = errno};
+      return (Read_result){.error = errno};
     if (read_bytes == 0)
-      return (ut_read_result_t){.error = EINVAL}; // TODO: retry?
+      return (Read_result){.error = EINVAL}; // TODO: retry?
 
     sb = sb_assume_appended_n(sb, read_bytes);
     pg_assert(sb.len <= sb.cap);
   }
-  return (ut_read_result_t){.content = sb_build(sb)};
+  return (Read_result){.content = sb_build(sb)};
 }
 
 __attribute__((warn_unused_result)) static char *str_to_c(Str s,
@@ -340,11 +340,11 @@ __attribute__((warn_unused_result)) static char *str_to_c(Str s,
   return c_str;
 }
 
-__attribute__((warn_unused_result)) static ut_read_result_t
+__attribute__((warn_unused_result)) static Read_result
 ut_read_all_from_file_path(char *path, Arena *arena) {
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
-    return (ut_read_result_t){.error = errno};
+    return (Read_result){.error = errno};
   }
 
   struct stat st = {0};
@@ -352,15 +352,15 @@ ut_read_all_from_file_path(char *path, Arena *arena) {
     fprintf(stderr, "Failed to get the file size %s: %s\n", path,
             strerror(errno));
     close(fd);
-    return (ut_read_result_t){.error = errno};
+    return (Read_result){.error = errno};
   }
 
   if (st.st_size == 0) {
     close(fd);
-    return (ut_read_result_t){0};
+    return (Read_result){0};
   }
 
-  ut_read_result_t res = ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+  Read_result res = ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
   close(fd);
   return res;
 }
