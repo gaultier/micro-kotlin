@@ -370,10 +370,10 @@ ut_read_all_from_file_path(char *path, Arena *arena) {
 typedef struct {
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
   u64 *call_stack;
-} mem_record;
+} Mem_record;
 
 struct Mem_profile {
-  mem_record *records;
+  Mem_record *records;
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
   Arena arena;
 };
@@ -417,7 +417,7 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
 
   // Upsert the record.
   for (u64 i = 0; i < pg_array_len(profile->records); i++) {
-    mem_record *r = &profile->records[i];
+    Mem_record *r = &profile->records[i];
 
     if (pg_array_len(r->call_stack) == call_stack_len &&
         memcmp(r->call_stack, call_stack, call_stack_len * sizeof(u64)) == 0) {
@@ -431,7 +431,7 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
   }
 
   // Not found, insert a new record.
-  mem_record record = {
+  Mem_record record = {
       .alloc_objects = objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
@@ -460,7 +460,7 @@ static void mem_profile_write(Mem_profile *profile, FILE *out) {
           profile->alloc_objects, profile->alloc_space);
 
   for (u64 i = 0; i < pg_array_len(profile->records); i++) {
-    mem_record r = profile->records[i];
+    Mem_record r = profile->records[i];
 
     fprintf(out, "%lu: %lu [%lu: %lu] @ ", r.in_use_objects, r.in_use_space,
             r.alloc_objects, r.alloc_space);
