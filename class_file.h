@@ -19,10 +19,10 @@
 #include <zlib.h>
 #endif
 
-str *class_path_string_to_class_path_entries(str class_path, arena_t *arena) {
+Str *class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
   pg_assert(!str_is_empty(class_path));
 
-  str *entries = NULL;
+  Str *entries = NULL;
   pg_array_init_reserve(entries, 16, arena);
 
   str_split_result_t split = {.right = class_path};
@@ -36,7 +36,7 @@ str *class_path_string_to_class_path_entries(str class_path, arena_t *arena) {
   // duplicate it).
   {
     bool found = false;
-    str needle = str_from_c(".");
+    Str needle = str_from_c(".");
 
     for (u64 i = 0; i < pg_array_len(entries); i++) {
       if (str_eq(entries[i], needle)) {
@@ -119,7 +119,7 @@ typedef enum __attribute__((packed)) {
 typedef struct {
   u32 scope_depth;
   u32 var_definition_node_i;
-  str name;
+  Str name;
 } ty_variable_t;
 
 typedef enum __attribute__((packed)) {
@@ -199,8 +199,8 @@ struct cf_constant_array_t;
 typedef struct cf_constant_array_t cf_constant_array_t;
 
 typedef struct {
-  str name;
-  str source_file_name;
+  Str name;
+  Str source_file_name;
   u8 *code;                           // In case of InlineOnly.
   cf_constant_array_t *constant_pool; // In case of InlineOnly.
   u32 *argument_types_i;
@@ -217,9 +217,9 @@ typedef enum {
 } ty_type_flag_t;
 
 struct ty_type_t {
-  str this_class_name;
-  str super_class_name;
-  str package_name;
+  Str this_class_name;
+  Str super_class_name;
+  Str package_name;
   union {
     ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;          // TYPE_ARRAY_REFERENCE
@@ -264,7 +264,7 @@ typedef enum __attribute__((packed)) {
   AST_KIND_MAX,
 } par_ast_node_kind_t;
 
-static str par_ast_node_kind_to_string[AST_KIND_MAX] = {
+static Str par_ast_node_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = str_from_c_literal("NONE"),
     [AST_KIND_NUMBER] = str_from_c_literal("NUMBER"),
     [AST_KIND_BOOL] = str_from_c_literal("BOOL"),
@@ -355,22 +355,22 @@ typedef struct {
 } lex_token_t;
 
 typedef struct {
-  str file_path;
+  Str file_path;
   lex_token_t *tokens;
   u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
 } lex_lexer_t;
 
 typedef struct {
-  str super_class_name;
+  Str super_class_name;
   u32 this_class_type_i;
   pg_pad(4);
 } resolver_super_class_to_resolve_t;
 
 typedef struct {
   // FIXME: Use str_t
-  str buf;
+  Str buf;
   lex_lexer_t *lexer;
-  str current_package;
+  Str current_package;
   par_ast_node_t *nodes;
   u32 current_function_i;
   u32 buf_len;
@@ -381,9 +381,9 @@ typedef struct {
 
 typedef struct {
   parser_t *parser;
-  str this_class_name;
-  str *class_path_entries;
-  str *imported_package_names;
+  Str this_class_name;
+  Str *class_path_entries;
+  Str *imported_package_names;
   u64 class_file_loaded_count;
   ty_variable_t *variables;
   ty_type_t *types;
@@ -393,11 +393,11 @@ typedef struct {
   pg_pad(4);
 } resolver_t;
 
-static str cg_make_class_name_from_path(str path, arena_t *arena);
+static Str cg_make_class_name_from_path(Str path, Arena *arena);
 
 static void resolver_init(resolver_t *resolver, parser_t *parser,
-                          str *class_path_entries, str class_file_path,
-                          arena_t *arena) {
+                          Str *class_path_entries, Str class_file_path,
+                          Arena *arena) {
 
   resolver->parser = parser;
   resolver->class_path_entries = class_path_entries;
@@ -434,9 +434,9 @@ static void resolver_init(resolver_t *resolver, parser_t *parser,
                   arena);
 }
 
-static void type_init_package_and_name(str fully_qualified_jvm_name,
-                                       str *package_name, str *name,
-                                       arena_t *arena) {
+static void type_init_package_and_name(Str fully_qualified_jvm_name,
+                                       Str *package_name, Str *name,
+                                       Arena *arena) {
   str_split_result_t slash_rplit_res =
       str_rsplit(fully_qualified_jvm_name, '/');
 
@@ -446,7 +446,7 @@ static void type_init_package_and_name(str fully_qualified_jvm_name,
     return;
   }
 
-  str_builder package_name_builder = sb_clone(slash_rplit_res.left, arena);
+  Str_builder package_name_builder = sb_clone(slash_rplit_res.left, arena);
   package_name_builder =
       sb_replace_element_starting_at(package_name_builder, 0, '/', '.');
   *package_name = sb_build(package_name_builder);
@@ -560,12 +560,12 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
 }
 
 static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
-                                          arena_t scratch_arena,
-                                          arena_t *arena);
+                                          Arena scratch_arena,
+                                          Arena *arena);
 
 static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
                                         const ty_type_t *b,
-                                        arena_t scratch_arena, arena_t *arena) {
+                                        Arena scratch_arena, Arena *arena) {
   // `A <: A` always.
   if (resolver_are_types_equal(resolver, a, b))
     return true;
@@ -616,8 +616,8 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
 
 static bool resolver_is_function_candidate_applicable(
     resolver_t *resolver, const u32 *call_site_argument_types_i,
-    const ty_type_t *function_definition_type, arena_t scratch_arena,
-    arena_t *arena) {
+    const ty_type_t *function_definition_type, Arena scratch_arena,
+    Arena *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
   const ty_type_method_t *definition = &function_definition_type->v.method;
@@ -654,7 +654,7 @@ static bool resolver_is_function_candidate_applicable(
 }
 
 static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
-                             arena_t *arena);
+                             Arena *arena);
 
 static u16
 cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
@@ -703,7 +703,7 @@ cg_type_to_verification_info(const ty_type_t *type) {
 
 static void cg_frame_stack_push(cg_frame_t *frame,
                                 cf_verification_info_t verification_info,
-                                arena_t *arena) {
+                                Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
@@ -729,13 +729,13 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
   frame->stack_physical_count -= 1;
 }
 
-static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena);
+static cg_frame_t *cg_frame_clone(const cg_frame_t *src, Arena *arena);
 
-static void cf_code_array_push_u8(u8 **array, u8 x, arena_t *arena) {
+static void cf_code_array_push_u8(u8 **array, u8 x, Arena *arena) {
   pg_array_append(*array, x, arena);
 }
 
-static void cf_code_array_push_u16(u8 **array, u16 x, arena_t *arena) {
+static void cf_code_array_push_u16(u8 **array, u16 x, Arena *arena) {
   cf_code_array_push_u8(array, (u8)((x & 0xff00) >> 8), arena);
   cf_code_array_push_u8(array, (u8)(x & 0x00ff), arena);
 }
@@ -765,7 +765,7 @@ typedef enum __attribute__((packed)) {
 typedef struct {
   union {
     u64 number;        // CONSTANT_POOL_KIND_INT
-    str s;             // CONSTANT_POOL_KIND_UTF8
+    Str s;             // CONSTANT_POOL_KIND_UTF8
     u16 string_utf8_i; // CONSTANT_POOL_KIND_STRING
     struct cf_constant_method_ref_t {
       u16 class;
@@ -817,7 +817,7 @@ struct cf_constant_array_t {
   cf_constant_t *values;
 };
 
-static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
+static cf_constant_array_t cf_constant_array_make(u64 cap, Arena *arena) {
   pg_assert(arena != NULL);
 
   return (cf_constant_array_t){
@@ -829,7 +829,7 @@ static cf_constant_array_t cf_constant_array_make(u64 cap, arena_t *arena) {
 }
 
 static u16 cf_constant_array_push(cf_constant_array_t *array,
-                                  const cf_constant_t *x, arena_t *arena) {
+                                  const cf_constant_t *x, Arena *arena) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -857,7 +857,7 @@ static u16 cf_constant_array_push(cf_constant_array_t *array,
   return index;
 }
 
-static void cg_frame_init(cg_frame_t *frame, arena_t *arena) {
+static void cg_frame_init(cg_frame_t *frame, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
@@ -865,7 +865,7 @@ static void cg_frame_init(cg_frame_t *frame, arena_t *arena) {
   pg_array_init_reserve(frame->stack, 256, arena);
 }
 
-static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
+static cg_frame_t *cg_frame_clone(const cg_frame_t *src, Arena *arena) {
   pg_assert(src != NULL);
   pg_assert(src->stack != NULL);
   pg_assert(pg_array_len(src->stack) <= UINT16_MAX);
@@ -896,7 +896,7 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, arena_t *arena) {
 
 static cf_constant_array_t *
 cf_constant_array_clone(const cf_constant_array_t *constant_pool,
-                        arena_t *arena) {
+                        Arena *arena) {
   cf_constant_array_t *res = arena_alloc(arena, sizeof(cf_constant_array_t),
                                          _Alignof(cf_constant_array_t), 1);
   res->cap = res->len = constant_pool->len;
@@ -926,9 +926,9 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-static str_builder cf_fill_descriptor_string(const ty_type_t *types,
-                                             str_builder sb, u32 type_i,
-                                             arena_t *arena) {
+static Str_builder cf_fill_descriptor_string(const ty_type_t *types,
+                                             Str_builder sb, u32 type_i,
+                                             Arena *arena) {
   pg_assert(types != NULL);
   pg_assert(type_i < pg_array_len(types));
 
@@ -960,7 +960,7 @@ static str_builder cf_fill_descriptor_string(const ty_type_t *types,
     return sb_append_c(sb, "Ljava/lang/String;", arena);
   }
   case TYPE_INSTANCE: {
-    str java_class_name = type->this_class_name;
+    Str java_class_name = type->this_class_name;
 
     sb = sb_append_char(sb, 'L', arena);
     sb = sb_append(sb, java_class_name, arena);
@@ -996,16 +996,16 @@ static str_builder cf_fill_descriptor_string(const ty_type_t *types,
   }
 }
 
-static str cf_parse_descriptor(resolver_t *resolver, str descriptor,
-                               ty_type_t *type, arena_t *arena) {
+static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
+                               ty_type_t *type, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(type != NULL);
   pg_assert(arena != NULL);
 
   if (str_is_empty(descriptor))
-    return (str){0};
+    return (Str){0};
 
-  str remaining = descriptor;
+  Str remaining = descriptor;
 
   switch (remaining.data[0]) {
   case 'V': {
@@ -1065,7 +1065,7 @@ static str cf_parse_descriptor(resolver_t *resolver, str descriptor,
     remaining = str_advance(remaining, 1);
     str_split_result_t semicolon_split = str_split(remaining, ';');
     pg_assert(semicolon_split.found);
-    str fqn = semicolon_split.left;
+    Str fqn = semicolon_split.left;
 
     if (str_eq_c(type->this_class_name, "java/lang/String")) {
       type->kind = TYPE_STRING;
@@ -1082,7 +1082,7 @@ static str cf_parse_descriptor(resolver_t *resolver, str descriptor,
     type->kind = TYPE_ARRAY;
     ty_type_t item_type = {0};
 
-    str descriptor_remaining = {
+    Str descriptor_remaining = {
         .data = remaining.data + 1,
         .len = remaining.len - 1,
     };
@@ -1251,9 +1251,9 @@ const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
 struct cf_class_file_t {
-  str archive_file_path;
-  str class_file_path;
-  str class_name;
+  Str archive_file_path;
+  Str class_file_path;
+  Str class_name;
   u16 minor_version;
   u16 major_version;
   u16 access_flags;
@@ -1308,7 +1308,7 @@ static void file_write_be_u64(FILE *file, u64 x) {
   fwrite(x_be, sizeof(x_be), 1, file);
 }
 
-static u16 buf_read_be_u16(str buf, u8 **current) {
+static u16 buf_read_be_u16(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + sizeof(u16) <= buf.data + buf.len);
@@ -1319,7 +1319,7 @@ static u16 buf_read_be_u16(str buf, u8 **current) {
   return x;
 }
 
-static u16 buf_read_le_u16(str buf, u8 **current) {
+static u16 buf_read_le_u16(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + sizeof(u16) <= buf.data + buf.len);
@@ -1330,7 +1330,7 @@ static u16 buf_read_le_u16(str buf, u8 **current) {
   return x;
 }
 
-static u32 buf_read_be_u32(str buf, u8 **current) {
+static u32 buf_read_be_u32(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + sizeof(u32) <= buf.data + buf.len);
@@ -1342,7 +1342,7 @@ static u32 buf_read_be_u32(str buf, u8 **current) {
   return x;
 }
 
-static u32 buf_read_le_u32(str buf, u8 **current) {
+static u32 buf_read_le_u32(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + sizeof(u32) <= buf.data + buf.len);
@@ -1354,18 +1354,18 @@ static u32 buf_read_le_u32(str buf, u8 **current) {
   return x;
 }
 
-static str buf_read_n_u8(str buf, u64 n, u8 **current) {
+static Str buf_read_n_u8(Str buf, u64 n, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + n <= buf.data + buf.len);
 
-  str res = {.data = *current, .len = n};
+  Str res = {.data = *current, .len = n};
   *current += n;
 
   return res;
 }
 
-static u8 buf_read_u8(str buf, u8 **current) {
+static u8 buf_read_u8(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + sizeof(u8) <= buf.data + buf.len);
@@ -1375,7 +1375,7 @@ static u8 buf_read_u8(str buf, u8 **current) {
   return x;
 }
 
-static str
+static Str
 cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
                                 u16 i) {
   const cf_constant_t *const constant = cf_constant_array_get(constant_pool, i);
@@ -1383,14 +1383,14 @@ cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
   return constant->v.s;
 }
 
-static void cf_buf_read_attributes(str buf, u8 **current,
+static void cf_buf_read_attributes(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
-                                   cf_attribute_t **attributes, arena_t *arena);
+                                   cf_attribute_t **attributes, Arena *arena);
 
-static void cf_buf_read_sourcefile_attribute(str buf, u8 **current,
+static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
                                              cf_class_file_t *class_file,
                                              cf_attribute_t **attributes,
-                                             arena_t *arena) {
+                                             Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1414,10 +1414,10 @@ static void cf_buf_read_sourcefile_attribute(str buf, u8 **current,
   pg_array_append(*attributes, attribute, arena);
 }
 
-static void cf_buf_read_code_attribute_exceptions(str buf, u8 **current,
+static void cf_buf_read_code_attribute_exceptions(Str buf, u8 **current,
                                                   cf_class_file_t *class_file,
                                                   cf_exception_t **exceptions,
-                                                  arena_t *arena) {
+                                                  Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1444,11 +1444,11 @@ static void cf_buf_read_code_attribute_exceptions(str buf, u8 **current,
   pg_assert(read_bytes == sizeof(u16) + table_len * sizeof(u16) * 4);
 }
 
-static void cf_buf_read_code_attribute(str buf, u8 **current,
+static void cf_buf_read_code_attribute(Str buf, u8 **current,
                                        cf_class_file_t *class_file,
                                        u32 attribute_len, u16 name_i,
                                        cf_attribute_t **attributes,
-                                       arena_t *arena) {
+                                       Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current + 2 <= buf.data + buf.len);
@@ -1467,7 +1467,7 @@ static void cf_buf_read_code_attribute(str buf, u8 **current,
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
   pg_array_init_reserve(code.code, code_len, arena);
-  str code_slice = buf_read_n_u8(buf, code_len, current);
+  Str code_slice = buf_read_n_u8(buf, code_len, current);
   memmove(code.code, code_slice.data, code_slice.len);
   pg_array_header(code.code)->len = code_len;
 
@@ -1486,7 +1486,7 @@ static void cf_buf_read_code_attribute(str buf, u8 **current,
 }
 
 static void
-cf_buf_read_stack_map_table_attribute_verification_infos(str buf, u8 **current,
+cf_buf_read_stack_map_table_attribute_verification_infos(Str buf, u8 **current,
                                                          u16 count) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1504,10 +1504,10 @@ cf_buf_read_stack_map_table_attribute_verification_infos(str buf, u8 **current,
   }
 }
 
-static void cf_buf_read_stack_map_table_attribute(str buf, u8 **current,
+static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
                                                   u32 attribute_len, u16 name_i,
                                                   cf_attribute_t **attributes,
-                                                  arena_t *arena) {
+                                                  Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(attributes != NULL);
@@ -1580,11 +1580,11 @@ static void cf_buf_read_stack_map_table_attribute(str buf, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_line_number_table_attribute(str buf, u8 **current,
+static void cf_buf_read_line_number_table_attribute(Str buf, u8 **current,
                                                     cf_class_file_t *class_file,
                                                     u32 attribute_len,
                                                     cf_attribute_t **attributes,
-                                                    arena_t *arena) {
+                                                    Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
@@ -1614,9 +1614,9 @@ static void cf_buf_read_line_number_table_attribute(str buf, u8 **current,
 }
 
 static void
-cf_buf_read_local_variable_table_attribute(str buf, u8 **current,
+cf_buf_read_local_variable_table_attribute(Str buf, u8 **current,
                                            cf_class_file_t *class_file,
-                                           u32 attribute_len, arena_t *arena) {
+                                           u32 attribute_len, Arena *arena) {
   pg_unused(arena);
   const u8 *const current_start = *current;
 
@@ -1646,8 +1646,8 @@ cf_buf_read_local_variable_table_attribute(str buf, u8 **current,
 }
 
 static void cf_buf_read_local_variable_type_table_attribute(
-    str buf, u8 **current, cf_class_file_t *class_file, u32 attribute_len,
-    arena_t *arena) {
+    Str buf, u8 **current, cf_class_file_t *class_file, u32 attribute_len,
+    Arena *arena) {
   pg_unused(arena);
   const u8 *const current_start = *current;
 
@@ -1676,9 +1676,9 @@ static void cf_buf_read_local_variable_type_table_attribute(
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_signature_attribute(str buf, u8 **current,
+static void cf_buf_read_signature_attribute(Str buf, u8 **current,
                                             cf_class_file_t *class_file,
-                                            u32 attribute_len, arena_t *arena) {
+                                            u32 attribute_len, Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
@@ -1695,11 +1695,11 @@ static void cf_buf_read_signature_attribute(str buf, u8 **current,
 }
 
 // TODO: store this data.
-static void cf_buf_read_exceptions_attribute(str buf, u8 **current,
+static void cf_buf_read_exceptions_attribute(Str buf, u8 **current,
                                              cf_class_file_t *class_file,
                                              u32 attribute_len,
                                              cf_attribute_t **attributes,
-                                             arena_t *arena) {
+                                             Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1728,10 +1728,10 @@ static void cf_buf_read_exceptions_attribute(str buf, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_inner_classes_attribute(str buf, u8 **current,
+static void cf_buf_read_inner_classes_attribute(Str buf, u8 **current,
                                                 cf_class_file_t *class_file,
                                                 u32 attribute_len,
-                                                arena_t *arena) {
+                                                Arena *arena) {
   pg_unused(arena);
   const u8 *const current_start = *current;
 
@@ -1762,14 +1762,14 @@ static void cf_buf_read_inner_classes_attribute(str buf, u8 **current,
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_annotation(str buf, u8 **current,
+static void cf_buf_read_annotation(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
-                                   cf_annotation_t *annotation, arena_t *arena);
+                                   cf_annotation_t *annotation, Arena *arena);
 
-static void cf_buf_read_element_value(str buf, u8 **current,
+static void cf_buf_read_element_value(Str buf, u8 **current,
                                       cf_class_file_t *class_file,
                                       cf_element_value_t *element_value,
-                                      arena_t *arena) {
+                                      Arena *arena) {
   element_value->tag = buf_read_u8(buf, current);
   switch (element_value->tag) {
   case 'B':
@@ -1823,10 +1823,10 @@ static void cf_buf_read_element_value(str buf, u8 **current,
   }
 }
 
-static void cf_buf_read_annotation(str buf, u8 **current,
+static void cf_buf_read_annotation(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_annotation_t *annotation,
-                                   arena_t *arena) {
+                                   Arena *arena) {
 
   annotation->type_index = buf_read_be_u16(buf, current);
   const u16 num_element_value_pairs = buf_read_be_u16(buf, current);
@@ -1846,8 +1846,8 @@ static void cf_buf_read_annotation(str buf, u8 **current,
 }
 
 static void cf_buf_read_runtime_invisible_annotations_attribute(
-    str buf, u8 **current, cf_class_file_t *class_file, u32 attribute_len,
-    cf_attribute_t **attributes, arena_t *arena) {
+    Str buf, u8 **current, cf_class_file_t *class_file, u32 attribute_len,
+    cf_attribute_t **attributes, Arena *arena) {
 
   const u8 *const current_start = *current;
 
@@ -1872,9 +1872,9 @@ static void cf_buf_read_runtime_invisible_annotations_attribute(
   pg_assert(read_bytes == attribute_len);
 }
 
-static void cf_buf_read_attribute(str buf, u8 **current,
+static void cf_buf_read_attribute(Str buf, u8 **current,
                                   cf_class_file_t *class_file,
-                                  cf_attribute_t **attributes, arena_t *arena) {
+                                  cf_attribute_t **attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1887,7 +1887,7 @@ static void cf_buf_read_attribute(str buf, u8 **current,
   pg_assert(*current + size <= buf.data + buf.len);
 
   pg_assert(name_i <= class_file->constant_pool.len);
-  str attribute_name =
+  Str attribute_name =
       cf_constant_array_get_as_string(&class_file->constant_pool, name_i);
 
   if (str_eq_c(attribute_name, "SourceFile")) {
@@ -1960,10 +1960,10 @@ static void cf_buf_read_attribute(str buf, u8 **current,
   }
 }
 
-static void cf_buf_read_attributes(str buf, u8 **current,
+static void cf_buf_read_attributes(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
                                    cf_attribute_t **attributes,
-                                   arena_t *arena) {
+                                   Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1981,9 +1981,9 @@ static void cf_buf_read_attributes(str buf, u8 **current,
 // Returns the number of incoming slots to skip:
 // - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
 // - `0` otherwise
-static u8 cf_buf_read_constant(str buf, u8 **current,
+static u8 cf_buf_read_constant(Str buf, u8 **current,
                                cf_class_file_t *class_file,
-                               u16 constant_pool_count, arena_t *arena) {
+                               u16 constant_pool_count, Arena *arena) {
   u8 kind = buf_read_u8(buf, current);
 
   if (!(kind == CONSTANT_POOL_KIND_UTF8 || kind == CONSTANT_POOL_KIND_INT ||
@@ -2197,9 +2197,9 @@ static u8 cf_buf_read_constant(str buf, u8 **current,
   return 0;
 }
 
-static void cf_buf_read_constants(str buf, u8 **current,
+static void cf_buf_read_constants(Str buf, u8 **current,
                                   cf_class_file_t *class_file,
-                                  u16 constant_pool_count, arena_t *arena) {
+                                  u16 constant_pool_count, Arena *arena) {
   for (u64 i = 0; i < constant_pool_count; i++) {
     pg_assert((u64)(*current - buf.data) < buf.len);
     i += cf_buf_read_constant(buf, current, class_file, constant_pool_count,
@@ -2209,8 +2209,8 @@ static void cf_buf_read_constants(str buf, u8 **current,
   pg_assert(constant_pool_count <= class_file->constant_pool.len);
 }
 
-static void cf_buf_read_method(str buf, u8 **current,
-                               cf_class_file_t *class_file, arena_t *arena) {
+static void cf_buf_read_method(Str buf, u8 **current,
+                               cf_class_file_t *class_file, Arena *arena) {
   cf_method_t method = {0};
   method.access_flags = buf_read_be_u16(buf, current);
   method.name = buf_read_be_u16(buf, current);
@@ -2228,8 +2228,8 @@ static void cf_buf_read_method(str buf, u8 **current,
   pg_array_append(class_file->methods, method, arena);
 }
 
-static void cf_buf_read_methods(str buf, u8 **current,
-                                cf_class_file_t *class_file, arena_t *arena) {
+static void cf_buf_read_methods(Str buf, u8 **current,
+                                cf_class_file_t *class_file, Arena *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, current);
   pg_array_init_reserve(class_file->methods, methods_count, arena);
@@ -2239,9 +2239,9 @@ static void cf_buf_read_methods(str buf, u8 **current,
   }
 }
 
-static void cf_buf_read_interfaces(str buf, u8 **current,
+static void cf_buf_read_interfaces(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
-                                   arena_t *arena) {
+                                   Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2267,8 +2267,8 @@ static void cf_buf_read_interfaces(str buf, u8 **current,
   pg_assert(read_bytes == sizeof(u16) + interfaces_count * sizeof(u16));
 }
 
-static void cf_buf_read_field(str buf, u8 **current,
-                              cf_class_file_t *class_file, arena_t *arena) {
+static void cf_buf_read_field(Str buf, u8 **current,
+                              cf_class_file_t *class_file, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -2290,8 +2290,8 @@ static void cf_buf_read_field(str buf, u8 **current,
   pg_array_append(class_file->fields, field, arena);
 }
 
-static void cf_buf_read_fields(str buf, u8 **current,
-                               cf_class_file_t *class_file, arena_t *arena) {
+static void cf_buf_read_fields(Str buf, u8 **current,
+                               cf_class_file_t *class_file, Arena *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, current);
   pg_array_init_reserve(class_file->fields, fields_count, arena);
@@ -2301,9 +2301,9 @@ static void cf_buf_read_fields(str buf, u8 **current,
   }
 }
 
-static void cf_buf_read_class_file(str buf, u8 **current,
+static void cf_buf_read_class_file(Str buf, u8 **current,
                                    cf_class_file_t *class_file,
-                                   arena_t *arena) {
+                                   Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2369,7 +2369,7 @@ static u8 cf_write_constant(const cf_class_file_t *class_file, FILE *file,
   fwrite(&constant->kind, sizeof(u8), 1, file);
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_UTF8: {
-    str s = constant->v.s;
+    Str s = constant->v.s;
     file_write_be_u16(file, s.len);
     fwrite(s.data, sizeof(u8), s.len, file);
     break;
@@ -2834,7 +2834,7 @@ static void cf_write(const cf_class_file_t *class_file, FILE *file) {
   fflush(file);
 }
 
-static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
+static void cf_init(cf_class_file_t *class_file, Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
@@ -2847,7 +2847,7 @@ static void cf_init(cf_class_file_t *class_file, arena_t *arena) {
   pg_array_init_reserve(class_file->attributes, 64, arena);
 }
 
-static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
+static void cf_attribute_code_init(cf_attribute_code_t *code, Arena *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
@@ -2856,8 +2856,8 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, arena_t *arena) {
   pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
-static u16 cf_add_constant_string(cf_constant_array_t *constant_pool, str s,
-                                  arena_t *arena) {
+static u16 cf_add_constant_string(cf_constant_array_t *constant_pool, Str s,
+                                  Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(!str_is_empty(s));
 
@@ -2867,7 +2867,7 @@ static u16 cf_add_constant_string(cf_constant_array_t *constant_pool, str s,
 }
 
 static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
-                                   arena_t *arena) {
+                                   Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
 
@@ -2877,7 +2877,7 @@ static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
 }
 
 static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
-                                   u16 constant_utf8_i, arena_t *arena) {
+                                   u16 constant_utf8_i, Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(constant_utf8_i > 0);
 
@@ -2889,7 +2889,7 @@ static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
 
 // TODO: sanitize `source_file_name` in case of spaces, etc.
 // Transform: `/a/b/foo.kt` to `/a/b/FooKt.class`
-static str cf_make_class_file_path_kt(str source_file_name, arena_t *arena) {
+static Str cf_make_class_file_path_kt(Str source_file_name, Arena *arena) {
   pg_assert(!str_is_empty(source_file_name));
   pg_assert(source_file_name.len > 0);
   pg_assert(arena != NULL);
@@ -2898,8 +2898,8 @@ static str cf_make_class_file_path_kt(str source_file_name, arena_t *arena) {
   pg_assert(file_extension_split.found);
   pg_assert(str_eq_c(file_extension_split.right, "kt"));
 
-  str suffix = str_from_c("Kt.class");
-  str_builder res = sb_new(file_extension_split.left.len + suffix.len, arena);
+  Str suffix = str_from_c("Kt.class");
+  Str_builder res = sb_new(file_extension_split.left.len + suffix.len, arena);
   res = sb_append(res, file_extension_split.left, arena);
 
   // Capitalize
@@ -2918,7 +2918,7 @@ static str cf_make_class_file_path_kt(str source_file_name, arena_t *arena) {
   return sb_build(res);
 }
 
-__attribute__((unused)) static str
+__attribute__((unused)) static Str
 cf_get_this_class_name(const cf_class_file_t *class_file) {
   pg_assert(class_file != NULL);
 
@@ -2955,8 +2955,8 @@ cf_attribute_by_kind(const cf_attribute_t *attributes,
 
 static void
 cf_get_source_location_of_function(const cf_class_file_t *class_file,
-                                   const cf_method_t *method, str *filename,
-                                   u16 *line, arena_t *arena) {
+                                   const cf_method_t *method, Str *filename,
+                                   u16 *line, Arena *arena) {
   const cf_attribute_t *const code = cf_method_find_code_attribute(method);
   if (code == NULL)
     return;
@@ -2983,7 +2983,7 @@ cf_get_source_location_of_function(const cf_class_file_t *class_file,
 
 // ---------------------------------- Lexer
 
-static u32 lex_get_current_offset(str buf, u8 *const *current) {
+static u32 lex_get_current_offset(Str buf, u8 *const *current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -2992,7 +2992,7 @@ static u32 lex_get_current_offset(str buf, u8 *const *current) {
   return *current - buf.data;
 }
 
-static bool lex_is_at_end(str buf, u8 *const *current) {
+static bool lex_is_at_end(Str buf, u8 *const *current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3001,7 +3001,7 @@ static bool lex_is_at_end(str buf, u8 *const *current) {
   return lex_get_current_offset(buf, current) == buf.len;
 }
 
-static u8 lex_peek(str buf, u8 **current) {
+static u8 lex_peek(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3009,7 +3009,7 @@ static u8 lex_peek(str buf, u8 **current) {
   return lex_is_at_end(buf, current) ? 0 : **current;
 }
 
-static u8 lex_peek_next(str buf, u8 **current) {
+static u8 lex_peek_next(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3021,7 +3021,7 @@ static u8 lex_peek_next(str buf, u8 **current) {
   return *(*current + 1);
 }
 
-static u8 lex_advance(str buf, u8 **current) {
+static u8 lex_advance(Str buf, u8 **current) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
@@ -3033,7 +3033,7 @@ static u8 lex_advance(str buf, u8 **current) {
   return lex_is_at_end(buf, current) ? 0 : c;
 }
 
-static bool lex_match(str buf, u8 **current, u8 c) {
+static bool lex_match(Str buf, u8 **current, u8 c) {
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
 
@@ -3044,13 +3044,13 @@ static bool lex_match(str buf, u8 **current, u8 c) {
   return false;
 }
 
-static void lex_skip_until_incl_1(str buf, u8 **current, u8 c) {
+static void lex_skip_until_incl_1(Str buf, u8 **current, u8 c) {
   while (!(lex_is_at_end(buf, current) || lex_peek(buf, current) == c)) {
     lex_advance(buf, current);
   }
 }
 
-static void lex_skip_until_incl_2(str buf, u8 **current, u8 c1, u8 c2) {
+static void lex_skip_until_incl_2(Str buf, u8 **current, u8 c1, u8 c2) {
   while (
       !(lex_is_at_end(buf, current) ||
         (lex_peek(buf, current) == c1 && lex_peek_next(buf, current) == c2))) {
@@ -3071,7 +3071,7 @@ static bool lex_is_identifier_char(u8 c) {
   return ut_char_is_alphabetic(c) || lex_is_digit(c) || c == '_';
 }
 
-static u32 lex_number_length(str buf, u32 current_offset) {
+static u32 lex_number_length(Str buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
@@ -3098,7 +3098,7 @@ static u32 lex_number_length(str buf, u32 current_offset) {
   return len;
 }
 
-static u32 lex_string_length(str buf, u32 current_offset) {
+static u32 lex_string_length(Str buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
@@ -3114,7 +3114,7 @@ static u32 lex_string_length(str buf, u32 current_offset) {
 // FIXME: probably need to memoize it actually to be able to support:
 // - `a.b.c = 1` => `a` has length 1.
 // - `var a : kotlin.Int` => `kotlin.Int` has length 9.
-static u32 lex_identifier_length(str buf, u32 current_offset) {
+static u32 lex_identifier_length(Str buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
   const u32 start_offset = current_offset;
@@ -3144,8 +3144,8 @@ static u32 lex_identifier_length(str buf, u32 current_offset) {
   return len;
 }
 
-static void lex_identifier(lex_lexer_t *lexer, str buf, u8 **current,
-                           arena_t *arena) {
+static void lex_identifier(lex_lexer_t *lexer, Str buf, u8 **current,
+                           Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
   pg_assert(current != NULL);
@@ -3154,7 +3154,7 @@ static void lex_identifier(lex_lexer_t *lexer, str buf, u8 **current,
   pg_assert(ut_char_is_alphabetic(**current));
 
   const u32 start_offset = lex_get_current_offset(buf, current);
-  str identifier = str_new(*current, lex_identifier_length(buf, start_offset));
+  Str identifier = str_new(*current, lex_identifier_length(buf, start_offset));
   *current += identifier.len;
   if (str_eq_c(identifier, "fun")) {
     const lex_token_t token = {
@@ -3213,8 +3213,8 @@ static void lex_identifier(lex_lexer_t *lexer, str buf, u8 **current,
   }
 }
 
-static void lex_number(lex_lexer_t *lexer, str buf, u8 **current,
-                       arena_t *arena) {
+static void lex_number(lex_lexer_t *lexer, Str buf, u8 **current,
+                       Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
   pg_assert(current != NULL);
@@ -3244,7 +3244,7 @@ static void lex_number(lex_lexer_t *lexer, str buf, u8 **current,
 }
 
 // FIXME: use str_t
-static void lex_lex(lex_lexer_t *lexer, str buf, u8 **current, arena_t *arena) {
+static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table != NULL);
   pg_assert(pg_array_len(lexer->line_table) == 0);
@@ -3531,7 +3531,7 @@ static void lex_lex(lex_lexer_t *lexer, str buf, u8 **current, arena_t *arena) {
   pg_array_append(lexer->line_table, buf.len, arena);
 }
 
-static u32 lex_find_token_length(const lex_lexer_t *lexer, str buf,
+static u32 lex_find_token_length(const lex_lexer_t *lexer, Str buf,
                                  lex_token_t token) {
   pg_assert(lexer != NULL);
 
@@ -3595,7 +3595,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, str buf,
 // ------------------------------ Parser
 
 static u32 par_add_node(parser_t *parser, const par_ast_node_t *node,
-                        arena_t *arena) {
+                        Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(node != NULL);
   pg_assert(pg_array_len(parser->nodes) < UINT32_MAX);
@@ -3611,7 +3611,7 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
 }
 
 static void par_find_token_position(const parser_t *parser, lex_token_t token,
-                                    u32 *line, u32 *column, str *token_string) {
+                                    u32 *line, u32 *column, Str *token_string) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3622,7 +3622,7 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   pg_assert(token_string != NULL);
   pg_assert(pg_array_len(parser->lexer->line_table) > 1);
 
-  *token_string = (str){
+  *token_string = (Str){
       .data = &parser->buf.data[token.source_offset],
       .len = lex_find_token_length(parser->lexer, parser->buf, token),
   };
@@ -3683,8 +3683,8 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   pg_assert(0 && "unreachable");
 }
 
-static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
-                                   arena_t *arena) {
+static Str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
+                                   Arena *arena) {
   const ty_type_t *const type = &types[type_i];
 
   switch (type->kind) {
@@ -3711,7 +3711,7 @@ static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_UNIT:
     return str_from_c("kotlin.Unit");
   case TYPE_ARRAY: {
-    str_builder res = sb_new(type->this_class_name.len + 256, arena);
+    Str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
     res = sb_append(res,
                     ty_type_to_human_string(types, type->v.array_type_i, arena),
@@ -3726,7 +3726,7 @@ static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   case TYPE_CONSTRUCTOR: {
     const ty_type_method_t *const method_type = &type->v.method;
 
-    str_builder res = sb_new(128, arena);
+    Str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "(", arena);
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
       const u32 argument_type_i = method_type->argument_types_i[i];
@@ -3744,7 +3744,7 @@ static str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
   }
   case TYPE_INTEGER_LITERAL: {
     const u32 possible_types = type->v.integer_literal_types;
-    str_builder res = sb_new(128, arena);
+    Str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "Integer literal: ", arena);
 
     if (possible_types & TYPE_BYTE)
@@ -3827,7 +3827,7 @@ static void par_error(parser_t *parser, lex_token_t token, const char *error) {
   case PARSER_STATE_OK: {
     u32 line = 0;
     u32 column = 0;
-    str token_string = {0};
+    Str token_string = {0};
     par_find_token_position(parser, token, &line, &column, &token_string);
 
     fprintf(stderr, "%.*s:%u:%u: around `%.*s`, %s\n",
@@ -3920,19 +3920,19 @@ static u64 par_number(const parser_t *parser, lex_token_t token, u8 *flag) {
   return number;
 }
 
-static str par_token_to_str_view(parser_t *parser, u32 token_i) {
+static Str par_token_to_str_view(parser_t *parser, u32 token_i) {
   pg_assert(parser != NULL);
   pg_assert(token_i < pg_array_len(parser->lexer->tokens));
 
   const lex_token_t token = parser->lexer->tokens[token_i];
 
-  return (str){
+  return (Str){
       .data = &parser->buf.data[token.source_offset],
       .len = lex_find_token_length(parser->lexer, parser->buf, token),
   };
 }
 
-static str par_token_range_to_string(parser_t *parser, u32 start_token_incl_i,
+static Str par_token_range_to_string(parser_t *parser, u32 start_token_incl_i,
                                      u32 end_token_excl_i) {
   pg_assert(parser != NULL);
   pg_assert(start_token_incl_i < pg_array_len(parser->lexer->tokens));
@@ -3945,19 +3945,19 @@ static str par_token_range_to_string(parser_t *parser, u32 start_token_incl_i,
           ? parser->buf.len
           : parser->lexer->tokens[end_token_excl_i].source_offset;
 
-  return (str){
+  return (Str){
       .data = &parser->buf.data[start_token_incl_source_offset],
       .len = end_token_excl_source_offset - start_token_incl_source_offset,
   };
 }
 
-static u32 par_parse_expression(parser_t *parser, arena_t *arena);
-static u32 par_parse_block(parser_t *parser, arena_t *arena);
-static u32 par_parse_postfix_unary_expression(parser_t *parser, arena_t *arena);
-static u32 par_parse_statements(parser_t *parser, arena_t *arena);
-static u32 par_parse_declaration(parser_t *parser, arena_t *arena);
-static u32 par_parse_statement(parser_t *parser, arena_t *arena);
-static u32 par_parse_type(parser_t *parser, arena_t *arena);
+static u32 par_parse_expression(parser_t *parser, Arena *arena);
+static u32 par_parse_block(parser_t *parser, Arena *arena);
+static u32 par_parse_postfix_unary_expression(parser_t *parser, Arena *arena);
+static u32 par_parse_statements(parser_t *parser, Arena *arena);
+static u32 par_parse_declaration(parser_t *parser, Arena *arena);
+static u32 par_parse_statement(parser_t *parser, Arena *arena);
+static u32 par_parse_type(parser_t *parser, Arena *arena);
 
 // block:
 //     '{'
@@ -3965,7 +3965,7 @@ static u32 par_parse_type(parser_t *parser, arena_t *arena);
 //     statements
 //     {NL}
 //     '}'
-static u32 par_parse_block(parser_t *parser, arena_t *arena) {
+static u32 par_parse_block(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3983,7 +3983,7 @@ static u32 par_parse_block(parser_t *parser, arena_t *arena) {
 // controlStructureBody:
 //     block
 //     | statement
-static u32 par_parse_control_structure_body(parser_t *parser, arena_t *arena) {
+static u32 par_parse_control_structure_body(parser_t *parser, Arena *arena) {
   pg_assert(parser);
   pg_assert(arena);
 
@@ -4003,7 +4003,7 @@ static u32 par_parse_control_structure_body(parser_t *parser, arena_t *arena) {
 //  {NL}
 //  (controlStructureBody | ([controlStructureBody] {NL} [';'] {NL} 'else'
 //  {NL} (controlStructureBody | ';')) | ';')
-static u32 par_parse_if_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_if_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4056,7 +4056,7 @@ static u32 par_parse_if_expression(parser_t *parser, arena_t *arena) {
 //     | CONTINUE_AT
 //     | 'break'
 //     | BREAK_AT
-static u32 par_parse_jump_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_jump_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4091,7 +4091,7 @@ static u32 par_parse_jump_expression(parser_t *parser, arena_t *arena) {
 //     | whenExpression
 //     | tryExpression
 //     | jumpExpression
-static u32 par_parse_primary_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_primary_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4149,7 +4149,7 @@ static u32 par_parse_primary_expression(parser_t *parser, arena_t *arena) {
 //     [{NL} ',']
 //     {NL}
 //     ')'
-static u32 par_parse_var_declaration(parser_t *parser, arena_t *arena) {
+static u32 par_parse_var_declaration(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4193,7 +4193,7 @@ static bool par_is_lvalue(const parser_t *parser, u32 node_i) {
 // assignment:
 //     ((directlyAssignableExpression '=') | (assignableExpression
 //     assignmentAndOperator)) {NL} expression
-static u32 par_parse_assignment(parser_t *parser, arena_t *arena) {
+static u32 par_parse_assignment(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4230,7 +4230,7 @@ static u32 par_parse_assignment(parser_t *parser, arena_t *arena) {
 //     ')'
 //     {NL}
 //     (controlStructureBody | ';')
-static u32 par_parse_while_statement(parser_t *parser, arena_t *arena) {
+static u32 par_parse_while_statement(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4255,7 +4255,7 @@ static u32 par_parse_while_statement(parser_t *parser, arena_t *arena) {
   return node_i;
 }
 
-static u32 par_parse_loop_statement(parser_t *parser, arena_t *arena) {
+static u32 par_parse_loop_statement(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4268,7 +4268,7 @@ static u32 par_parse_loop_statement(parser_t *parser, arena_t *arena) {
 // statement:
 //     {label | annotation} (declaration | assignment | loopStatement |
 //     expression)
-static u32 par_parse_statement(parser_t *parser, arena_t *arena) {
+static u32 par_parse_statement(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4297,7 +4297,7 @@ static u32 par_parse_statement(parser_t *parser, arena_t *arena) {
 //     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
 //     'class')
 static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
-                                       arena_t *arena) {
+                                       Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4333,7 +4333,7 @@ static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
 static void par_parse_value_arguments(parser_t *parser, u32 **nodes,
-                                      arena_t *arena) {
+                                      Arena *arena) {
 
   while (!par_is_at_end(parser)) {
     u32 argument_i = par_parse_expression(parser, arena);
@@ -4362,7 +4362,7 @@ static void par_parse_value_arguments(parser_t *parser, u32 **nodes,
 // callSuffix:
 //     [typeArguments] (([valueArguments] annotatedLambda) | valueArguments)
 static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
-                                 arena_t *arena) {
+                                 Arena *arena) {
   if (!par_match_token(parser, TOKEN_KIND_LEFT_PAREN))
     return 0;
 
@@ -4391,7 +4391,7 @@ static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
 //     | indexingSuffix
 //     | navigationSuffix
 static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
-                                          arena_t *arena) {
+                                          Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4409,7 +4409,7 @@ static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
 // postfixUnaryExpression:
 //     primaryExpression {postfixUnarySuffix}
 static u32 par_parse_postfix_unary_expression(parser_t *parser,
-                                              arena_t *arena) {
+                                              Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4432,7 +4432,7 @@ static u32 par_parse_postfix_unary_expression(parser_t *parser,
 
 // prefixUnaryExpression:
 //     {unaryPrefix} postfixUnaryExpression
-static u32 par_parse_prefix_unary_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_prefix_unary_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4454,7 +4454,7 @@ static u32 par_parse_prefix_unary_expression(parser_t *parser, arena_t *arena) {
 
 // asExpression:
 //     prefixUnaryExpression {{NL} asOperator {NL} type}
-static u32 par_parse_as_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_as_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4467,7 +4467,7 @@ static u32 par_parse_as_expression(parser_t *parser, arena_t *arena) {
 // multiplicativeExpression:
 //     asExpression {multiplicativeOperator {NL} asExpression}
 static u32 par_parse_multiplicative_expression(parser_t *parser,
-                                               arena_t *arena) {
+                                               Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4492,7 +4492,7 @@ static u32 par_parse_multiplicative_expression(parser_t *parser,
 // additiveExpression:
 //     multiplicativeExpression {additiveOperator {NL}
 //     multiplicativeExpression}
-static u32 par_parse_additive_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_additive_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4515,7 +4515,7 @@ static u32 par_parse_additive_expression(parser_t *parser, arena_t *arena) {
 
 // rangeExpression:
 //     additiveExpression {'..' {NL} additiveExpression}
-static u32 par_parse_range_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_range_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4527,7 +4527,7 @@ static u32 par_parse_range_expression(parser_t *parser, arena_t *arena) {
 
 // infixFunctionCall:
 //     rangeExpression {simpleIdentifier {NL} rangeExpression}
-static u32 par_parse_infix_function_call(parser_t *parser, arena_t *arena) {
+static u32 par_parse_infix_function_call(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4539,7 +4539,7 @@ static u32 par_parse_infix_function_call(parser_t *parser, arena_t *arena) {
 
 // elvisExpression:
 //     infixFunctionCall {{NL} elvis {NL} infixFunctionCall}
-static u32 par_parse_elvis_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_elvis_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4552,7 +4552,7 @@ static u32 par_parse_elvis_expression(parser_t *parser, arena_t *arena) {
 // infixOperation:
 //     elvisExpression {(inOperator {NL} elvisExpression) | (isOperator {NL}
 //     type)}
-static u32 par_parse_infix_operation(parser_t *parser, arena_t *arena) {
+static u32 par_parse_infix_operation(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4565,7 +4565,7 @@ static u32 par_parse_infix_operation(parser_t *parser, arena_t *arena) {
 // genericCallLikeComparison:
 //     infixOperation {callSuffix}
 static u32 par_parse_generic_call_like_comparison(parser_t *parser,
-                                                  arena_t *arena) {
+                                                  Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4578,7 +4578,7 @@ static u32 par_parse_generic_call_like_comparison(parser_t *parser,
 // comparison:
 //     genericCallLikeComparison {comparisonOperator {NL}
 //     genericCallLikeComparison}
-static u32 par_parse_comparison(parser_t *parser, arena_t *arena) {
+static u32 par_parse_comparison(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4603,7 +4603,7 @@ static u32 par_parse_comparison(parser_t *parser, arena_t *arena) {
 
 // equality:
 //     comparison {equalityOperator {NL} comparison}
-static u32 par_parse_equality(parser_t *parser, arena_t *arena) {
+static u32 par_parse_equality(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4626,7 +4626,7 @@ static u32 par_parse_equality(parser_t *parser, arena_t *arena) {
 
 // conjunction:
 //     equality {{NL} '&&' {NL} equality}
-static u32 par_parse_conjunction(parser_t *parser, arena_t *arena) {
+static u32 par_parse_conjunction(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4648,7 +4648,7 @@ static u32 par_parse_conjunction(parser_t *parser, arena_t *arena) {
 
 // disjunction:
 //     conjunction {{NL} '||' {NL} conjunction}
-static u32 par_parse_disjunction(parser_t *parser, arena_t *arena) {
+static u32 par_parse_disjunction(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4670,7 +4670,7 @@ static u32 par_parse_disjunction(parser_t *parser, arena_t *arena) {
 
 // expression:
 //     disjunction
-static u32 par_parse_expression(parser_t *parser, arena_t *arena) {
+static u32 par_parse_expression(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4682,7 +4682,7 @@ static u32 par_parse_expression(parser_t *parser, arena_t *arena) {
 
 // statements:
 //     [statement {semis statement}] [semis]
-static u32 par_parse_statements(parser_t *parser, arena_t *arena) {
+static u32 par_parse_statements(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4710,7 +4710,7 @@ static u32 par_parse_statements(parser_t *parser, arena_t *arena) {
 // type:
 //     [typeModifiers] (functionType | parenthesizedType | nullableType |
 //     typeReference | definitelyNonNullableType)
-static u32 par_parse_type(parser_t *parser, arena_t *arena) {
+static u32 par_parse_type(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4744,7 +4744,7 @@ static u32 par_parse_type(parser_t *parser, arena_t *arena) {
 //     ':'
 //     {NL}
 //     type
-static u32 par_parse_parameter(parser_t *parser, arena_t *arena) {
+static u32 par_parse_parameter(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4775,7 +4775,7 @@ static u32 par_parse_parameter(parser_t *parser, arena_t *arena) {
 // functionValueParameter:
 //     [parameterModifiers] parameter [{NL} '=' {NL} expression]
 static u32 par_parse_function_value_parameter(parser_t *parser,
-                                              arena_t *arena) {
+                                              Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4793,7 +4793,7 @@ static u32 par_parse_function_value_parameter(parser_t *parser,
 //     ',']] {NL}
 //     ')'
 static u32 par_parse_function_value_parameters(parser_t *parser,
-                                               arena_t *arena) {
+                                               Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4821,7 +4821,7 @@ static u32 par_parse_function_value_parameters(parser_t *parser,
 // functionBody:
 //     block
 //     | ('=' {NL} expression)
-static u32 par_parse_function_body(parser_t *parser, arena_t *arena) {
+static u32 par_parse_function_body(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4840,7 +4840,7 @@ static u32 par_parse_function_body(parser_t *parser, arena_t *arena) {
 //     [{NL} ':' {NL} type]
 //     [{NL} typeConstraints]
 //     [{NL} functionBody]
-static u32 par_parse_function_declaration(parser_t *parser, arena_t *arena) {
+static u32 par_parse_function_declaration(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4913,7 +4913,7 @@ static void par_sync_if_panicked(parser_t *parser) {
 //     [(NL {NL}) ';']
 //     {NL}
 //     (([getter] [{NL} [semi] setter]) | ([setter] [{NL} [semi] getter]))
-static u32 par_parse_property_declaration(parser_t *parser, arena_t *arena) {
+static u32 par_parse_property_declaration(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4929,7 +4929,7 @@ static u32 par_parse_property_declaration(parser_t *parser, arena_t *arena) {
 //     | functionDeclaration
 //     | propertyDeclaration
 //     | typeAlias
-static u32 par_parse_declaration(parser_t *parser, arena_t *arena) {
+static u32 par_parse_declaration(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4949,7 +4949,7 @@ static u32 par_parse_declaration(parser_t *parser, arena_t *arena) {
 }
 
 // topLevelObject: declaration [semis]
-static u32 par_parse_top_level_object(parser_t *parser, arena_t *arena) {
+static u32 par_parse_top_level_object(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4967,7 +4967,7 @@ static u32 par_parse_top_level_object(parser_t *parser, arena_t *arena) {
 //     importList
 //     {topLevelObject}
 //     EOF
-static u32 par_parse_kotlin_file(parser_t *parser, arena_t *arena) {
+static u32 par_parse_kotlin_file(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4992,7 +4992,7 @@ static u32 par_parse_kotlin_file(parser_t *parser, arena_t *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static u32 par_parse(parser_t *parser, arena_t *arena) {
+static u32 par_parse(parser_t *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5016,7 +5016,7 @@ static u32 par_parse(parser_t *parser, arena_t *arena) {
 
 // TODO: Caching?
 static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
-                             arena_t *arena) {
+                             Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(new_type != NULL);
@@ -5046,8 +5046,8 @@ static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
   return pg_array_last_index(resolver->types);
 }
 
-static str resolver_function_to_human_string(const resolver_t *resolver,
-                                             u32 function_i, arena_t *arena);
+static Str resolver_function_to_human_string(const resolver_t *resolver,
+                                             u32 function_i, Arena *arena);
 
 static bool
 cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
@@ -5063,7 +5063,7 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
       const cf_annotation_t *const annotation =
           &attribute->v.runtime_invisible_annotations[j];
 
-      str descriptor = cf_constant_array_get_as_string(
+      Str descriptor = cf_constant_array_get_as_string(
           &class_file->constant_pool, annotation->type_index);
 
       if (str_eq_c(descriptor, "Lkotlin/internal/InlineOnly;"))
@@ -5075,7 +5075,7 @@ cf_method_has_inline_only_annotation(const cf_class_file_t *class_file,
 
 static void resolver_load_methods_from_class_file(
     resolver_t *resolver, u32 this_class_type_i,
-    const cf_class_file_t *class_file, arena_t *arena) {
+    const cf_class_file_t *class_file, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
@@ -5086,9 +5086,9 @@ static void resolver_load_methods_from_class_file(
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
-    str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
+    Str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                      method->descriptor);
-    str name = cf_constant_array_get_as_string(&class_file->constant_pool,
+    Str name = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                method->name);
 
     ty_type_t type = {
@@ -5134,8 +5134,8 @@ static void resolver_load_methods_from_class_file(
     const u32 type_i = resolver_add_type(resolver, &type, arena);
 
     if (cli_log_verbose) {
-      arena_t tmp_arena = *arena;
-      str human_type =
+      Arena tmp_arena = *arena;
+      Str human_type =
           resolver_function_to_human_string(resolver, type_i, &tmp_arena);
       LOG("Loaded method %s [%lu]: access_flags=%u type=%.*s",
           ty_type_kind_string(resolver->types, type_i),
@@ -5157,8 +5157,8 @@ static void resolver_load_methods_from_class_file(
   }
 }
 
-static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
-                                 arena_t scratch_arena, arena_t *arena) {
+static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
+                                 Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
@@ -5309,7 +5309,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
       const u16 extra_field_length =
           buf_read_le_u16(content, &local_file_header);
 
-      str file_name = {.data = local_file_header, .len = file_name_length};
+      Str file_name = {.data = local_file_header, .len = file_name_length};
       buf_read_n_u8(content, file_name_length, &local_file_header);
 
       buf_read_n_u8(content, extra_field_length, &local_file_header);
@@ -5356,7 +5356,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 && str_eq_c(file_name, ".class")) {
 #if WITH_ZLIB
-        str dst = sb_build(sb_new(
+        Str dst = sb_build(sb_new(
             uncompressed_size_according_to_directory_entry, &scratch_arena));
 
         z_stream stream = {
@@ -5389,7 +5389,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
               &class_file.constant_pool, class_file.super_class);
 
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
-          str super_class_name = cf_constant_array_get_as_string(
+          Str super_class_name = cf_constant_array_get_as_string(
               &class_file.constant_pool, constant_super->v.string_utf8_i);
 
           if (!str_eq_c(super_class_name, "java/lang/Object")) {
@@ -5418,8 +5418,8 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, str content, str path,
   }
   return false;
 }
-static bool cf_read_jmod_file(resolver_t *resolver, str path,
-                              arena_t scratch_arena, arena_t *arena) {
+static bool cf_read_jmod_file(resolver_t *resolver, Str path,
+                              Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
@@ -5436,7 +5436,7 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
     return false;
   }
 
-  str content = read_res.content;
+  Str content = read_res.content;
   // Check magic number.
   {
     u8 *current = content.data;
@@ -5450,8 +5450,8 @@ static bool cf_read_jmod_file(resolver_t *resolver, str path,
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
-static bool cf_read_jar_file(resolver_t *resolver, str path,
-                             arena_t scratch_arena, arena_t *arena) {
+static bool cf_read_jar_file(resolver_t *resolver, Str path,
+                             Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
 
@@ -5469,7 +5469,7 @@ static bool cf_read_jar_file(resolver_t *resolver, str path,
 }
 
 static bool resolver_is_package_imported(const resolver_t *resolver,
-                                         str package_name) {
+                                         Str package_name) {
   for (u64 i = 0; i < pg_array_len(resolver->imported_package_names); i++) {
     if (str_eq(resolver->imported_package_names[i], package_name))
       return true;
@@ -5479,9 +5479,9 @@ static bool resolver_is_package_imported(const resolver_t *resolver,
 }
 
 static void resolver_collect_callables_with_name(const resolver_t *resolver,
-                                                 str function_name,
+                                                 Str function_name,
                                                  u32 **candidate_functions_i,
-                                                 arena_t *arena) {
+                                                 Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
   pg_assert(candidate_functions_i != NULL);
@@ -5511,8 +5511,8 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
 }
 
 // TODO: Add to string: file:line
-static str resolver_function_to_human_string(const resolver_t *resolver,
-                                             u32 type_i, arena_t *arena) {
+static Str resolver_function_to_human_string(const resolver_t *resolver,
+                                             u32 type_i, Arena *arena) {
 
   const ty_type_t *const type = &resolver->types[type_i];
 
@@ -5524,7 +5524,7 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
   const ty_type_t *const this_class_type =
       &resolver->types[method->this_class_type_i];
 
-  str_builder res = sb_new(
+  Str_builder res = sb_new(
       method->name.len + this_class_type->this_class_name.len + 1024, arena);
 
   if (method->access_flags & ACCESS_FLAGS_PRIVATE)
@@ -5547,7 +5547,7 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
 
   const u8 argument_count = pg_array_len(method->argument_types_i);
   for (u8 i = 0; i < argument_count; i++) {
-    str argument_type_string = ty_type_to_human_string(
+    Str argument_type_string = ty_type_to_human_string(
         resolver->types, method->argument_types_i[i], arena);
 
     res = sb_append(res, argument_type_string, arena);
@@ -5557,7 +5557,7 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
   }
 
   res = sb_append_c(res, ") : ", arena);
-  str return_type_string =
+  Str return_type_string =
       ty_type_to_human_string(resolver->types, method->return_type_i, arena);
   res = sb_append(res, return_type_string, arena);
 
@@ -5579,8 +5579,8 @@ static str resolver_function_to_human_string(const resolver_t *resolver,
 
 static void resolver_remove_non_applicable_function_candidates(
     resolver_t *resolver, u32 *candidate_functions_i,
-    const u32 *call_site_argument_types_i, arena_t scratch_arena,
-    arena_t *arena) {
+    const u32 *call_site_argument_types_i, Arena scratch_arena,
+    Arena *arena) {
 
   u64 i = 0;
   while (i < pg_array_len(candidate_functions_i)) {
@@ -5604,7 +5604,7 @@ typedef enum __attribute__((packed)) {
 
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
     resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
-    arena_t scratch_arena, arena_t *arena) {
+    Arena scratch_arena, Arena *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
   pg_assert(a->v.method.argument_types_i != NULL);
   pg_assert(a->this_class_name.data != NULL);
@@ -5632,8 +5632,8 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
 }
 
 static u32 resolver_select_most_specific_candidate_function(
-    resolver_t *resolver, u32 *candidates, arena_t scratch_arena,
-    arena_t *arena) {
+    resolver_t *resolver, u32 *candidates, Arena scratch_arena,
+    Arena *arena) {
 
   const u64 candidates_count = pg_array_len(candidates);
 
@@ -5668,9 +5668,9 @@ static u32 resolver_select_most_specific_candidate_function(
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
         if (cli_log_verbose) {
-          str a_human_type = resolver_function_to_human_string(
+          Str a_human_type = resolver_function_to_human_string(
               resolver, a_type_i, &scratch_arena);
-          str b_human_type = resolver_function_to_human_string(
+          Str b_human_type = resolver_function_to_human_string(
               resolver, b_type_i, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", (int)a_human_type.len,
@@ -5715,9 +5715,9 @@ static u32 resolver_select_most_specific_candidate_function(
 // TODO: Keep track of imported packages (including those imported by
 // default).
 static bool resolver_resolve_free_function(
-    resolver_t *resolver, str method_name,
+    resolver_t *resolver, Str method_name,
     const u32 *call_site_argument_types_i, u32 *picked_method_type_i,
-    u32 **candidate_functions_i, arena_t scratch_arena, arena_t *arena) {
+    u32 **candidate_functions_i, Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
@@ -5802,7 +5802,7 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
 }
 
 static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
-                                     FILE *file, u16 indent, arena_t *arena) {
+                                     FILE *file, u16 indent, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(resolver->parser->lexer != NULL);
@@ -5819,11 +5819,11 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   if (node->kind == AST_KIND_NONE)
     return;
 
-  const str kind_string = par_ast_node_kind_to_string[node->kind];
+  const Str kind_string = par_ast_node_kind_to_string[node->kind];
   const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
   u32 line = 0;
   u32 column = 0;
-  str token_string = {0};
+  Str token_string = {0};
   par_find_token_position(resolver->parser, token, &line, &column,
                           &token_string);
 
@@ -5831,7 +5831,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 
   const char *const type_kind =
       ty_type_kind_string(resolver->types, node->type_i);
-  str human_type =
+  Str human_type =
       ty_type_to_human_string(resolver->types, node->type_i, arena);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
@@ -5898,13 +5898,13 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
 #define TYPE_SHORT_I ((u32)9)
 #define TYPE_STRING_I ((u32)10)
 
-static bool type_fqn_equal_to_package_and_name(str a_fqn, str b_package_name,
-                                               str b_class_name,
-                                               arena_t scratch_arena) {
+static bool type_fqn_equal_to_package_and_name(Str a_fqn, Str b_package_name,
+                                               Str b_class_name,
+                                               Arena scratch_arena) {
   pg_assert(!str_contains_element(b_class_name, (u8)'/'));
   pg_assert(!str_contains_element(b_class_name, (u8)'.'));
 
-  str_builder b_fqn =
+  Str_builder b_fqn =
       sb_new(b_package_name.len + 1 + b_class_name.len, &scratch_arena);
   if (!str_is_empty(b_package_name)) {
     b_fqn = sb_append(b_fqn, b_package_name, &scratch_arena);
@@ -5915,10 +5915,10 @@ static bool type_fqn_equal_to_package_and_name(str a_fqn, str b_package_name,
   return str_eq(a_fqn, sb_build(b_fqn));
 }
 
-static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
+static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
                                                   u32 *type_i,
-                                                  arena_t scratch_arena,
-                                                  arena_t *arena) {
+                                                  Arena scratch_arena,
+                                                  Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(!str_is_empty(fqn));
   pg_assert(type_i != NULL);
@@ -5988,13 +5988,13 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
   // Scan the class path entries for `$CLASS_PATH_ENTRY/$CLASS_NAME.class`.
   // E.g.: `/usr/share/java/kotlin-stdlib.jar` -> `/usr/share/java/Fqn.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    str entry = resolver->class_path_entries[i];
+    Str entry = resolver->class_path_entries[i];
     str_split_result_t entry_last_slash_split = str_rsplit(entry, '/');
-    str parent = entry_last_slash_split.left;
+    Str parent = entry_last_slash_split.left;
 
-    str final_extension = str_from_c(".class");
+    Str final_extension = str_from_c(".class");
 
-    str_builder tentative_class_file_path_builder =
+    Str_builder tentative_class_file_path_builder =
         sb_new(parent.len + 1 + fqn.len + final_extension.len, arena);
 
     tentative_class_file_path_builder =
@@ -6016,7 +6016,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 
     tentative_class_file_path_builder =
         sb_append(tentative_class_file_path_builder, final_extension, arena);
-    str tentative_class_file_path = sb_build(tentative_class_file_path_builder);
+    Str tentative_class_file_path = sb_build(tentative_class_file_path_builder);
 
     {
       // TODO: check if we can read the file content into `scratch_arena`
@@ -6049,7 +6049,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
   // that contains
   // `$CLASS_NAME.class`.
   for (u64 i = 0; i < pg_array_len(resolver->class_path_entries); i++) {
-    str class_path_entry = resolver->class_path_entries[i];
+    Str class_path_entry = resolver->class_path_entries[i];
     if (!str_ends_with(class_path_entry, str_from_c(".jar")))
       continue;
 
@@ -6073,8 +6073,8 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, str fqn,
 // TODO: Check if there is a way not to do it lazily. Not goog to have I/O
 // randomly pop up in the middle of type checking.
 static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
-                                          arena_t scratch_arena,
-                                          arena_t *arena) {
+                                          Arena scratch_arena,
+                                          Arena *arena) {
 
   // Already done?
   if (type->super_type_i > 0)
@@ -6096,9 +6096,9 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
                                                scratch_arena, arena);
 }
 
-static void resolver_load_standard_types(resolver_t *resolver, str java_home,
-                                         arena_t scratch_arena,
-                                         arena_t *arena) {
+static void resolver_load_standard_types(resolver_t *resolver, Str java_home,
+                                         Arena scratch_arena,
+                                         Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(!str_is_empty(java_home));
   pg_assert(arena != NULL);
@@ -6120,15 +6120,15 @@ static void resolver_load_standard_types(resolver_t *resolver, str java_home,
   for (u64 i = 0; i < sizeof(known_types) / sizeof(known_types[0]); i++)
     pg_array_append(resolver->types, known_types[i], arena);
 
-  str relative_jmod_path = str_from_c("/jmods/java.base.jmod");
-  str_builder path = sb_new(java_home.len + relative_jmod_path.len, arena);
+  Str relative_jmod_path = str_from_c("/jmods/java.base.jmod");
+  Str_builder path = sb_new(java_home.len + relative_jmod_path.len, arena);
   path = sb_append(path, java_home, arena);
   path = sb_append(path, relative_jmod_path, arena);
 
   cf_read_jmod_file(resolver, sb_build(path), scratch_arena, arena);
 
   u32 dummy = 0;
-  str sanity_check = str_from_c("kotlin.io.ConsoleKt");
+  Str sanity_check = str_from_c("kotlin.io.ConsoleKt");
   if (!resolver_resolve_fully_qualified_name(resolver, sanity_check, &dummy,
                                              scratch_arena, arena)) {
     fprintf(
@@ -6165,8 +6165,8 @@ static void ty_end_scope(resolver_t *resolver) {
   resolver->scope_depth -= 1;
 }
 
-static u32 ty_declare_variable(resolver_t *resolver, str name, u32 node_i,
-                               arena_t *arena) {
+static u32 ty_declare_variable(resolver_t *resolver, Str name, u32 node_i,
+                               Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
@@ -6202,7 +6202,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
 
-  str name = par_token_to_str_view(resolver->parser, token_i);
+  Str name = par_token_to_str_view(resolver->parser, token_i);
 
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
     const ty_variable_t *const variable = &resolver->variables[i];
@@ -6220,7 +6220,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
-static str resolver_get_fqn_from_navigation_chain(const resolver_t *resolver,
+static Str resolver_get_fqn_from_navigation_chain(const resolver_t *resolver,
                                                   u32 node_i) {
   const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
   pg_assert(node->kind == AST_KIND_NAVIGATION);
@@ -6264,7 +6264,7 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
 
   u32 line = 0;
   u32 column = 0;
-  str token_string = {0};
+  Str token_string = {0};
   par_find_token_position(resolver->parser, previous_var_name_token, &line,
                           &column, &token_string);
   char error[256] = {0};
@@ -6276,7 +6276,7 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
 }
 
 static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
-                                 arena_t scratch_arena, arena_t *arena) {
+                                 Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
@@ -6293,11 +6293,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     return node->type_i = TYPE_BOOLEAN_I;
   }
   case AST_KIND_CALL: {
-    arena_t tmp_arena = scratch_arena;
+    Arena tmp_arena = scratch_arena;
 
     const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_UNRESOLVED_NAME);
-    str name = par_token_to_str_view(resolver->parser, lhs->main_token_i);
+    Str name = par_token_to_str_view(resolver->parser, lhs->main_token_i);
 
     // Resolve arguments.
     u32 *call_site_argument_types_i = NULL;
@@ -6322,7 +6322,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
               resolver, name, call_site_argument_types_i, &picked_method_type_i,
               &candidate_functions_i, tmp_arena, arena)) {
 
-        str_builder error = sb_new(256, &scratch_arena);
+        Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "failed to find matching function", arena);
 
         if (pg_array_len(candidate_functions_i) == 0) {
@@ -6388,7 +6388,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
       const ty_type_t *const type = &resolver->types[node->type_i];
       if (type->kind != TYPE_BOOLEAN) {
-        str_builder error = sb_new(256, &scratch_arena);
+        Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "incompatible types: got ", arena);
         error = sb_append(
             error,
@@ -6418,7 +6418,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
           error, ty_type_to_human_string(resolver->types, lhs_i, arena), arena);
@@ -6441,7 +6441,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_PIPE_PIPE: {
       const ty_type_t *const lhs_type = &resolver->types[lhs_i];
       if (lhs_type->kind != TYPE_BOOLEAN) {
-        str_builder error = sb_new(256, &scratch_arena);
+        Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(
             error, "incompatible types: expected Boolean, got: ", arena);
         error = sb_append(
@@ -6504,12 +6504,12 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
-      str lhs_type_human =
+      Str lhs_type_human =
           ty_type_to_human_string(resolver->types, lhs_type_i, arena);
-      str rhs_type_human =
+      Str rhs_type_human =
           ty_type_to_human_string(resolver->types, rhs_type_i, arena);
 
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible types: declared type is ", arena);
       error = sb_append(error, lhs_type_human, arena);
@@ -6541,11 +6541,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error,
                           "incompatible types, expected Boolean, got: ", arena);
 
-      str type_inferred_string =
+      Str type_inferred_string =
           ty_type_to_human_string(resolver->types, type_condition_i, arena);
       error = sb_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, (char *)error.data);
@@ -6564,11 +6564,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const ty_type_t *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error,
                           "incompatible types, expect Boolean, got: ", arena);
 
-      str type_inferred_string =
+      Str type_inferred_string =
           ty_type_to_human_string(resolver->types, type_condition_i, arena);
       error = sb_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, (char *)error.data);
@@ -6601,7 +6601,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     const u32 variable_i = ty_find_variable(resolver, node->main_token_i);
 
     if (variable_i == (u32)-1) {
-      str fqn = resolver_get_fqn_from_navigation_chain(resolver, node_i);
+      Str fqn = resolver_get_fqn_from_navigation_chain(resolver, node_i);
 
       if (resolver_resolve_fully_qualified_name(resolver, fqn, &node->type_i,
                                                 scratch_arena, arena)) {
@@ -6609,7 +6609,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       } else {
         const lex_token_t main_token =
             resolver->parser->lexer->tokens[node->main_token_i];
-        str_builder error = sb_new(256, &scratch_arena);
+        Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error,
                             "Unknown reference to a name, neither a variable "
                             "in scope or an external identifier: ",
@@ -6640,7 +6640,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   }
 
   case AST_KIND_TYPE: {
-    str type_literal_string =
+    Str type_literal_string =
         par_token_to_str_view(resolver->parser, node->main_token_i);
 
     if (str_eq_c(type_literal_string, "Any") ||
@@ -6677,7 +6677,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       const bool found = resolver_resolve_fully_qualified_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
       if (!found) {
-        str_builder error = sb_new(256, &scratch_arena);
+        Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "unknown type: ", arena);
         error = sb_append(error, type_literal_string, arena);
 
@@ -6719,7 +6719,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     ty_end_scope(resolver);
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
           error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
@@ -6762,7 +6762,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (!resolver_are_types_equal(resolver, &resolver->types[node->type_i],
                                   &resolver->types[return_type_i])) {
-      str_builder error = sb_new(256, &scratch_arena);
+      Str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible return type in function `", arena);
       error = sb_append(error,
@@ -6796,7 +6796,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 }
 
 static void resolver_collect_user_defined_function_signatures(
-    resolver_t *resolver, arena_t scratch_arena, arena_t *arena) {
+    resolver_t *resolver, Arena scratch_arena, Arena *arena) {
   for (u64 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
     par_ast_node_t *const node = &resolver->parser->nodes[i];
     if (node->kind != AST_KIND_FUNCTION_DEFINITION)
@@ -6879,7 +6879,7 @@ typedef struct {
 static void cg_frame_locals_push(cg_generator_t *gen,
                                  const cf_variable_t *variable,
                                  u16 *logical_local_index,
-                                 u16 *physical_local_index, arena_t *arena) {
+                                 u16 *physical_local_index, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(variable != NULL);
@@ -6907,7 +6907,7 @@ static void cg_frame_locals_push(cg_generator_t *gen,
 
 static u16 cg_import_constant(cf_constant_array_t *dst,
                               const cf_constant_array_t *src, u16 constant_i,
-                              arena_t *arena) {
+                              Arena *arena) {
   const cf_constant_t *const constant = cf_constant_array_get(src, constant_i);
 
   switch (constant->kind) {
@@ -6989,7 +6989,7 @@ static u16 cg_import_constant(cf_constant_array_t *dst,
 }
 
 static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
-                                      arena_t *arena) {
+                                      Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7024,7 +7024,7 @@ static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
   return jump_from_i;
 }
 
-static u16 cg_emit_jump(cg_generator_t *gen, arena_t *arena) {
+static u16 cg_emit_jump(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7041,7 +7041,7 @@ static u16 cg_emit_jump(cg_generator_t *gen, arena_t *arena) {
   return from_location;
 }
 
-static void cg_emit_pop(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_pop(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7056,7 +7056,7 @@ static void cg_emit_pop(cg_generator_t *gen, arena_t *arena) {
 }
 
 static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
-                                       arena_t *arena) {
+                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7076,7 +7076,7 @@ static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_store_variable_object(cg_generator_t *gen, u8 var_i,
-                                          arena_t *arena) {
+                                          Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7096,7 +7096,7 @@ static void cg_emit_store_variable_object(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_store_variable_long(cg_generator_t *gen, u8 var_i,
-                                        arena_t *arena) {
+                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7116,7 +7116,7 @@ static void cg_emit_store_variable_long(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_store_variable(cg_generator_t *gen, u8 var_i,
-                                   arena_t *arena) {
+                                   Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) > 0);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
@@ -7140,7 +7140,7 @@ static void cg_emit_store_variable(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
-                                      arena_t *arena) {
+                                      Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7160,7 +7160,7 @@ static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_load_variable_object(cg_generator_t *gen, u8 var_i,
-                                         arena_t *arena) {
+                                         Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7184,7 +7184,7 @@ static void cg_emit_load_variable_object(cg_generator_t *gen, u8 var_i,
 
 static void cg_emit_ldc(cg_generator_t *gen,
                         const cf_constant_array_t *constant_pool,
-                        u16 constant_i, arena_t *arena) {
+                        u16 constant_i, Arena *arena) {
 
   cf_code_array_push_u8(&gen->code->code, BYTECODE_LDC_W, arena);
 
@@ -7203,7 +7203,7 @@ static void cg_emit_ldc(cg_generator_t *gen,
 }
 
 static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
-                                       arena_t *arena) {
+                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7223,7 +7223,7 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
-                               arena_t *arena) {
+                               Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7247,7 +7247,7 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
 
 static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
                                    const ty_type_method_t *method_type,
-                                   arena_t *arena) {
+                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7276,7 +7276,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
 
 static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
                                   const ty_type_method_t *method_type,
-                                  arena_t *arena) {
+                                  Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7305,7 +7305,7 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
 
 static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
                                    const ty_type_method_t *method_type,
-                                   arena_t *arena) {
+                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7333,7 +7333,7 @@ static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
 
 static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
                                                cf_class_file_t *class_file,
-                                               u16 constant_i, arena_t *arena) {
+                                               u16 constant_i, Arena *arena) {
   const cf_constant_t *const constant =
       cf_constant_array_get(&class_file->constant_pool, constant_i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_METHOD_REF);
@@ -7342,7 +7342,7 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
       &class_file->constant_pool, constant->v.method_ref.name_and_type);
   pg_assert(name_and_type->kind == CONSTANT_POOL_KIND_NAME_AND_TYPE);
 
-  str descriptor = cf_constant_array_get_as_string(
+  Str descriptor = cf_constant_array_get_as_string(
       &class_file->constant_pool, name_and_type->v.name_and_type.descriptor);
 
   ty_type_t new_type = {0};
@@ -7354,7 +7354,7 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
                                         cf_class_file_t *class_file,
                                         const ty_type_t *method_type,
-                                        u16 locals_offset, arena_t *arena) {
+                                        u16 locals_offset, Arena *arena) {
   pg_assert(method_type->kind == TYPE_METHOD);
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
 
@@ -7501,7 +7501,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
             stack_size_after_inline_snippet);
 }
 
-static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_add(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7532,7 +7532,7 @@ static void cg_emit_add(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_neg(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_neg(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7555,7 +7555,7 @@ static void cg_emit_neg(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_lcmp(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_lcmp(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7572,7 +7572,7 @@ static void cg_emit_lcmp(cg_generator_t *gen, arena_t *arena) {
                       arena);
 }
 
-static void cg_emit_bipush(cg_generator_t *gen, u8 value, arena_t *arena) {
+static void cg_emit_bipush(cg_generator_t *gen, u8 value, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7587,7 +7587,7 @@ static void cg_emit_bipush(cg_generator_t *gen, u8 value, arena_t *arena) {
                       arena);
 }
 
-static void cg_emit_ixor(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_ixor(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7605,7 +7605,7 @@ static void cg_emit_ixor(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_mul(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_mul(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7636,7 +7636,7 @@ static void cg_emit_mul(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_div(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_div(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7667,7 +7667,7 @@ static void cg_emit_div(cg_generator_t *gen, arena_t *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_rem(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7701,7 +7701,7 @@ static void cg_emit_rem(cg_generator_t *gen, arena_t *arena) {
 static void
 cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
                                   cf_verification_info_t verification_info,
-                                  arena_t *arena) {
+                                  Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7722,7 +7722,7 @@ cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
 static void
 cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
                                   cf_verification_info_t verification_info,
-                                  arena_t *arena) {
+                                  Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7740,7 +7740,7 @@ cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_return_nothing(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_return_nothing(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7749,7 +7749,7 @@ static void cg_emit_return_nothing(cg_generator_t *gen, arena_t *arena) {
   cf_code_array_push_u8(&gen->code->code, BYTECODE_RETURN, arena);
 }
 
-static void cg_emit_return_value(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_return_value(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7783,7 +7783,7 @@ static void cg_begin_scope(cg_generator_t *gen) {
 static void
 stack_map_record_frame_at_pc(const cg_frame_t *frame,
                              cf_stack_map_frame_t **stack_map_frames, u16 pc,
-                             arena_t *arena) {
+                             Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
@@ -7849,7 +7849,7 @@ static bool cf_find_variable(const cg_frame_t *frame, u32 node_i,
 }
 
 static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
-                         u32 node_i, arena_t *arena);
+                         u32 node_i, Arena *arena);
 
 static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
@@ -7866,7 +7866,7 @@ static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
 // TODO: Make a primitive emerge to use here and in cg_emit_if_then_else.
 static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
                                            u8 conditional_jump_opcode,
-                                           arena_t *arena) {
+                                           Arena *arena) {
   // Assume the condition is already on the stack
 
   cf_code_array_push_u8(&gen->code->code, conditional_jump_opcode, arena);
@@ -7914,7 +7914,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
                                unconditional_jump_target_absolute, arena);
 }
 
-static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_gt(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7941,7 +7941,7 @@ static void cg_emit_gt(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_ne(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_ne(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7967,7 +7967,7 @@ static void cg_emit_ne(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_eq(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_eq(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7993,7 +7993,7 @@ static void cg_emit_eq(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_ge(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_ge(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8020,7 +8020,7 @@ static void cg_emit_ge(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_le(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_le(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8047,7 +8047,7 @@ static void cg_emit_le(cg_generator_t *gen, arena_t *arena) {
   }
 }
 
-static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
+static void cg_emit_lt(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8076,7 +8076,7 @@ static void cg_emit_lt(cg_generator_t *gen, arena_t *arena) {
 
 static void cg_emit_if_then_else(cg_generator_t *gen,
                                  cf_class_file_t *class_file, u32 node_i,
-                                 arena_t *arena) {
+                                 Arena *arena) {
   // clang-format off
 //
 //               IF 
@@ -8182,7 +8182,7 @@ static int stack_map_frame_sort(const void *a, const void *b) {
 
 static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
                                      cf_stack_map_frame_t *stack_map_frames,
-                                     arena_t *arena) {
+                                     Arena *arena) {
   pg_assert(first_method_frame != NULL);
   pg_assert(stack_map_frames != NULL);
   pg_assert(arena != NULL);
@@ -8252,8 +8252,8 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
 }
 
 __attribute__((unused)) static u16
-cg_add_class_name_in_constant_pool(cf_class_file_t *class_file, str class_name,
-                                   arena_t *arena) {
+cg_add_class_name_in_constant_pool(cf_class_file_t *class_file, Str class_name,
+                                   Arena *arena) {
   const u16 class_name_i =
       cf_add_constant_string(&class_file->constant_pool, class_name, arena);
   const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
@@ -8265,7 +8265,7 @@ cg_add_class_name_in_constant_pool(cf_class_file_t *class_file, str class_name,
 }
 
 static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
-                         u32 node_i, arena_t *arena) {
+                         u32 node_i, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
   pg_assert(gen->resolver->parser->lexer != NULL);
@@ -8401,7 +8401,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
       const u16 name_i =
           cf_constant_array_push(&class_file->constant_pool, &name, arena);
 
-      str_builder descriptor_s = sb_new(256, arena);
+      Str_builder descriptor_s = sb_new(256, arena);
       descriptor_s = cf_fill_descriptor_string(
           gen->resolver->types, descriptor_s, node->type_i, arena);
       const cf_constant_t descriptor = {.kind = CONSTANT_POOL_KIND_UTF8,
@@ -8440,7 +8440,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
         gen->resolver->parser->lexer->tokens[token_name_i];
     pg_assert(token_name.kind == TOKEN_KIND_IDENTIFIER);
 
-    str method_name = {
+    Str method_name = {
         .len = lex_identifier_length(gen->resolver->parser->buf,
                                      token_name.source_offset),
         .data = &gen->resolver->parser->buf.data[token_name.source_offset],
@@ -8448,7 +8448,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
     const u16 method_name_i =
         cf_add_constant_string(&class_file->constant_pool, method_name, arena);
 
-    str_builder descriptor = sb_new(64, arena);
+    Str_builder descriptor = sb_new(64, arena);
     descriptor = cf_fill_descriptor_string(gen->resolver->types, descriptor,
                                            node->type_i, arena);
     const u16 descriptor_i = cf_add_constant_string(
@@ -8905,7 +8905,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   case AST_KIND_STRING: {
     const u32 length =
         lex_string_length(gen->resolver->parser->buf, token.source_offset);
-    str s = {
+    Str s = {
         .data = gen->resolver->parser->buf.data + token.source_offset,
         .len = length,
     };
@@ -8990,7 +8990,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   }
 }
 
-static str cg_make_class_name_from_path(str path, arena_t *arena) {
+static Str cg_make_class_name_from_path(Str path, Arena *arena) {
 
   str_split_result_t slash_split = str_rsplit(path, '/');
   pg_assert(!str_is_empty(slash_split.right));
@@ -8999,14 +8999,14 @@ static str cg_make_class_name_from_path(str path, arena_t *arena) {
   pg_assert(dot_split.found);
   pg_assert(!str_is_empty(dot_split.left));
 
-  str_builder res = sb_clone(dot_split.left, arena);
+  Str_builder res = sb_clone(dot_split.left, arena);
   res = sb_capitalize_at(res, 0);
   return sb_build(res);
 }
 
 static void cg_emit_synthetic_class(cg_generator_t *gen,
                                     cf_class_file_t *class_file,
-                                    arena_t *arena) {
+                                    Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver != NULL);
   pg_assert(gen->resolver->parser != NULL);
@@ -9050,7 +9050,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
 
 static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
                          u16 name, u16 descriptor, cf_attribute_t *attributes,
-                         arena_t *arena) {
+                         Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
@@ -9066,14 +9066,14 @@ static u16 cg_add_method(cf_class_file_t *class_file, u16 access_flags,
 
 static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
                                                cf_class_file_t *class_file,
-                                               arena_t *arena) {
+                                               Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
   i32 method_i = -1;
-  str source_descriptor_str = str_from_c("([Ljava/lang/String;)V");
+  Str source_descriptor_str = str_from_c("([Ljava/lang/String;)V");
 
   for (u16 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -9083,12 +9083,12 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       continue;
 
     // A function not named `main`, skip.
-    str name = cf_constant_array_get_as_string(&class_file->constant_pool,
+    Str name = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                method->name);
     if (!str_eq_c(name, "main"))
       continue;
 
-    str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
+    Str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                      method->descriptor);
 
     // The entrypoint already exists as the JVM expects it, nothing to do.
@@ -9120,7 +9120,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
   // Generate code section for the new method.
   {
 
-    str target_descriptor_string = cf_constant_array_get_as_string(
+    Str target_descriptor_string = cf_constant_array_get_as_string(
         &class_file->constant_pool, target_method->descriptor);
     const cf_constant_t target_descriptor = {
         .kind = CONSTANT_POOL_KIND_UTF8,
@@ -9229,7 +9229,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 }
 
 static void cg_emit(resolver_t *resolver, cf_class_file_t *class_file,
-                    u32 root_i, arena_t *arena) {
+                    u32 root_i, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);

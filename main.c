@@ -45,8 +45,8 @@ int main(int argc, char *argv[]) {
   pg_assert(argc > 0);
 
   int opt = 0;
-  str cli_classpath = str_from_c(".");
-  str cli_java_home = {0};
+  Str cli_classpath = str_from_c(".");
+  Str cli_java_home = {0};
   bool cli_mem_debug = false;
 
   int options_index = 0;
@@ -76,8 +76,8 @@ int main(int argc, char *argv[]) {
     case 0: // Long option
     {
       struct option long_cli_option = long_cli_options[options_index];
-      str cli_option_name = str_from_c((char *)long_cli_option.name);
-      str cli_arg = str_from_c(optarg);
+      Str cli_option_name = str_from_c((char *)long_cli_option.name);
+      Str cli_arg = str_from_c(optarg);
       if (str_eq_c(cli_option_name, "java-home"))
         cli_java_home = cli_arg;
       if (str_eq_c(cli_option_name, "classpath"))
@@ -118,23 +118,23 @@ int main(int argc, char *argv[]) {
     print_usage_and_exit(argv[0]);
   }
 
-  mem_profile_t mem_profile = {
+  Mem_profile mem_profile = {
       .arena = arena_new(8 * MiB, NULL),
   };
-  arena_t arena =
+  Arena arena =
       arena_new(32 * MiB, cli_mem_debug ? &mem_profile : NULL); // 64 MiB
   LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
-  arena_t scratch_arena = arena_new(256 * MiB, NULL);
+  Arena scratch_arena = arena_new(256 * MiB, NULL);
 
-  str *class_path_entries =
+  Str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
 
   {
     // TODO: when parsing multiple files, need to allocate that.
     char *source_file_name_cstr = argv[optind];
-    str source_file_name = str_from_c(source_file_name_cstr);
+    Str source_file_name = str_from_c(source_file_name_cstr);
     if (!str_ends_with(source_file_name, str_from_c(".kt"))) {
       fprintf(stderr, "Expected an input file ending with .kt\n");
       exit(EINVAL);
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
         .file_path = source_file_name,
     };
 
-    str source = source_file_read_res.content;
+    Str source = source_file_read_res.content;
     pg_array_init_reserve(lexer.tokens, source.len, &arena);
     pg_array_init_reserve(lexer.line_table, source.len, &arena);
 
@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
 
-    const str class_file_path =
+    const Str class_file_path =
         cf_make_class_file_path_kt(source_file_name, &arena);
 
     resolver_t resolver = {0};
@@ -198,7 +198,7 @@ int main(int argc, char *argv[]) {
       LOG("------ After type checking%s", "");
       LOG("After type checking: arena_available=%lu", arena.end - arena.start);
 
-      arena_t tmp_arena = arena;
+      Arena tmp_arena = arena;
       resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
     }
 

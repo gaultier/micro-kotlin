@@ -65,20 +65,20 @@ static bool cli_log_verbose = false;
 
 // --------------------------- Arena
 
-typedef struct mem_profile mem_profile_t;
+typedef struct Mem_profile Mem_profile;
 typedef struct {
   u8 *start;
   u8 *end;
-  mem_profile_t *profile;
-} arena_t;
+  Mem_profile *profile;
+} Arena;
 
-__attribute__((warn_unused_result)) static arena_t
-arena_new(u64 cap, mem_profile_t *profile) {
+__attribute__((warn_unused_result)) static Arena
+arena_new(u64 cap, Mem_profile *profile) {
   u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
                  -1, 0);
   pg_assert(mem);
 
-  arena_t arena = {
+  Arena arena = {
       .profile = profile,
       .start = mem,
       .end = mem + cap,
@@ -86,12 +86,12 @@ arena_new(u64 cap, mem_profile_t *profile) {
   return arena;
 }
 
-static void mem_profile_record_alloc(mem_profile_t *profile, u64 objects_count,
+static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
                                      u64 bytes_count);
 
 __attribute__((warn_unused_result))
 __attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
-arena_alloc(arena_t *a, size_t size, size_t align, size_t count) {
+arena_alloc(Arena *a, size_t size, size_t align, size_t count) {
   pg_assert(a->start <= a->end);
   pg_assert(size > 0);
   pg_assert(align == 1 || align == 2 || align == 4 || align == 8);
