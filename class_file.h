@@ -131,10 +131,10 @@ typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_NULL = 6,
   VERIFICATION_INFO_OBJECT = 7,
   VERIFICATION_INFO_UNINITIALIZED = 8,
-} cf_verification_info_kind_t;
+} Jvm_verification_info;
 
 typedef struct {
-  cf_verification_info_kind_t kind;
+  Jvm_verification_info kind;
   pg_pad(1);
   u16 extra_data;
 } cf_verification_info_t;
@@ -193,7 +193,7 @@ struct cg_frame_t {
   pg_pad(4);
 };
 
-struct ty_type_t;
+struct Type;
 
 struct cf_constant_array_t;
 typedef struct cf_constant_array_t cf_constant_array_t;
@@ -216,7 +216,7 @@ typedef enum {
   TYPE_FLAG_INLINE_ONLY = 1 << 10,
 } ty_type_flag_t;
 
-struct ty_type_t {
+struct Type {
   Str this_class_name;
   Str super_class_name;
   Str package_name;
@@ -230,7 +230,7 @@ struct ty_type_t {
   u32 super_type_i;
 };
 
-typedef struct ty_type_t ty_type_t;
+typedef struct Type Type;
 
 typedef struct {
   u16 start_pc;
@@ -386,7 +386,7 @@ typedef struct {
   Str *imported_package_names;
   u64 class_file_loaded_count;
   ty_variable_t *variables;
-  ty_type_t *types;
+  Type *types;
   u32 current_type_i;
   u32 scope_depth;
   u32 current_function_i;
@@ -454,17 +454,17 @@ static void type_init_package_and_name(Str fully_qualified_jvm_name,
   *name = str_clone(slash_rplit_res.right, arena);
 }
 
-static const ty_type_t *resolver_eval_type(resolver_t *resolver,
-                                           const ty_type_t *in) {
+static const Type *resolver_eval_type(resolver_t *resolver,
+                                           const Type *in) {
   if (in->kind != TYPE_METHOD)
     return in;
 
-  ty_type_t *const return_type = &resolver->types[in->v.method.return_type_i];
+  Type *const return_type = &resolver->types[in->v.method.return_type_i];
 
   return resolver_eval_type(resolver, return_type);
 }
 
-static bool resolver_is_type_integer(const ty_type_t *type) {
+static bool resolver_is_type_integer(const Type *type) {
   switch (type->kind) {
   case TYPE_BYTE:
   case TYPE_SHORT:
@@ -478,8 +478,8 @@ static bool resolver_is_type_integer(const ty_type_t *type) {
 }
 
 static bool resolver_are_types_equal(const resolver_t *resolver,
-                                     const ty_type_t *lhs,
-                                     const ty_type_t *rhs) {
+                                     const Type *lhs,
+                                     const Type *rhs) {
   if (lhs->kind != rhs->kind)
     return false;
 
@@ -522,7 +522,7 @@ static bool resolver_are_types_equal(const resolver_t *resolver,
   return true;
 }
 
-static u16 resolver_widen_integer_type(const ty_type_t *type) {
+static u16 resolver_widen_integer_type(const Type *type) {
   pg_assert(resolver_is_type_integer(type));
 
   if (type->kind == TYPE_INT) {
@@ -534,8 +534,8 @@ static u16 resolver_widen_integer_type(const ty_type_t *type) {
   }
 }
 
-static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
-                                                const ty_type_t *b) {
+static bool resolver_is_integer_type_subtype_of(const Type *a,
+                                                const Type *b) {
   pg_assert(resolver_is_type_integer(a));
 
   // Every type is a subtype of Any.
@@ -559,12 +559,12 @@ static bool resolver_is_integer_type_subtype_of(const ty_type_t *a,
          resolver_widen_integer_type(b);
 }
 
-static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
+static bool resolver_resolve_super_lazily(resolver_t *resolver, Type *type,
                                           Arena scratch_arena,
                                           Arena *arena);
 
-static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
-                                        const ty_type_t *b,
+static bool resolver_is_type_subtype_of(resolver_t *resolver, Type *a,
+                                        const Type *b,
                                         Arena scratch_arena, Arena *arena) {
   // `A <: A` always.
   if (resolver_are_types_equal(resolver, a, b))
@@ -590,7 +590,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
     return false;
 
   case TYPE_INSTANCE: {
-    ty_type_t *it = a;
+    Type *it = a;
     while (true) {
       if (!resolver_resolve_super_lazily(resolver, it, scratch_arena, arena))
         return false;
@@ -616,7 +616,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, ty_type_t *a,
 
 static bool resolver_is_function_candidate_applicable(
     resolver_t *resolver, const u32 *call_site_argument_types_i,
-    const ty_type_t *function_definition_type, Arena scratch_arena,
+    const Type *function_definition_type, Arena scratch_arena,
     Arena *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
@@ -633,8 +633,8 @@ static bool resolver_is_function_candidate_applicable(
 
   for (u8 i = 0; i < call_argument_count; i++) {
     const u32 call_site_argument_type_i = call_site_argument_types_i[i];
-    ty_type_t *call_argument = &resolver->types[call_site_argument_type_i];
-    const ty_type_t *definition_argument =
+    Type *call_argument = &resolver->types[call_site_argument_type_i];
+    const Type *definition_argument =
         &resolver->types[definition->argument_types_i[i]];
 
     const bool is_call_argument_subtype_of_definition_argument =
@@ -653,11 +653,11 @@ static bool resolver_is_function_candidate_applicable(
   return true;
 }
 
-static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
+static u32 resolver_add_type(resolver_t *resolver, Type *new_type,
                              Arena *arena);
 
 static u16
-cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
+cf_verification_info_kind_word_count(Jvm_verification_info kind) {
   switch (kind) {
   case VERIFICATION_INFO_TOP:
   case VERIFICATION_INFO_INT:
@@ -674,7 +674,7 @@ cf_verification_info_kind_word_count(cf_verification_info_kind_t kind) {
 }
 
 static cf_verification_info_t
-cg_type_to_verification_info(const ty_type_t *type) {
+cg_type_to_verification_info(const Type *type) {
 
   switch (type->kind) {
   case TYPE_BOOLEAN:
@@ -926,13 +926,13 @@ cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
   return &constant_pool->values[i - 1];
 }
 
-static Str_builder cf_fill_descriptor_string(const ty_type_t *types,
+static Str_builder cf_fill_descriptor_string(const Type *types,
                                              Str_builder sb, u32 type_i,
                                              Arena *arena) {
   pg_assert(types != NULL);
   pg_assert(type_i < pg_array_len(types));
 
-  const ty_type_t *const type = &types[type_i];
+  const Type *const type = &types[type_i];
 
   switch (type->kind) {
   case TYPE_UNIT: {
@@ -997,7 +997,7 @@ static Str_builder cf_fill_descriptor_string(const ty_type_t *types,
 }
 
 static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
-                               ty_type_t *type, Arena *arena) {
+                               Type *type, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(type != NULL);
   pg_assert(arena != NULL);
@@ -1080,7 +1080,7 @@ static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
 
   case '[': {
     type->kind = TYPE_ARRAY;
-    ty_type_t item_type = {0};
+    Type item_type = {0};
 
     Str descriptor_remaining = {
         .data = remaining.data + 1,
@@ -1112,7 +1112,7 @@ static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
       if (str_first(remaining) == ')')
         break;
 
-      ty_type_t argument_type = {0};
+      Type argument_type = {0};
       remaining =
           cf_parse_descriptor(resolver, remaining, &argument_type, arena);
       const u32 argument_type_i =
@@ -1123,7 +1123,7 @@ static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
     pg_assert(remaining.data[0] = ')');
     remaining = str_advance(remaining, 1);
 
-    ty_type_t return_type = {0};
+    Type return_type = {0};
     remaining = cf_parse_descriptor(resolver, remaining, &return_type, arena);
     // TODO: Check cache before adding the type.
 
@@ -3643,8 +3643,8 @@ static void par_find_token_position(const parser_t *parser, lex_token_t token,
   /* pg_assert(*column > 0); */
 }
 
-static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
-  const ty_type_t *const type = &types[type_i];
+static char *ty_type_kind_string(const Type *types, u32 type_i) {
+  const Type *const type = &types[type_i];
 
   switch (type->kind) {
   case TYPE_ANY:
@@ -3683,9 +3683,9 @@ static char *ty_type_kind_string(const ty_type_t *types, u32 type_i) {
   pg_assert(0 && "unreachable");
 }
 
-static Str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
+static Str Typeo_human_string(const Type *types, u32 type_i,
                                    Arena *arena) {
-  const ty_type_t *const type = &types[type_i];
+  const Type *const type = &types[type_i];
 
   switch (type->kind) {
   case TYPE_ANY:
@@ -3714,7 +3714,7 @@ static Str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     Str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
     res = sb_append(res,
-                    ty_type_to_human_string(types, type->v.array_type_i, arena),
+                    Typeo_human_string(types, type->v.array_type_i, arena),
                     arena);
     res = sb_append_char(res, '>', arena);
     return sb_build(res);
@@ -3731,14 +3731,14 @@ static Str ty_type_to_human_string(const ty_type_t *types, u32 type_i,
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
       const u32 argument_type_i = method_type->argument_types_i[i];
       res = sb_append(
-          res, ty_type_to_human_string(types, argument_type_i, arena), arena);
+          res, Typeo_human_string(types, argument_type_i, arena), arena);
 
       if (i < pg_array_len(method_type->argument_types_i) - 1)
         res = sb_append_c(res, ", ", arena);
     }
     res = sb_append_c(res, ") : ", arena);
     res = sb_append(
-        res, ty_type_to_human_string(types, method_type->return_type_i, arena),
+        res, Typeo_human_string(types, method_type->return_type_i, arena),
         arena);
     return sb_build(res);
   }
@@ -5015,7 +5015,7 @@ static u32 par_parse(parser_t *parser, Arena *arena) {
 // --------------------------------- Typing
 
 // TODO: Caching?
-static u32 resolver_add_type(resolver_t *resolver, ty_type_t *new_type,
+static u32 resolver_add_type(resolver_t *resolver, Type *new_type,
                              Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
@@ -5082,7 +5082,7 @@ static void resolver_load_methods_from_class_file(
 
   bool has_at_least_one_inline_only_method = false;
   const u64 initial_types_count = pg_array_len(resolver->types);
-  const ty_type_t *const this_class_type = &resolver->types[this_class_type_i];
+  const Type *const this_class_type = &resolver->types[this_class_type_i];
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
     const cf_method_t *const method = &class_file->methods[i];
@@ -5091,7 +5091,7 @@ static void resolver_load_methods_from_class_file(
     Str name = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                method->name);
 
-    ty_type_t type = {
+    Type type = {
         .this_class_name = this_class_type->this_class_name,
         .package_name = this_class_type->package_name,
     };
@@ -5150,7 +5150,7 @@ static void resolver_load_methods_from_class_file(
     cf_constant_array_t *constant_pool_clone =
         cf_constant_array_clone(&class_file->constant_pool, arena);
     for (u64 i = initial_types_count; i < pg_array_len(resolver->types); i++) {
-      ty_type_t *const type = &resolver->types[i];
+      Type *const type = &resolver->types[i];
       if (type->kind == TYPE_METHOD && (type->flags & TYPE_FLAG_INLINE_ONLY))
         type->v.method.constant_pool = constant_pool_clone;
     }
@@ -5327,7 +5327,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
                     uncompressed_size_according_to_directory_entry),
             &local_file_header, &class_file, &scratch_arena);
 
-        ty_type_t type = {.kind = TYPE_INSTANCE};
+        Type type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
@@ -5378,7 +5378,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
         u8 *dst_current = dst.data;
         cf_buf_read_class_file(dst, &dst_current, &class_file, &scratch_arena);
 
-        ty_type_t type = {.kind = TYPE_INSTANCE};
+        Type type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
@@ -5488,7 +5488,7 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
   pg_assert(*candidate_functions_i != NULL);
 
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
-    const ty_type_t *const type = &resolver->types[i];
+    const Type *const type = &resolver->types[i];
     if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR) {
       const ty_type_method_t *const method = &type->v.method;
 
@@ -5514,14 +5514,14 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
 static Str resolver_function_to_human_string(const resolver_t *resolver,
                                              u32 type_i, Arena *arena) {
 
-  const ty_type_t *const type = &resolver->types[type_i];
+  const Type *const type = &resolver->types[type_i];
 
   if (!(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR))
-    return ty_type_to_human_string(resolver->types, type_i, arena);
+    return Typeo_human_string(resolver->types, type_i, arena);
 
   const ty_type_method_t *const method = &type->v.method;
 
-  const ty_type_t *const this_class_type =
+  const Type *const this_class_type =
       &resolver->types[method->this_class_type_i];
 
   Str_builder res = sb_new(
@@ -5547,7 +5547,7 @@ static Str resolver_function_to_human_string(const resolver_t *resolver,
 
   const u8 argument_count = pg_array_len(method->argument_types_i);
   for (u8 i = 0; i < argument_count; i++) {
-    Str argument_type_string = ty_type_to_human_string(
+    Str argument_type_string = Typeo_human_string(
         resolver->types, method->argument_types_i[i], arena);
 
     res = sb_append(res, argument_type_string, arena);
@@ -5558,7 +5558,7 @@ static Str resolver_function_to_human_string(const resolver_t *resolver,
 
   res = sb_append_c(res, ") : ", arena);
   Str return_type_string =
-      ty_type_to_human_string(resolver->types, method->return_type_i, arena);
+      Typeo_human_string(resolver->types, method->return_type_i, arena);
   res = sb_append(res, return_type_string, arena);
 
   res = sb_append_c(res, " from ", arena);
@@ -5584,7 +5584,7 @@ static void resolver_remove_non_applicable_function_candidates(
 
   u64 i = 0;
   while (i < pg_array_len(candidate_functions_i)) {
-    const ty_type_t *const candidate_type =
+    const Type *const candidate_type =
         &resolver->types[candidate_functions_i[i]];
     if (!resolver_is_function_candidate_applicable(
             resolver, call_site_argument_types_i, candidate_type, scratch_arena,
@@ -5603,7 +5603,7 @@ typedef enum __attribute__((packed)) {
 } type_applicability_t;
 
 static type_applicability_t resolver_check_applicability_of_candidate_pair(
-    resolver_t *resolver, const ty_type_t *a, const ty_type_t *b,
+    resolver_t *resolver, const Type *a, const Type *b,
     Arena scratch_arena, Arena *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
   pg_assert(a->v.method.argument_types_i != NULL);
@@ -5618,8 +5618,8 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
   pg_assert(pg_array_len(b->v.method.argument_types_i) == call_argument_count);
 
   for (u64 k = 0; k < call_argument_count; k++) {
-    ty_type_t *argument_a = &resolver->types[a->v.method.argument_types_i[k]];
-    const ty_type_t *argument_b =
+    Type *argument_a = &resolver->types[a->v.method.argument_types_i[k]];
+    const Type *argument_b =
         &resolver->types[b->v.method.argument_types_i[k]];
 
     if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b,
@@ -5654,8 +5654,8 @@ static u32 resolver_select_most_specific_candidate_function(
         if (tombstones[a_index] || tombstones[b_index])
           continue;
 
-        const ty_type_t *const a = &resolver->types[a_type_i];
-        const ty_type_t *const b = &resolver->types[b_type_i];
+        const Type *const a = &resolver->types[a_type_i];
+        const Type *const b = &resolver->types[b_type_i];
 
         const type_applicability_t a_b =
             resolver_check_applicability_of_candidate_pair(
@@ -5757,8 +5757,8 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   pg_assert(rhs_i < pg_array_len(resolver->types));
   pg_assert(result_i != NULL);
 
-  const ty_type_t *const lhs_type = &resolver->types[lhs_i];
-  const ty_type_t *const rhs_type = &resolver->types[rhs_i];
+  const Type *const lhs_type = &resolver->types[lhs_i];
+  const Type *const rhs_type = &resolver->types[rhs_i];
 
   if (resolver_are_types_equal(resolver, lhs_type, rhs_type)) {
     *result_i = lhs_i;
@@ -5832,7 +5832,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   const char *const type_kind =
       ty_type_kind_string(resolver->types, node->type_i);
   Str human_type =
-      ty_type_to_human_string(resolver->types, node->type_i, arena);
+      Typeo_human_string(resolver->types, node->type_i, arena);
 
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
@@ -5972,7 +5972,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
 
   // Check if cached first.
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
-    const ty_type_t *const type = &resolver->types[i];
+    const Type *const type = &resolver->types[i];
 
     if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR)
       continue;
@@ -6035,7 +6035,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
 
       pg_assert(str_eq(fqn, class_file.class_name));
 
-      ty_type_t this_type = {.kind = TYPE_INSTANCE};
+      Type this_type = {.kind = TYPE_INSTANCE};
       type_init_package_and_name(class_file.class_name, &this_type.package_name,
                                  &this_type.this_class_name, arena);
 
@@ -6057,7 +6057,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
     cf_read_jar_file(resolver, class_path_entry, scratch_arena, arena);
 
     for (u64 i = previous_len; i < pg_array_len(resolver->types); i++) {
-      const ty_type_t *const type = &resolver->types[i];
+      const Type *const type = &resolver->types[i];
       if (type->kind == TYPE_INSTANCE &&
           type_fqn_equal_to_package_and_name(
               fqn, type->package_name, type->this_class_name, scratch_arena)) {
@@ -6072,7 +6072,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
 
 // TODO: Check if there is a way not to do it lazily. Not goog to have I/O
 // randomly pop up in the middle of type checking.
-static bool resolver_resolve_super_lazily(resolver_t *resolver, ty_type_t *type,
+static bool resolver_resolve_super_lazily(resolver_t *resolver, Type *type,
                                           Arena scratch_arena,
                                           Arena *arena) {
 
@@ -6103,7 +6103,7 @@ static void resolver_load_standard_types(resolver_t *resolver, Str java_home,
   pg_assert(!str_is_empty(java_home));
   pg_assert(arena != NULL);
 
-  const ty_type_t known_types[] = {
+  const Type known_types[] = {
       [TYPE_ANY_I] = {.kind = TYPE_ANY},
       [TYPE_BOOLEAN_I] = {.kind = TYPE_BOOLEAN},
       [TYPE_BYTE_I] = {.kind = TYPE_BYTE},
@@ -6286,7 +6286,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    pg_array_append(resolver->types, (ty_type_t){.kind = TYPE_ANY}, arena);
+    pg_array_append(resolver->types, (Type){.kind = TYPE_ANY}, arena);
 
     return node->type_i = pg_array_last_index(resolver->types);
   case AST_KIND_BOOL: {
@@ -6348,7 +6348,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     }
 
     pg_assert(picked_method_type_i > 0);
-    const ty_type_t *picked_method_type =
+    const Type *picked_method_type =
         &resolver->types[picked_method_type_i];
     pg_assert(picked_method_type->kind == TYPE_METHOD ||
               picked_method_type->kind == TYPE_CONSTRUCTOR);
@@ -6386,13 +6386,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     case TOKEN_KIND_NOT:
       node->type_i =
           resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
-      const ty_type_t *const type = &resolver->types[node->type_i];
+      const Type *const type = &resolver->types[node->type_i];
       if (type->kind != TYPE_BOOLEAN) {
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "incompatible types: got ", arena);
         error = sb_append(
             error,
-            ty_type_to_human_string(resolver->types, node->type_i, arena),
+            Typeo_human_string(resolver->types, node->type_i, arena),
             arena);
         error = sb_append_c(error, ", expected Boolean ", arena);
         par_error(resolver->parser, token, (char *)error.data);
@@ -6421,10 +6421,10 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, lhs_i, arena), arena);
+          error, Typeo_human_string(resolver->types, lhs_i, arena), arena);
       error = sb_append_c(error, " vs ", arena);
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, rhs_i, arena), arena);
+          error, Typeo_human_string(resolver->types, rhs_i, arena), arena);
       par_error(resolver->parser, token, (char *)error.data);
     }
 
@@ -6439,13 +6439,13 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const ty_type_t *const lhs_type = &resolver->types[lhs_i];
+      const Type *const lhs_type = &resolver->types[lhs_i];
       if (lhs_type->kind != TYPE_BOOLEAN) {
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(
             error, "incompatible types: expected Boolean, got: ", arena);
         error = sb_append(
-            error, ty_type_to_human_string(resolver->types, lhs_i, arena),
+            error, Typeo_human_string(resolver->types, lhs_i, arena),
             arena);
         par_error(resolver->parser, token, (char *)error.data);
       }
@@ -6505,9 +6505,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     if (!ty_merge_types(resolver, lhs_type_i, rhs_type_i, &node->type_i)) {
       Str lhs_type_human =
-          ty_type_to_human_string(resolver->types, lhs_type_i, arena);
+          Typeo_human_string(resolver->types, lhs_type_i, arena);
       Str rhs_type_human =
-          ty_type_to_human_string(resolver->types, rhs_type_i, arena);
+          Typeo_human_string(resolver->types, rhs_type_i, arena);
 
       Str_builder error = sb_new(256, &scratch_arena);
       error =
@@ -6538,7 +6538,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     const u32 type_condition_i =
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
-    const ty_type_t *const type_condition = &resolver->types[type_condition_i];
+    const Type *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
       Str_builder error = sb_new(256, &scratch_arena);
@@ -6546,7 +6546,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                           "incompatible types, expected Boolean, got: ", arena);
 
       Str type_inferred_string =
-          ty_type_to_human_string(resolver->types, type_condition_i, arena);
+          Typeo_human_string(resolver->types, type_condition_i, arena);
       error = sb_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, (char *)error.data);
     }
@@ -6561,7 +6561,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 
     const u32 type_condition_i =
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
-    const ty_type_t *const type_condition = &resolver->types[type_condition_i];
+    const Type *const type_condition = &resolver->types[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
       Str_builder error = sb_new(256, &scratch_arena);
@@ -6569,7 +6569,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                           "incompatible types, expect Boolean, got: ", arena);
 
       Str type_inferred_string =
-          ty_type_to_human_string(resolver->types, type_condition_i, arena);
+          Typeo_human_string(resolver->types, type_condition_i, arena);
       error = sb_append(error, type_inferred_string, arena);
       par_error(resolver->parser, token, (char *)error.data);
     }
@@ -6722,11 +6722,11 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
       Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, lhs_type_i, arena),
+          error, Typeo_human_string(resolver->types, lhs_type_i, arena),
           arena);
       error = sb_append_c(error, " vs ", arena);
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, rhs_type_i, arena),
+          error, Typeo_human_string(resolver->types, rhs_type_i, arena),
           arena);
       par_error(resolver->parser, token, (char *)error.data);
     }
@@ -6753,7 +6753,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
     const par_ast_node_t *const current_function =
         &resolver->parser->nodes[resolver->current_function_i];
-    const ty_type_t *const function_type =
+    const Type *const function_type =
         &resolver->types[current_function->type_i];
 
     pg_assert(function_type->kind == TYPE_METHOD ||
@@ -6771,17 +6771,17 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                         arena);
       error = sb_append_c(error, "` of type ", arena);
       error = sb_append(error,
-                        ty_type_to_human_string(
+                        Typeo_human_string(
                             resolver->types, current_function->type_i, arena),
                         arena);
       error = sb_append_c(error, ": got ", arena);
 
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, node->type_i, arena),
+          error, Typeo_human_string(resolver->types, node->type_i, arena),
           arena);
       error = sb_append_c(error, ", expected ", arena);
       error = sb_append(
-          error, ty_type_to_human_string(resolver->types, return_type_i, arena),
+          error, Typeo_human_string(resolver->types, return_type_i, arena),
           arena);
       par_error(resolver->parser, token, (char *)error.data);
     }
@@ -6816,7 +6816,7 @@ static void resolver_collect_user_defined_function_signatures(
 
     const lex_token_t name_token =
         resolver->parser->lexer->tokens[node->main_token_i];
-    ty_type_t type = {
+    Type type = {
         .kind = TYPE_METHOD,
         .package_name = resolver->parser->current_package,
         .this_class_name = resolver->this_class_name,
@@ -7121,7 +7121,7 @@ static void cg_emit_store_variable(cg_generator_t *gen, u8 var_i,
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  const cf_verification_info_kind_t kind =
+  const Jvm_verification_info kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7262,7 +7262,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
 
-  const ty_type_t *const return_type =
+  const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
   if (return_type->kind == TYPE_UNIT)
@@ -7291,7 +7291,7 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
 
-  const ty_type_t *const return_type =
+  const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
   if (return_type->kind == TYPE_UNIT)
@@ -7320,7 +7320,7 @@ static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
   for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
     cg_frame_stack_pop(gen->frame);
 
-  const ty_type_t *const return_type =
+  const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
   pg_assert(return_type->kind != TYPE_UNIT);
@@ -7345,7 +7345,7 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
   Str descriptor = cf_constant_array_get_as_string(
       &class_file->constant_pool, name_and_type->v.name_and_type.descriptor);
 
-  ty_type_t new_type = {0};
+  Type new_type = {0};
   cf_parse_descriptor(gen->resolver, descriptor, &new_type, arena);
 
   return resolver_add_type(gen->resolver, &new_type, arena);
@@ -7353,7 +7353,7 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
 
 static void cg_emit_inlined_method_call(cg_generator_t *gen,
                                         cf_class_file_t *class_file,
-                                        const ty_type_t *method_type,
+                                        const Type *method_type,
                                         u16 locals_offset, Arena *arena) {
   pg_assert(method_type->kind == TYPE_METHOD);
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
@@ -7398,7 +7398,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
 
       const u32 invoked_type_i = cg_make_type_from_method_descriptor(
           gen, class_file, method_ref_gen_i, arena);
-      const ty_type_t *const invoked_type =
+      const Type *const invoked_type =
           &gen->resolver->types[invoked_type_i];
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
@@ -7479,7 +7479,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
 
       const u32 invoked_type_i = cg_make_type_from_method_descriptor(
           gen, class_file, method_ref_gen_i, arena);
-      const ty_type_t *const invoked_type =
+      const Type *const invoked_type =
           &gen->resolver->types[invoked_type_i];
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
@@ -7509,11 +7509,11 @@ static void cg_emit_add(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame->stack != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
 
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7540,7 +7540,7 @@ static void cg_emit_neg(cg_generator_t *gen, Arena *arena) {
   pg_assert(gen->frame->stack != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 1);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const cf_verification_info_kind_t kind =
+  const Jvm_verification_info kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7615,9 +7615,9 @@ static void cg_emit_mul(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7646,9 +7646,9 @@ static void cg_emit_div(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7677,9 +7677,9 @@ static void cg_emit_rem(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7757,7 +7757,7 @@ static void cg_emit_return_value(cg_generator_t *gen, Arena *arena) {
 
   pg_assert(pg_array_len(gen->frame->stack) >= 1);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const cf_verification_info_kind_t kind =
+  const Jvm_verification_info kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7920,9 +7920,9 @@ static void cg_emit_gt(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7947,9 +7947,9 @@ static void cg_emit_ne(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7973,9 +7973,9 @@ static void cg_emit_eq(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7999,9 +7999,9 @@ static void cg_emit_ge(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8026,9 +8026,9 @@ static void cg_emit_le(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8053,9 +8053,9 @@ static void cg_emit_lt(cg_generator_t *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const cf_verification_info_kind_t kind_a =
+  const Jvm_verification_info kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const cf_verification_info_kind_t kind_b =
+  const Jvm_verification_info kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8280,7 +8280,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
   const par_ast_node_t *const node = &gen->resolver->parser->nodes[node_i];
   const lex_token_t token =
       gen->resolver->parser->lexer->tokens[node->main_token_i];
-  const ty_type_t *const type = &gen->resolver->types[node->type_i];
+  const Type *const type = &gen->resolver->types[node->type_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
@@ -8307,7 +8307,7 @@ static void cg_emit_node(cg_generator_t *gen, cf_class_file_t *class_file,
               pg_array_len(gen->resolver->parser->lexer->tokens));
 
     cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
-    cf_verification_info_kind_t verification_info_kind = VERIFICATION_INFO_INT;
+    Jvm_verification_info verification_info_kind = VERIFICATION_INFO_INT;
     if (type->kind == TYPE_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
@@ -9155,14 +9155,14 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     // Fill locals (method arguments).
     {
-      const ty_type_t string_type = {
+      const Type string_type = {
           .kind = TYPE_INSTANCE,
           .this_class_name = str_from_c("java/lang/String"),
       };
       pg_array_append(gen->resolver->types, string_type, arena);
       const u32 string_type_i = pg_array_last_index(gen->resolver->types);
 
-      const ty_type_t source_method_argument_types = {
+      const Type source_method_argument_types = {
           .kind = TYPE_ARRAY,
           .this_class_name = str_from_c("FIXME"),
           .v = {.array_type_i = string_type_i},
