@@ -7886,14 +7886,13 @@ static void codegen_emit_ge(codegen_generator *gen, Arena *arena) {
 
 static void codegen_emit_le(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7913,14 +7912,13 @@ static void codegen_emit_le(codegen_generator *gen, Arena *arena) {
 
 static void codegen_emit_lt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7968,8 +7966,6 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
   pg_assert(arena != NULL);
   pg_assert(node_i < gen->resolver->parser->nodes.len);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
 
   const Ast *const node = &gen->resolver->parser->nodes.data[node_i];
   pg_assert(node->type_i > 0);
@@ -8067,8 +8063,7 @@ static void stack_map_resolve_frames(const codegen_frame *first_method_frame,
     const codegen_frame *const previous_frame =
         i > 0 ? stack_map_frames.data[i - 1].frame : first_method_frame;
 
-    i16 locals_delta =
-        pg_array_len(frame->locals) - pg_array_len(previous_frame->locals);
+    i16 locals_delta = frame->locals.len - previous_frame->locals.len;
 
     i32 offset_delta =
         i == 0 ? stack_map_frame->pc
@@ -8211,7 +8206,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const u16 initial_locals_physical_count =
           gen->frame->locals_physical_count;
 
-      u64 stack_index = pg_array_last_index(gen->frame->stack);
+      u64 stack_index = array32_last_index(gen->frame->stack);
 
       for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
         const u32 argument_i = node->nodes[i];
@@ -8221,7 +8216,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
         // b c` with the corresponding verification info.
         const Jvm_verification_info verification_info =
-            gen->frame->stack[stack_index];
+            gen->frame->stack.data[stack_index];
         const Jvm_variable variable = {
             .node_i = argument_i,
             .type_i = argument->type_i,
@@ -8427,7 +8422,6 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   }
   case AST_KIND_BINARY: {
     pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->locals != NULL);
 
     pg_assert(node->lhs < gen->resolver->parser->nodes.len);
     pg_assert(node->rhs < gen->resolver->parser->nodes.len);
@@ -8652,14 +8646,13 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   case AST_KIND_LIST: {
     if (gen->code != NULL) {
       pg_assert(gen->frame != NULL);
-      pg_assert(gen->frame->locals != NULL);
     }
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       const u32 child_i = node->nodes[i];
 
       if (gen->frame != NULL) {
-        pg_assert(pg_array_len(gen->frame->stack) == 0);
+        pg_assert(array32_is_empty(gen->frame->stack));
       }
       codegen_emit_node(gen, class_file, child_i, arena);
 
@@ -8671,7 +8664,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const Ast *const child = &gen->resolver->parser->nodes.data[child_i];
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
-        while (pg_array_len(gen->frame->stack) > 0)
+        while (!array32_is_empty(gen->frame->stack))
           codegen_emit_pop(gen, arena);
       }
     }
@@ -8680,7 +8673,6 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   }
   case AST_KIND_VAR_DEFINITION: {
     pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->locals != NULL);
     pg_assert(node->type_i > 0);
 
     codegen_emit_node(gen, class_file, node->lhs, arena);
@@ -8706,7 +8698,6 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   }
   case AST_KIND_VAR_REFERENCE: {
     pg_assert(gen->frame != NULL);
-    pg_assert(gen->frame->locals != NULL);
     pg_assert(node->type_i > 0);
 
     pg_assert(node->lhs > 0);
@@ -8721,7 +8712,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
                                 &physical_local_index));
 
     const Jvm_verification_info verification_info =
-        gen->frame->locals[logical_local_index].verification_info;
+        gen->frame->locals.data[logical_local_index].verification_info;
     if (verification_info.kind == VERIFICATION_INFO_INT)
       codegen_emit_load_variable_int(gen, physical_local_index, arena);
     else if (verification_info.kind == VERIFICATION_INFO_LONG)

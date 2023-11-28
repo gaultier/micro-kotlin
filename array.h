@@ -129,7 +129,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
       .cap = _len,                                                             \
       .data = ((_len) > 0)                                                     \
                   ? memcpy(arena_alloc(arena, sizeof(T), _Alignof(T), _len),   \
-                           (void *)src, _len * sizeof(T))                      \
+                           (void *)src, (_len) * sizeof(T))                    \
                   : NULL,                                                      \
   })
 
@@ -149,7 +149,8 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 #define array32_clear(array) (array)->len = 0
 
 #define array32_drop(array, n)                                                 \
-  (array)->len = ((array)->len > n ? 0 : (array)->len - n)
+  (pg_assert(n <= (array)->len), (array)->len -= (n),                          \
+   memset(&(array)[(array)->len], 0, (n) * sizeof((array)->data[0])))
 
 #define array32_clone(T, dst, src, arena)                                      \
   do {                                                                         \
