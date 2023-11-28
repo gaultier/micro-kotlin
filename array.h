@@ -107,7 +107,8 @@ typedef struct pg_array_header_t {
 
 static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                          u32 item_align, Arena *arena) {
-  *cap = *cap == 0 ? 16 : *cap * 2;
+  // Big initial capacity because resizing is costly in an arena.
+  *cap = *cap == 0 ? 512 : *cap * 2;
   void *new_data = arena_alloc(arena, item_size, item_align, *cap);
   pg_assert(new_data);
 
@@ -123,7 +124,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                   sizeof(*(array)->data), _Alignof(*(array)->data), arena),    \
    (array)->data + (array)->len++ : (array)->data + (array)->len++)
 
-#define array32_make_from_slice(T, src, _len, arena)                               \
+#define array32_make_from_slice(T, src, _len, arena)                           \
   ((Array32(T)){                                                               \
       .len = _len,                                                             \
       .cap = _len,                                                             \
@@ -166,7 +167,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
     array32_drop(array, 1);                                                    \
   } while (0)
 
-#define array32_append_slice(array, src,src_len)
+#define array32_append_slice(array, src, src_len)
 
 Array32_struct(_Bool);
 typedef Array32(_Bool) Array32(bool);

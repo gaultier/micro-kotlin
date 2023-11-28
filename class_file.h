@@ -1184,6 +1184,7 @@ typedef struct {
   u16 start_pc;
   u16 line_number;
 } Jvm_line_number_table_entry;
+Array32_struct(Jvm_line_number_table_entry);
 
 struct Jvm_attribute {
   union {
@@ -1200,8 +1201,8 @@ struct Jvm_attribute {
       u16 source_file;
     } source_file; // ATTRIBUTE_KIND_SOURCE_FILE
 
-    Jvm_line_number_table_entry
-        *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
+    Array32(Jvm_line_number_table_entry)
+        line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
     Array32(Stack_map_frame) stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
     Array32(Jvm_annotation)
@@ -1588,15 +1589,15 @@ static void jvm_buf_read_line_number_table_attribute(
             attribute_len);
 
   Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
-  pg_array_init_reserve(attribute.v.line_number_table_entries, table_len,
-                        arena);
+  attribute.v.line_number_table_entries =
+      array32_make(Jvm_line_number_table_entry, 0, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
     Jvm_line_number_table_entry entry = {
         .start_pc = buf_read_be_u16(buf, current),
         .line_number = buf_read_be_u16(buf, current),
     };
-    pg_array_append(attribute.v.line_number_table_entries, entry, arena);
+    *array32_push(&attribute.v.line_number_table_entries, arena) = entry;
   }
 
   *array32_push(&*attributes, arena) = attribute;
@@ -2557,7 +2558,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
   }
   case ATTRIBUTE_KIND_LINE_NUMBER_TABLE: {
     return (u32)sizeof(u16) /* count */ +
-           (u32)pg_array_len(attribute->v.line_number_table_entries) *
+           attribute->v.line_number_table_entries.len *
                (u32)sizeof(Jvm_line_number_table_entry);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
@@ -2758,10 +2759,9 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
     const u32 size = jvm_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    for (u16 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
-         i++) {
+    for (u16 i = 0; i < attribute->v.line_number_table_entries.len; i++) {
       Jvm_line_number_table_entry line_number_table =
-          attribute->v.line_number_table_entries[i];
+          attribute->v.line_number_table_entries.data[i];
       file_write_be_u16(file, line_number_table.start_pc);
       file_write_be_u16(file, line_number_table.line_number);
     }
@@ -2840,14 +2840,6 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   pg_assert(arena != NULL);
 
   class_file->constant_pool = jvm_constant_array_make(1024, arena);
-}
-
-static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
-  pg_assert(code != NULL);
-  pg_assert(arena != NULL);
-
-  code->bytecode = array32_make(u8, 0, 512, arena);
-  code->attributes = array32_make(Jvm_attribute, 0, 4, arena);
 }
 
 static u16 jvm_add_constant_string(Jvm_constant_pool *constant_pool, Str s,
@@ -2968,11 +2960,11 @@ static void jvm_get_source_location_of_function(const Class_file *class_file,
   const Jvm_attribute *const line_number_table = jvm_attribute_by_kind(
       code->v.code.attributes, ATTRIBUTE_KIND_LINE_NUMBER_TABLE);
   if (line_number_table != NULL) {
-    const Jvm_line_number_table_entry *const entries =
+    const Array32(Jvm_line_number_table_entry) entries =
         line_number_table->v.line_number_table_entries;
 
-    if (pg_array_len(entries) > 0)
-      *line = entries[0].line_number;
+    if (entries.len > 0)
+      *line = entries.data[0].line_number;
   }
 }
 
@@ -8288,7 +8280,6 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     method.attributes = array32_make(Jvm_attribute, 0, 1, arena);
 
     Jvm_attribute_code code = {0};
-    jvm_attribute_code_init(&code, arena);
     gen->code = &code;
     codegen_frame frame = {0};
     codegen_frame_init(&frame, arena);
