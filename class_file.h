@@ -146,8 +146,8 @@ typedef struct {
   Jvm_verification_info verification_info;
 } Jvm_variable;
 
-struct Cg_frame;
-typedef struct Cg_frame Cg_frame;
+struct codegen_frame;
+typedef struct codegen_frame codegen_frame;
 typedef struct {
   u16 pc;
   // TODO: Should we actually memoize this or not?
@@ -157,7 +157,7 @@ typedef struct {
   pg_pad(2);
   // Immutable clone of the frame when the stack map
   // frame was created.
-  Cg_frame *frame;
+  codegen_frame *frame;
 } Stack_map_frame;
 
 enum __attribute__((packed)) Type_kind {
@@ -182,7 +182,7 @@ typedef enum Type_kind Type_kind;
 
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
-struct Cg_frame {
+struct codegen_frame {
   Jvm_variable *locals;
   Jvm_verification_info *stack;
   u16 max_physical_stack;
@@ -387,7 +387,7 @@ typedef struct {
   pg_pad(4);
 } Resolver;
 
-static Str cg_make_class_name_from_path(Str path, Arena *arena);
+static Str codegen_make_class_name_from_path(Str path, Arena *arena);
 
 static void resolver_init(Resolver *resolver, Parser *parser,
                           Str *class_path_entries, Str class_file_path,
@@ -396,7 +396,7 @@ static void resolver_init(Resolver *resolver, Parser *parser,
   resolver->parser = parser;
   resolver->class_path_entries = class_path_entries;
   resolver->this_class_name =
-      cg_make_class_name_from_path(class_file_path, arena);
+      codegen_make_class_name_from_path(class_file_path, arena);
 
   pg_array_init_reserve(resolver->variables, 512, arena);
   pg_array_init_reserve(resolver->types, 1 << 16, arena);
@@ -668,7 +668,7 @@ jvm_verification_info_kind_word_count(Jvm_verification_info_kind kind) {
 }
 
 static Jvm_verification_info
-cg_type_to_verification_info(const Type *type) {
+codegen_type_to_verification_info(const Type *type) {
 
   switch (type->kind) {
   case TYPE_BOOLEAN:
@@ -695,7 +695,7 @@ cg_type_to_verification_info(const Type *type) {
   }
 }
 
-static void cg_frame_stack_push(Cg_frame *frame,
+static void codegen_frame_stack_push(codegen_frame *frame,
                                 Jvm_verification_info verification_info,
                                 Arena *arena) {
   pg_assert(frame != NULL);
@@ -712,7 +712,7 @@ static void cg_frame_stack_push(Cg_frame *frame,
       pg_max(frame->max_physical_stack, frame->stack_physical_count);
 }
 
-static void cg_frame_stack_pop(Cg_frame *frame) {
+static void codegen_frame_stack_pop(codegen_frame *frame) {
   pg_assert(frame != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(frame->stack_physical_count >= 1);
@@ -723,7 +723,7 @@ static void cg_frame_stack_pop(Cg_frame *frame) {
   frame->stack_physical_count -= 1;
 }
 
-static Cg_frame *cg_frame_clone(const Cg_frame *src, Arena *arena);
+static codegen_frame *codegen_frame_clone(const codegen_frame *src, Arena *arena);
 
 static void jvm_code_array_push_u8(u8 **array, u8 x, Arena *arena) {
   pg_array_append(*array, x, arena);
@@ -851,7 +851,7 @@ static u16 jvm_constant_array_push(Jvm_constant_pool *array,
   return index;
 }
 
-static void cg_frame_init(Cg_frame *frame, Arena *arena) {
+static void codegen_frame_init(codegen_frame *frame, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
@@ -859,16 +859,16 @@ static void cg_frame_init(Cg_frame *frame, Arena *arena) {
   pg_array_init_reserve(frame->stack, 256, arena);
 }
 
-static Cg_frame *cg_frame_clone(const Cg_frame *src, Arena *arena) {
+static codegen_frame *codegen_frame_clone(const codegen_frame *src, Arena *arena) {
   pg_assert(src != NULL);
   pg_assert(src->stack != NULL);
   pg_assert(pg_array_len(src->stack) <= UINT16_MAX);
   pg_assert(src->locals != NULL);
   pg_assert(arena != NULL);
 
-  Cg_frame *dst =
-      arena_alloc(arena, sizeof(Cg_frame), _Alignof(Cg_frame), 1);
-  cg_frame_init(dst, arena);
+  codegen_frame *dst =
+      arena_alloc(arena, sizeof(codegen_frame), _Alignof(codegen_frame), 1);
+  codegen_frame_init(dst, arena);
 
   dst->max_physical_stack = src->max_physical_stack;
   dst->max_physical_locals = src->max_physical_locals;
@@ -6857,20 +6857,20 @@ static void resolver_collect_user_defined_function_signatures(
 typedef struct {
   Jvm_variable variable;
   u32 scope_id;
-} Cg_scope_variable;
+} codegen_scope_variable;
 
 typedef struct {
   Resolver *resolver;
   Jvm_attribute_code *code;
-  Cg_frame *frame;
-  Cg_scope_variable *locals;
+  codegen_frame *frame;
+  codegen_scope_variable *locals;
   Stack_map_frame *stack_map_frames;
   u32 scope_id;
   pg_pad(4);
-} Cg_generator;
+} codegen_generator;
 
 // FIXME: Probably should not behave like a FIFO and rather like an array.
-static void cg_frame_locals_push(Cg_generator *gen,
+static void codegen_frame_locals_push(codegen_generator *gen,
                                  const Jvm_variable *variable,
                                  u16 *logical_local_index,
                                  u16 *physical_local_index, Arena *arena) {
@@ -6894,12 +6894,12 @@ static void cg_frame_locals_push(Cg_generator *gen,
   gen->frame->max_physical_locals = pg_max(gen->frame->max_physical_locals,
                                            gen->frame->locals_physical_count);
 
-  Cg_scope_variable scope_variable = {.variable = *variable,
+  codegen_scope_variable scope_variable = {.variable = *variable,
                                         .scope_id = gen->scope_id};
   pg_array_append(gen->locals, scope_variable, arena);
 }
 
-static u16 cg_import_constant(Jvm_constant_pool *dst,
+static u16 codegen_import_constant(Jvm_constant_pool *dst,
                               const Jvm_constant_pool *src, u16 constant_i,
                               Arena *arena) {
   const Jvm_constant_pool_entry *const constant = jvm_constant_array_get(src, constant_i);
@@ -6914,10 +6914,10 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
             {
                 .field_ref =
                     {
-                        .descriptor = cg_import_constant(
+                        .descriptor = codegen_import_constant(
                             dst, src, field_ref.descriptor, arena),
                         .name =
-                            cg_import_constant(dst, src, field_ref.name, arena),
+                            codegen_import_constant(dst, src, field_ref.name, arena),
                     },
             },
     };
@@ -6932,9 +6932,9 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
             {
                 .method_ref =
                     {
-                        .class = cg_import_constant(dst, src, method_ref.class,
+                        .class = codegen_import_constant(dst, src, method_ref.class,
                                                     arena),
-                        .name_and_type = cg_import_constant(
+                        .name_and_type = codegen_import_constant(
                             dst, src, method_ref.name_and_type, arena),
                     },
             },
@@ -6950,9 +6950,9 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
             {
                 .name_and_type =
                     {
-                        .name = cg_import_constant(dst, src, name_and_type.name,
+                        .name = codegen_import_constant(dst, src, name_and_type.name,
                                                    arena),
-                        .descriptor = cg_import_constant(
+                        .descriptor = codegen_import_constant(
                             dst, src, name_and_type.descriptor, arena),
                     },
             },
@@ -6970,7 +6970,7 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
         .kind = constant->kind,
         .v =
             {
-                .java_class_name = cg_import_constant(
+                .java_class_name = codegen_import_constant(
                     dst, src, constant->v.java_class_name, arena),
             },
     };
@@ -6982,7 +6982,7 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
   }
 }
 
-static u16 cg_emit_jump_conditionally(Cg_generator *gen, u8 jump_opcode,
+static u16 codegen_emit_jump_conditionally(codegen_generator *gen, u8 jump_opcode,
                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7004,12 +7004,12 @@ static u16 cg_emit_jump_conditionally(Cg_generator *gen, u8 jump_opcode,
   case BYTECODE_IF_ICMPGE:
   case BYTECODE_IF_ICMPGT:
   case BYTECODE_IF_ICMPLE:
-    cg_frame_stack_pop(gen->frame);
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
     break;
   case BYTECODE_IFEQ:
   case BYTECODE_IFNE:
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
     break;
   default:
     pg_assert(0 && "unreachable/unimplemented");
@@ -7018,7 +7018,7 @@ static u16 cg_emit_jump_conditionally(Cg_generator *gen, u8 jump_opcode,
   return jump_from_i;
 }
 
-static u16 cg_emit_jump(Cg_generator *gen, Arena *arena) {
+static u16 codegen_emit_jump(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7035,7 +7035,7 @@ static u16 cg_emit_jump(Cg_generator *gen, Arena *arena) {
   return from_location;
 }
 
-static void cg_emit_pop(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_pop(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7046,10 +7046,10 @@ static void cg_emit_pop(Cg_generator *gen, Arena *arena) {
 
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_POP, arena);
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_int(Cg_generator *gen, u8 var_i,
+static void codegen_emit_store_variable_int(codegen_generator *gen, u8 var_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7066,10 +7066,10 @@ static void cg_emit_store_variable_int(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_ISTORE, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_object(Cg_generator *gen, u8 var_i,
+static void codegen_emit_store_variable_object(codegen_generator *gen, u8 var_i,
                                           Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7086,10 +7086,10 @@ static void cg_emit_store_variable_object(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_ASTORE, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_long(Cg_generator *gen, u8 var_i,
+static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
                                         Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7106,10 +7106,10 @@ static void cg_emit_store_variable_long(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_LSTORE, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable(Cg_generator *gen, u8 var_i,
+static void codegen_emit_store_variable(codegen_generator *gen, u8 var_i,
                                    Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) > 0);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7120,20 +7120,20 @@ static void cg_emit_store_variable(Cg_generator *gen, u8 var_i,
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
-    cg_emit_store_variable_int(gen, var_i, arena);
+    codegen_emit_store_variable_int(gen, var_i, arena);
     break;
   case VERIFICATION_INFO_OBJECT:
-    cg_emit_store_variable_object(gen, var_i, arena);
+    codegen_emit_store_variable_object(gen, var_i, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_store_variable_long(gen, var_i, arena);
+    codegen_emit_store_variable_long(gen, var_i, arena);
     break;
   default:
     pg_assert(0 && "unimplemented");
   }
 }
 
-static void cg_emit_load_variable_int(Cg_generator *gen, u8 var_i,
+static void codegen_emit_load_variable_int(codegen_generator *gen, u8 var_i,
                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7148,12 +7148,12 @@ static void cg_emit_load_variable_int(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_ILOAD, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_push(gen->frame,
+  codegen_frame_stack_push(gen->frame,
                       (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_load_variable_object(Cg_generator *gen, u8 var_i,
+static void codegen_emit_load_variable_object(codegen_generator *gen, u8 var_i,
                                          Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7168,7 +7168,7 @@ static void cg_emit_load_variable_object(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_ALOAD, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_push(gen->frame,
+  codegen_frame_stack_push(gen->frame,
                       (Jvm_verification_info){
                           .kind = VERIFICATION_INFO_OBJECT,
                           .extra_data = 0, // FIXME
@@ -7176,7 +7176,7 @@ static void cg_emit_load_variable_object(Cg_generator *gen, u8 var_i,
                       arena);
 }
 
-static void cg_emit_ldc(Cg_generator *gen,
+static void codegen_emit_ldc(codegen_generator *gen,
                         const Jvm_constant_pool *constant_pool,
                         u16 constant_i, Arena *arena) {
 
@@ -7187,7 +7187,7 @@ static void cg_emit_ldc(Cg_generator *gen,
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_INT:
     jvm_code_array_push_u16(&gen->code->code, constant_i, arena);
-    cg_frame_stack_push(gen->frame,
+    codegen_frame_stack_push(gen->frame,
                         (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                         arena);
     break;
@@ -7196,7 +7196,7 @@ static void cg_emit_ldc(Cg_generator *gen,
   }
 }
 
-static void cg_emit_load_variable_long(Cg_generator *gen, u8 var_i,
+static void codegen_emit_load_variable_long(codegen_generator *gen, u8 var_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7211,12 +7211,12 @@ static void cg_emit_load_variable_long(Cg_generator *gen, u8 var_i,
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_LLOAD, arena);
   jvm_code_array_push_u8(&gen->code->code, var_i, arena);
 
-  cg_frame_stack_push(gen->frame,
+  codegen_frame_stack_push(gen->frame,
                       (Jvm_verification_info){.kind = VERIFICATION_INFO_LONG},
                       arena);
 }
 
-static void cg_emit_get_static(Cg_generator *gen, u16 field_i, u16 class_i,
+static void codegen_emit_get_static(codegen_generator *gen, u16 field_i, u16 class_i,
                                Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7236,10 +7236,10 @@ static void cg_emit_get_static(Cg_generator *gen, u16 field_i, u16 class_i,
       .kind = VERIFICATION_INFO_OBJECT,
       .extra_data = class_i,
   };
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_virtual(Cg_generator *gen, u16 method_ref_i,
+static void codegen_emit_invoke_virtual(codegen_generator *gen, u16 method_ref_i,
                                    const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
@@ -7254,7 +7254,7 @@ static void cg_emit_invoke_virtual(Cg_generator *gen, u16 method_ref_i,
   jvm_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
   for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
@@ -7262,13 +7262,13 @@ static void cg_emit_invoke_virtual(Cg_generator *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const Jvm_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = codegen_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_static(Cg_generator *gen, u16 method_ref_i,
+static void codegen_emit_invoke_static(codegen_generator *gen, u16 method_ref_i,
                                   const Method *method_type,
                                   Arena *arena) {
   pg_assert(gen != NULL);
@@ -7283,7 +7283,7 @@ static void cg_emit_invoke_static(Cg_generator *gen, u16 method_ref_i,
   jvm_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
   for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
@@ -7291,13 +7291,13 @@ static void cg_emit_invoke_static(Cg_generator *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const Jvm_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = codegen_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_special(Cg_generator *gen, u16 method_ref_i,
+static void codegen_emit_invoke_special(codegen_generator *gen, u16 method_ref_i,
                                    const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
@@ -7312,20 +7312,20 @@ static void cg_emit_invoke_special(Cg_generator *gen, u16 method_ref_i,
   jvm_code_array_push_u16(&gen->code->code, method_ref_i, arena);
 
   for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
       &gen->resolver->types[method_type->return_type_i];
 
   pg_assert(return_type->kind != TYPE_UNIT);
 
-  const Jvm_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = codegen_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static u32 cg_make_type_from_method_descriptor(Cg_generator *gen,
+static u32 codegen_make_type_from_method_descriptor(codegen_generator *gen,
                                                Class_file *class_file,
                                                u16 constant_i, Arena *arena) {
   const Jvm_constant_pool_entry *const constant =
@@ -7345,7 +7345,7 @@ static u32 cg_make_type_from_method_descriptor(Cg_generator *gen,
   return resolver_add_type(gen->resolver, &new_type, arena);
 }
 
-static void cg_emit_inlined_method_call(Cg_generator *gen,
+static void codegen_emit_inlined_method_call(codegen_generator *gen,
                                         Class_file *class_file,
                                         const Type *method_type,
                                         u16 locals_offset, Arena *arena) {
@@ -7371,14 +7371,14 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
       const u16 field_ref_i =
           buf_read_be_u16(str_new(code, code_size), &current);
       const u16 field_ref_gen_i =
-          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+          codegen_import_constant(&class_file->constant_pool, method->constant_pool,
                              field_ref_i, arena);
 
       const Jvm_constant_pool_entry *const field_ref_gen =
           jvm_constant_array_get(&class_file->constant_pool, field_ref_gen_i);
       pg_assert(field_ref_gen->kind == CONSTANT_POOL_KIND_FIELD_REF);
 
-      cg_emit_get_static(gen, field_ref_gen_i, field_ref_gen->v.field_ref.name,
+      codegen_emit_get_static(gen, field_ref_gen_i, field_ref_gen->v.field_ref.name,
                          arena);
 
       break;
@@ -7387,16 +7387,16 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
       const u16 method_ref_i =
           buf_read_be_u16(str_new(code, code_size), &current);
       const u16 method_ref_gen_i =
-          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+          codegen_import_constant(&class_file->constant_pool, method->constant_pool,
                              method_ref_i, arena);
 
-      const u32 invoked_type_i = cg_make_type_from_method_descriptor(
+      const u32 invoked_type_i = codegen_make_type_from_method_descriptor(
           gen, class_file, method_ref_gen_i, arena);
       const Type *const invoked_type =
           &gen->resolver->types[invoked_type_i];
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
-      cg_emit_invoke_virtual(gen, method_ref_gen_i, &invoked_type->v.method,
+      codegen_emit_invoke_virtual(gen, method_ref_gen_i, &invoked_type->v.method,
                              arena);
 
       break;
@@ -7412,10 +7412,10 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
         };
 
         u16 logical_local_index = 0;
-        cg_frame_locals_push(gen, &variable, &logical_local_index,
+        codegen_frame_locals_push(gen, &variable, &logical_local_index,
                              &physical_local_index, arena);
       }
-      cg_emit_store_variable_int(gen, physical_local_index, arena);
+      codegen_emit_store_variable_int(gen, physical_local_index, arena);
 
       break;
     }
@@ -7430,20 +7430,20 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
         };
 
         u16 logical_local_index = 0;
-        cg_frame_locals_push(gen, &variable, &logical_local_index,
+        codegen_frame_locals_push(gen, &variable, &logical_local_index,
                              &physical_local_index, arena);
       }
-      cg_emit_store_variable_int(gen, physical_local_index, arena);
+      codegen_emit_store_variable_int(gen, physical_local_index, arena);
 
       break;
     }
 
     case BYTECODE_ILOAD_0:
-      cg_emit_load_variable_int(gen, locals_offset + 0, arena);
+      codegen_emit_load_variable_int(gen, locals_offset + 0, arena);
       break;
 
     case BYTECODE_LLOAD_0:
-      cg_emit_load_variable_long(gen, locals_offset + 0, arena);
+      codegen_emit_load_variable_long(gen, locals_offset + 0, arena);
       break;
     case BYTECODE_RETURN:
       // No-op by nature.
@@ -7452,32 +7452,32 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
     case BYTECODE_LDC: {
       const u16 constant_i =
           (u16)buf_read_u8(str_new(code, code_size), &current);
-      const u16 constant_gen_i = cg_import_constant(
+      const u16 constant_gen_i = codegen_import_constant(
           &class_file->constant_pool, method->constant_pool, constant_i, arena);
 
-      cg_emit_ldc(gen, &class_file->constant_pool, constant_gen_i, arena);
+      codegen_emit_ldc(gen, &class_file->constant_pool, constant_gen_i, arena);
 
       break;
     }
 
     case BYTECODE_ALOAD_0: {
-      cg_emit_load_variable_object(gen, locals_offset + 0, arena);
+      codegen_emit_load_variable_object(gen, locals_offset + 0, arena);
       break;
     }
     case BYTECODE_INVOKE_STATIC: {
       const u16 method_ref_i =
           buf_read_be_u16(str_new(code, code_size), &current);
       const u16 method_ref_gen_i =
-          cg_import_constant(&class_file->constant_pool, method->constant_pool,
+          codegen_import_constant(&class_file->constant_pool, method->constant_pool,
                              method_ref_i, arena);
 
-      const u32 invoked_type_i = cg_make_type_from_method_descriptor(
+      const u32 invoked_type_i = codegen_make_type_from_method_descriptor(
           gen, class_file, method_ref_gen_i, arena);
       const Type *const invoked_type =
           &gen->resolver->types[invoked_type_i];
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
-      cg_emit_invoke_static(gen, method_ref_gen_i, &invoked_type->v.method,
+      codegen_emit_invoke_static(gen, method_ref_gen_i, &invoked_type->v.method,
                             arena);
 
       break;
@@ -7495,7 +7495,7 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
             stack_size_after_inline_snippet);
 }
 
-static void cg_emit_add(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7523,10 +7523,10 @@ static void cg_emit_add(Cg_generator *gen, Arena *arena) {
     pg_assert(0 && "todo");
   }
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_neg(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_neg(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7549,7 +7549,7 @@ static void cg_emit_neg(Cg_generator *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_lcmp(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_lcmp(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7558,15 +7558,15 @@ static void cg_emit_lcmp(Cg_generator *gen, Arena *arena) {
 
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_LCMP, arena);
 
-  cg_frame_stack_pop(gen->frame);
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 
-  cg_frame_stack_push(gen->frame,
+  codegen_frame_stack_push(gen->frame,
                       (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_bipush(Cg_generator *gen, u8 value, Arena *arena) {
+static void codegen_emit_bipush(codegen_generator *gen, u8 value, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7576,12 +7576,12 @@ static void cg_emit_bipush(Cg_generator *gen, u8 value, Arena *arena) {
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_BIPUSH, arena);
   jvm_code_array_push_u8(&gen->code->code, value, arena);
 
-  cg_frame_stack_push(gen->frame,
+  codegen_frame_stack_push(gen->frame,
                       (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_ixor(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7596,10 +7596,10 @@ static void cg_emit_ixor(Cg_generator *gen, Arena *arena) {
 
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_IXOR, arena);
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_mul(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7627,10 +7627,10 @@ static void cg_emit_mul(Cg_generator *gen, Arena *arena) {
     pg_assert(0 && "todo");
   }
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_div(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7658,10 +7658,10 @@ static void cg_emit_div(Cg_generator *gen, Arena *arena) {
     pg_assert(0 && "todo");
   }
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_rem(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7689,11 +7689,11 @@ static void cg_emit_rem(Cg_generator *gen, Arena *arena) {
     pg_assert(0 && "todo");
   }
 
-  cg_frame_stack_pop(gen->frame);
+  codegen_frame_stack_pop(gen->frame);
 }
 
 static void
-cg_emit_load_constant_single_word(Cg_generator *gen, u16 constant_i,
+codegen_emit_load_constant_single_word(codegen_generator *gen, u16 constant_i,
                                   Jvm_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
@@ -7710,11 +7710,11 @@ cg_emit_load_constant_single_word(Cg_generator *gen, u16 constant_i,
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
 
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
 static void
-cg_emit_load_constant_double_word(Cg_generator *gen, u16 constant_i,
+codegen_emit_load_constant_double_word(codegen_generator *gen, u16 constant_i,
                                   Jvm_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
@@ -7731,10 +7731,10 @@ cg_emit_load_constant_double_word(Cg_generator *gen, u16 constant_i,
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
 
-  cg_frame_stack_push(gen->frame, verification_info, arena);
+  codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_return_nothing(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_return_nothing(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7743,7 +7743,7 @@ static void cg_emit_return_nothing(Cg_generator *gen, Arena *arena) {
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_RETURN, arena);
 }
 
-static void cg_emit_return_value(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_return_value(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7766,7 +7766,7 @@ static void cg_emit_return_value(Cg_generator *gen, Arena *arena) {
   }
 }
 
-static void cg_begin_scope(Cg_generator *gen) {
+static void codegen_begin_scope(codegen_generator *gen) {
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth < UINT32_MAX);
 
@@ -7775,20 +7775,20 @@ static void cg_begin_scope(Cg_generator *gen) {
 }
 
 static void
-stack_map_record_frame_at_pc(const Cg_frame *frame,
+stack_map_record_frame_at_pc(const codegen_frame *frame,
                              Stack_map_frame **stack_map_frames, u16 pc,
                              Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
   const Stack_map_frame stack_map_frame = {
-      .frame = cg_frame_clone(frame, arena),
+      .frame = codegen_frame_clone(frame, arena),
       .pc = pc,
   };
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
 }
 
-static void cg_frame_drop_current_scope_variables(Cg_frame *frame) {
+static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
   pg_assert(frame != NULL);
 
   u64 to_drop = 0;
@@ -7805,19 +7805,19 @@ static void cg_frame_drop_current_scope_variables(Cg_frame *frame) {
   pg_array_drop_last_n(frame->locals, to_drop);
 }
 
-static void cg_end_scope(Cg_generator *gen) {
+static void codegen_end_scope(codegen_generator *gen) {
   pg_assert(gen);
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth > 0);
 
-  cg_frame_drop_current_scope_variables(gen->frame);
+  codegen_frame_drop_current_scope_variables(gen->frame);
 
   gen->frame->scope_depth -= 1;
 }
 
 // TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable
 // slot number? Or use a lookup table?
-static bool jvm_find_variable(const Cg_frame *frame, u32 node_i,
+static bool jvm_find_variable(const codegen_frame *frame, u32 node_i,
                              u16 *logical_local_index,
                              u16 *physical_local_index) {
   pg_assert(frame != NULL);
@@ -7842,10 +7842,10 @@ static bool jvm_find_variable(const Cg_frame *frame, u32 node_i,
   return false;
 }
 
-static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
+static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
                          u32 node_i, Arena *arena);
 
-static void cg_patch_jump_at(Cg_generator *gen, u16 at, u16 target) {
+static void codegen_patch_jump_at(codegen_generator *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7857,8 +7857,8 @@ static void cg_patch_jump_at(Cg_generator *gen, u16 at, u16 target) {
   gen->code->code[at + 1] = (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
 }
 
-// TODO: Make a primitive emerge to use here and in cg_emit_if_then_else.
-static void cg_emit_synthetic_if_then_else(Cg_generator *gen,
+// TODO: Make a primitive emerge to use here and in codegen_emit_if_then_else.
+static void codegen_emit_synthetic_if_then_else(codegen_generator *gen,
                                            u8 conditional_jump_opcode,
                                            Arena *arena) {
   // Assume the condition is already on the stack
@@ -7874,31 +7874,31 @@ static void cg_emit_synthetic_if_then_else(Cg_generator *gen,
   case BYTECODE_IF_ICMPGE:
   case BYTECODE_IF_ICMPGT:
   case BYTECODE_IF_ICMPLE:
-    cg_frame_stack_pop(gen->frame);
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
     break;
   case BYTECODE_IFEQ:
   case BYTECODE_IFNE:
-    cg_frame_stack_pop(gen->frame);
+    codegen_frame_stack_pop(gen->frame);
     break;
   default:
     pg_assert(0 && "unreachable/unimplemented");
   }
 
-  const Cg_frame *const frame_before_then_else =
-      cg_frame_clone(gen->frame, arena);
+  const codegen_frame *const frame_before_then_else =
+      codegen_frame_clone(gen->frame, arena);
 
-  cg_emit_bipush(gen, true, arena); // Then.
+  codegen_emit_bipush(gen, true, arena); // Then.
   jvm_code_array_push_u8(&gen->code->code, BYTECODE_GOTO, arena);
   jvm_code_array_push_u8(&gen->code->code, 0, arena);
   jvm_code_array_push_u8(&gen->code->code, 3 + 2, arena);
 
-  const Cg_frame *const frame_after_then = cg_frame_clone(gen->frame, arena);
+  const codegen_frame *const frame_after_then = codegen_frame_clone(gen->frame, arena);
 
-  gen->frame = cg_frame_clone(frame_before_then_else, arena);
+  gen->frame = codegen_frame_clone(frame_before_then_else, arena);
 
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
-  cg_emit_bipush(gen, false, arena); // Else.
+  codegen_emit_bipush(gen, false, arena); // Else.
 
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
@@ -7908,7 +7908,7 @@ static void cg_emit_synthetic_if_then_else(Cg_generator *gen,
                                unconditional_jump_target_absolute, arena);
 }
 
-static void cg_emit_gt(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_gt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7923,19 +7923,19 @@ static void cg_emit_gt(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_bipush(gen, 1, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_bipush(gen, 1, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_ne(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_ne(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7950,18 +7950,18 @@ static void cg_emit_ne(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IFEQ, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IFEQ, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_eq(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_eq(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7976,18 +7976,18 @@ static void cg_emit_eq(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IFNE, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IFNE, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_ge(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_ge(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8002,19 +8002,19 @@ static void cg_emit_ge(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPLT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_bipush(gen, -1, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_bipush(gen, -1, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_le(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_le(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8029,19 +8029,19 @@ static void cg_emit_le(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGT, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_bipush(gen, 1, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_bipush(gen, 1, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPEQ, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_lt(Cg_generator *gen, Arena *arena) {
+static void codegen_emit_lt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8056,19 +8056,19 @@ static void cg_emit_lt(Cg_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPGE, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    cg_emit_lcmp(gen, arena);
-    cg_emit_bipush(gen, -1, arena);
-    cg_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
+    codegen_emit_lcmp(gen, arena);
+    codegen_emit_bipush(gen, -1, arena);
+    codegen_emit_synthetic_if_then_else(gen, BYTECODE_IF_ICMPNE, arena);
     break;
   default:
     pg_assert(0 && "todo");
   }
 }
 
-static void cg_emit_if_then_else(Cg_generator *gen,
+static void codegen_emit_if_then_else(codegen_generator *gen,
                                  Class_file *class_file, u32 node_i,
                                  Arena *arena) {
   // clang-format off
@@ -8110,10 +8110,10 @@ static void cg_emit_if_then_else(Cg_generator *gen,
   pg_assert(node->rhs < pg_array_len(gen->resolver->parser->nodes));
 
   // Emit condition.
-  cg_emit_node(gen, class_file, node->lhs, arena);
+  codegen_emit_node(gen, class_file, node->lhs, arena);
 
   const u16 jump_conditionally_from_i =
-      cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
+      codegen_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
   const Ast *const rhs = &gen->resolver->parser->nodes[node->rhs];
@@ -8122,22 +8122,22 @@ static void cg_emit_if_then_else(Cg_generator *gen,
   // Emit `then` branch.
   // Save a clone of the frame before the `then` branch since we need it
   // later.
-  const Cg_frame *const frame_before_then_else =
-      cg_frame_clone(gen->frame, arena);
+  const codegen_frame *const frame_before_then_else =
+      codegen_frame_clone(gen->frame, arena);
 
-  cg_emit_node(gen, class_file, rhs->lhs, arena);
-  const u16 jump_from_i = (rhs->rhs > 0) ? cg_emit_jump(gen, arena) : 0;
+  codegen_emit_node(gen, class_file, rhs->lhs, arena);
+  const u16 jump_from_i = (rhs->rhs > 0) ? codegen_emit_jump(gen, arena) : 0;
   const u16 conditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   // Save a clone of the frame after the `then` branch executed so that we
   // can generate a stack map frame later.
-  const Cg_frame *const frame_after_then = cg_frame_clone(gen->frame, arena);
+  const codegen_frame *const frame_after_then = codegen_frame_clone(gen->frame, arena);
 
   // Emit `else` branch.
   // Restore the frame as if the `then` branch never executed.
-  gen->frame = cg_frame_clone(frame_before_then_else, arena);
+  gen->frame = codegen_frame_clone(frame_before_then_else, arena);
 
-  cg_emit_node(gen, class_file, rhs->rhs, arena);
+  codegen_emit_node(gen, class_file, rhs->rhs, arena);
   const u16 unconditional_jump_target_absolute = pg_array_len(gen->code->code);
 
   gen->frame->max_physical_stack = pg_max(frame_after_then->max_physical_stack,
@@ -8148,7 +8148,7 @@ static void cg_emit_if_then_else(Cg_generator *gen,
 
   // Patch first, conditional, jump.
   {
-    cg_patch_jump_at(gen, jump_conditionally_from_i,
+    codegen_patch_jump_at(gen, jump_conditionally_from_i,
                      conditional_jump_target_absolute);
     stack_map_record_frame_at_pc(frame_before_then_else, &gen->stack_map_frames,
                                  conditional_jump_target_absolute, arena);
@@ -8156,7 +8156,7 @@ static void cg_emit_if_then_else(Cg_generator *gen,
   // Patch second, unconditional, jump.
   {
     if (rhs->rhs > 0) {
-      cg_patch_jump_at(gen, jump_from_i, unconditional_jump_target_absolute);
+      codegen_patch_jump_at(gen, jump_from_i, unconditional_jump_target_absolute);
 
       stack_map_record_frame_at_pc(frame_after_then, &gen->stack_map_frames,
                                    unconditional_jump_target_absolute, arena);
@@ -8174,7 +8174,7 @@ static int stack_map_frame_sort(const void *a, const void *b) {
   return (int)smp_a->pc - (int)smp_b->pc;
 }
 
-static void stack_map_resolve_frames(const Cg_frame *first_method_frame,
+static void stack_map_resolve_frames(const codegen_frame *first_method_frame,
                                      Stack_map_frame *stack_map_frames,
                                      Arena *arena) {
   pg_assert(first_method_frame != NULL);
@@ -8190,9 +8190,9 @@ static void stack_map_resolve_frames(const Cg_frame *first_method_frame,
 
   for (u64 i = 0; i < pg_array_len(stack_map_frames); i++) {
     Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
-    Cg_frame *const frame = stack_map_frame->frame;
+    codegen_frame *const frame = stack_map_frame->frame;
 
-    const Cg_frame *const previous_frame =
+    const codegen_frame *const previous_frame =
         i > 0 ? stack_map_frames[i - 1].frame : first_method_frame;
 
     i16 locals_delta =
@@ -8246,7 +8246,7 @@ static void stack_map_resolve_frames(const Cg_frame *first_method_frame,
 }
 
 __attribute__((unused)) static u16
-cg_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
+codegen_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
                                    Arena *arena) {
   const u16 class_name_i =
       jvm_add_constant_string(&class_file->constant_pool, class_name, arena);
@@ -8258,7 +8258,7 @@ cg_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
   return class_i;
 }
 
-static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
+static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
                          u32 node_i, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
@@ -8293,7 +8293,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     const Jvm_verification_info verification_info = {
         .kind = VERIFICATION_INFO_INT};
-    cg_emit_load_constant_single_word(gen, number_i, verification_info, arena);
+    codegen_emit_load_constant_single_word(gen, number_i, verification_info, arena);
     break;
   }
   case AST_KIND_NUMBER: {
@@ -8317,11 +8317,11 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       const Jvm_constant_pool_entry dummy = {0};
       jvm_constant_array_push(&class_file->constant_pool, &dummy, arena);
 
-      cg_emit_load_constant_double_word(
+      codegen_emit_load_constant_double_word(
           gen, number_i,
           (Jvm_verification_info){.kind = verification_info_kind}, arena);
     } else {
-      cg_emit_load_constant_single_word(
+      codegen_emit_load_constant_single_word(
           gen, number_i,
           (Jvm_verification_info){.kind = verification_info_kind}, arena);
     }
@@ -8333,7 +8333,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     pg_assert(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR);
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      cg_emit_node(gen, class_file, node->nodes[i], arena);
+      codegen_emit_node(gen, class_file, node->nodes[i], arena);
     }
 
     if (type->flags & TYPE_FLAG_INLINE_ONLY) {
@@ -8360,15 +8360,15 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
         u16 logical_local_index = 0;
         u16 physical_local_index = 0;
-        cg_frame_locals_push(gen, &variable, &logical_local_index,
+        codegen_frame_locals_push(gen, &variable, &logical_local_index,
                              &physical_local_index, arena);
 
-        cg_emit_store_variable(gen, physical_local_index, arena);
+        codegen_emit_store_variable(gen, physical_local_index, arena);
 
         stack_index -=
             jvm_verification_info_kind_word_count(verification_info.kind);
       }
-      cg_emit_inlined_method_call(gen, class_file, type,
+      codegen_emit_inlined_method_call(gen, class_file, type,
                                   initial_locals_physical_count, arena);
 
     } else {
@@ -8417,9 +8417,9 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
           &class_file->constant_pool, &method_ref, arena);
 
       if (type->kind == TYPE_METHOD)
-        cg_emit_invoke_static(gen, method_ref_i, &type->v.method, arena);
+        codegen_emit_invoke_static(gen, method_ref_i, &type->v.method, arena);
       else if (type->kind == TYPE_CONSTRUCTOR)
-        cg_emit_invoke_special(gen, method_ref_i, &type->v.method, arena);
+        codegen_emit_invoke_special(gen, method_ref_i, &type->v.method, arena);
     }
 
     break;
@@ -8458,47 +8458,47 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     Jvm_attribute_code code = {0};
     jvm_attribute_code_init(&code, arena);
     gen->code = &code;
-    Cg_frame frame = {0};
-    cg_frame_init(&frame, arena);
+    codegen_frame frame = {0};
+    codegen_frame_init(&frame, arena);
 
     gen->frame = &frame;
 
     // `lhs` is the arguments, `rhs` is the body.
 
-    cg_begin_scope(gen);
+    codegen_begin_scope(gen);
     // Emit parameters i.e. locals.
-    cg_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->lhs, arena);
     // The firt frame implicitly encompasses arguments as locals.
-    Cg_frame *const first_method_frame = cg_frame_clone(gen->frame, arena);
+    codegen_frame *const first_method_frame = codegen_frame_clone(gen->frame, arena);
     // Emit the body.
-    cg_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
 
     { // Add return if there is none e.g. the function body is empty or the
       // return type is Unit.
       // TODO: Should it be in the lowering phase instead?
 
       if (node->rhs == 0) { // Empty body
-        cg_emit_return_nothing(gen, arena);
+        codegen_emit_return_nothing(gen, arena);
       } else {
         const Ast *const rhs =
             &gen->resolver->parser->nodes[node->rhs];
         pg_assert(rhs->kind == AST_KIND_LIST);
 
         if (pg_array_len(rhs->nodes) == 0) {
-          cg_emit_return_nothing(gen, arena);
+          codegen_emit_return_nothing(gen, arena);
         } else {
           const u32 last_node_i = rhs->nodes[pg_array_len(rhs->nodes) - 1];
           const Ast *const last_node =
               &gen->resolver->parser->nodes[last_node_i];
 
           if (last_node->kind != AST_KIND_RETURN) {
-            cg_emit_return_nothing(gen, arena);
+            codegen_emit_return_nothing(gen, arena);
           }
         }
       }
     }
 
-    cg_end_scope(gen);
+    codegen_end_scope(gen);
 
     gen->code->max_physical_stack = gen->frame->max_physical_stack;
     gen->code->max_physical_locals = gen->frame->max_physical_locals;
@@ -8539,14 +8539,14 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     switch (token.kind) {
     case TOKEN_KIND_NOT:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_bipush(gen, 1, arena);
-      cg_emit_ixor(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_bipush(gen, 1, arena);
+      codegen_emit_ixor(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_neg(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_neg(gen, arena);
       break;
 
     default:
@@ -8566,34 +8566,34 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       break; // Nothing to do.
 
     case TOKEN_KIND_PLUS:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_add(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_MINUS:
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_neg(gen, arena);
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_add(gen, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_neg(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_add(gen, arena);
       break;
 
     case TOKEN_KIND_STAR:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_mul(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_mul(gen, arena);
       break;
 
     case TOKEN_KIND_SLASH:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_div(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_div(gen, arena);
       break;
 
     case TOKEN_KIND_PERCENT:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_rem(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_rem(gen, arena);
       break;
 
     case TOKEN_KIND_AMPERSAND_AMPERSAND: {
@@ -8630,35 +8630,35 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       //  +      ......> ...           
       //
       // clang-format on
-      cg_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
 
       jvm_code_array_push_u8(&gen->code->code, BYTECODE_IFEQ, arena);
       const u16 conditional_jump_location = pg_array_len(gen->code->code);
       jvm_code_array_push_u16(&gen->code->code, 0, arena);
-      cg_frame_stack_pop(gen->frame);
+      codegen_frame_stack_pop(gen->frame);
 
-      const Cg_frame *const frame_before_rhs =
-          cg_frame_clone(gen->frame, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
+      const codegen_frame *const frame_before_rhs =
+          codegen_frame_clone(gen->frame, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
 
-      const Cg_frame *const frame_after_rhs =
-          cg_frame_clone(gen->frame, arena);
-      const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
+      const codegen_frame *const frame_after_rhs =
+          codegen_frame_clone(gen->frame, arena);
+      const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
       {
         const u16 pc_end = pg_array_len(gen->code->code);
-        cg_patch_jump_at(gen, conditional_jump_location, pc_end);
+        codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
       }
 
       // Restore the frame as if the `rhs` branch never executed.
-      gen->frame = cg_frame_clone(frame_before_rhs, arena);
-      cg_emit_bipush(gen, false, arena);
+      gen->frame = codegen_frame_clone(frame_before_rhs, arena);
+      codegen_emit_bipush(gen, false, arena);
 
       {
         const u16 pc_end = pg_array_len(gen->code->code);
-        cg_patch_jump_at(gen, unconditional_jump_location, pc_end);
+        codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
       }
@@ -8701,35 +8701,35 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       //  +      ......> ...           
       //
       // clang-format on
-      cg_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
 
       jvm_code_array_push_u8(&gen->code->code, BYTECODE_IFNE, arena);
       const u16 conditional_jump_location = pg_array_len(gen->code->code);
       jvm_code_array_push_u16(&gen->code->code, 0, arena);
-      cg_frame_stack_pop(gen->frame);
+      codegen_frame_stack_pop(gen->frame);
 
-      const Cg_frame *const frame_before_rhs =
-          cg_frame_clone(gen->frame, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
+      const codegen_frame *const frame_before_rhs =
+          codegen_frame_clone(gen->frame, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
 
-      const Cg_frame *const frame_after_rhs =
-          cg_frame_clone(gen->frame, arena);
-      const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
+      const codegen_frame *const frame_after_rhs =
+          codegen_frame_clone(gen->frame, arena);
+      const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
       {
         const u16 pc_end = pg_array_len(gen->code->code);
-        cg_patch_jump_at(gen, conditional_jump_location, pc_end);
+        codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
       }
 
       // Restore the frame as if the `rhs` branch never executed.
-      gen->frame = cg_frame_clone(frame_before_rhs, arena);
-      cg_emit_bipush(gen, true, arena);
+      gen->frame = codegen_frame_clone(frame_before_rhs, arena);
+      codegen_emit_bipush(gen, true, arena);
 
       {
         const u16 pc_end = pg_array_len(gen->code->code);
-        cg_patch_jump_at(gen, unconditional_jump_location, pc_end);
+        codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
       }
@@ -8738,39 +8738,39 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     }
 
     case TOKEN_KIND_EQUAL_EQUAL:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_eq(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_eq(gen, arena);
       break;
 
     case TOKEN_KIND_LE:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_le(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_le(gen, arena);
       break;
 
     case TOKEN_KIND_LT:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_lt(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_lt(gen, arena);
       break;
 
     case TOKEN_KIND_GT:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_gt(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_gt(gen, arena);
       break;
 
     case TOKEN_KIND_GE:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_ge(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_ge(gen, arena);
       break;
 
     case TOKEN_KIND_NOT_EQUAL:
-      cg_emit_node(gen, class_file, node->lhs, arena);
-      cg_emit_node(gen, class_file, node->rhs, arena);
-      cg_emit_ne(gen, arena);
+      codegen_emit_node(gen, class_file, node->lhs, arena);
+      codegen_emit_node(gen, class_file, node->rhs, arena);
+      codegen_emit_ne(gen, arena);
       break;
 
     default:
@@ -8790,7 +8790,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       if (gen->frame != NULL) {
         pg_assert(pg_array_len(gen->frame->stack) == 0);
       }
-      cg_emit_node(gen, class_file, child_i, arena);
+      codegen_emit_node(gen, class_file, child_i, arena);
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
@@ -8802,7 +8802,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
         while (pg_array_len(gen->frame->stack) > 0)
-          cg_emit_pop(gen, arena);
+          codegen_emit_pop(gen, arena);
       }
     }
 
@@ -8813,11 +8813,11 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     pg_assert(gen->frame->locals != NULL);
     pg_assert(node->type_i > 0);
 
-    cg_emit_node(gen, class_file, node->lhs, arena);
-    cg_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
 
     const Jvm_verification_info verification_info =
-        cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
+        codegen_type_to_verification_info(resolver_eval_type(gen->resolver, type));
     const Jvm_variable variable = {
         .node_i = node_i,
         .type_i = node->type_i,
@@ -8827,10 +8827,10 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     u16 logical_local_index = 0;
     u16 physical_local_index = 0;
-    cg_frame_locals_push(gen, &variable, &logical_local_index,
+    codegen_frame_locals_push(gen, &variable, &logical_local_index,
                          &physical_local_index, arena);
 
-    cg_emit_store_variable(gen, physical_local_index, arena);
+    codegen_emit_store_variable(gen, physical_local_index, arena);
     break;
   }
   case AST_KIND_VAR_REFERENCE: {
@@ -8852,28 +8852,28 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     const Jvm_verification_info verification_info =
         gen->frame->locals[logical_local_index].verification_info;
     if (verification_info.kind == VERIFICATION_INFO_INT)
-      cg_emit_load_variable_int(gen, physical_local_index, arena);
+      codegen_emit_load_variable_int(gen, physical_local_index, arena);
     else if (verification_info.kind == VERIFICATION_INFO_LONG)
-      cg_emit_load_variable_long(gen, physical_local_index, arena);
+      codegen_emit_load_variable_long(gen, physical_local_index, arena);
     else
       pg_assert(0 && "todo");
 
     break;
   }
   case AST_KIND_IF: {
-    cg_emit_if_then_else(gen, class_file, node_i, arena);
+    codegen_emit_if_then_else(gen, class_file, node_i, arena);
     break;
   }
   case AST_KIND_WHILE_LOOP: {
     const u16 pc_start = pg_array_len(gen->code->code);
-    const Cg_frame *const frame_before_loop =
-        cg_frame_clone(gen->frame, arena);
+    const codegen_frame *const frame_before_loop =
+        codegen_frame_clone(gen->frame, arena);
 
-    cg_emit_node(gen, class_file, node->lhs, arena); // Condition.
+    codegen_emit_node(gen, class_file, node->lhs, arena); // Condition.
     const u16 conditional_jump =
-        cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
-    cg_emit_node(gen, class_file, node->rhs, arena); // Body.
-    const u16 unconditional_jump = cg_emit_jump(gen, arena);
+        codegen_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena); // Body.
+    const u16 unconditional_jump = codegen_emit_jump(gen, arena);
 
     const i16 unconditional_jump_delta = -(unconditional_jump - 1 - pc_start);
     gen->code->code[unconditional_jump + 0] =
@@ -8889,7 +8889,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     // Patch first, conditional, jump.
     {
-      cg_patch_jump_at(gen, conditional_jump, pc_end);
+      codegen_patch_jump_at(gen, conditional_jump, pc_end);
       stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
                                    pc_end, arena);
     }
@@ -8922,7 +8922,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
         .extra_data = jvm_constant_array_push(&class_file->constant_pool,
                                              &string_class_info, arena),
     };
-    cg_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
+    codegen_emit_load_constant_single_word(gen, jstring_i, verification_info, arena);
 
     break;
   }
@@ -8936,7 +8936,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
   }
   case AST_KIND_FUNCTION_PARAMETER: {
     const Jvm_verification_info verification_info =
-        cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
+        codegen_type_to_verification_info(resolver_eval_type(gen->resolver, type));
     const Jvm_variable argument = {
         .node_i = node_i,
         .type_i = node->type_i,
@@ -8945,7 +8945,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     };
     u16 logical_local_index = 0;
     u16 physical_local_index = 0;
-    cg_frame_locals_push(gen, &argument, &logical_local_index,
+    codegen_frame_locals_push(gen, &argument, &logical_local_index,
                          &physical_local_index, arena);
     break;
   }
@@ -8963,20 +8963,20 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     const Ast *const lhs = &gen->resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
 
-    cg_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
 
     u16 logical_local_index = 0;
     u16 physical_local_index = 0;
     pg_assert(jvm_find_variable(gen->frame, lhs->lhs, &logical_local_index,
                                &physical_local_index));
 
-    cg_emit_store_variable(gen, physical_local_index, arena);
+    codegen_emit_store_variable(gen, physical_local_index, arena);
     break;
 
   case AST_KIND_RETURN:
-    cg_emit_node(gen, class_file, node->lhs, arena);
-    type->kind == TYPE_UNIT ? cg_emit_return_nothing(gen, arena)
-                            : cg_emit_return_value(gen, arena);
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    type->kind == TYPE_UNIT ? codegen_emit_return_nothing(gen, arena)
+                            : codegen_emit_return_value(gen, arena);
     break;
 
   case AST_KIND_MAX:
@@ -8984,7 +8984,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
   }
 }
 
-static Str cg_make_class_name_from_path(Str path, Arena *arena) {
+static Str codegen_make_class_name_from_path(Str path, Arena *arena) {
 
   Str_split_result slash_split = str_rsplit(path, '/');
   pg_assert(!str_is_empty(slash_split.right));
@@ -8998,7 +8998,7 @@ static Str cg_make_class_name_from_path(Str path, Arena *arena) {
   return sb_build(res);
 }
 
-static void cg_emit_synthetic_class(Cg_generator *gen,
+static void codegen_emit_synthetic_class(codegen_generator *gen,
                                     Class_file *class_file,
                                     Arena *arena) {
   pg_assert(gen != NULL);
@@ -9042,7 +9042,7 @@ static void cg_emit_synthetic_class(Cg_generator *gen,
   }
 }
 
-static u16 cg_add_method(Class_file *class_file, u16 access_flags,
+static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
                          u16 name, u16 descriptor, Jvm_attribute *attributes,
                          Arena *arena) {
   pg_assert(class_file != NULL);
@@ -9058,7 +9058,7 @@ static u16 cg_add_method(Class_file *class_file, u16 access_flags,
   return pg_array_last_index(class_file->methods);
 }
 
-static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
+static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
                                                Class_file *class_file,
                                                Arena *arena) {
   pg_assert(gen != NULL);
@@ -9144,8 +9144,8 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
 
     gen->code = &code;
     gen->frame =
-        arena_alloc(arena, sizeof(Cg_frame), _Alignof(Cg_frame), 1);
-    cg_frame_init(gen->frame, arena);
+        arena_alloc(arena, sizeof(codegen_frame), _Alignof(codegen_frame), 1);
+    codegen_frame_init(gen->frame, arena);
 
     // Fill locals (method arguments).
     {
@@ -9189,12 +9189,12 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
       };
       u16 logical_local_index = 0;
       u16 physical_local_index = 0;
-      cg_frame_locals_push(gen, &arg0, &logical_local_index,
+      codegen_frame_locals_push(gen, &arg0, &logical_local_index,
                            &physical_local_index, arena);
     }
 
-    cg_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
-    cg_emit_return_nothing(gen, arena);
+    codegen_emit_invoke_static(gen, target_method_ref_i, &target_method_type, arena);
+    codegen_emit_return_nothing(gen, arena);
 
     gen->code->max_physical_stack = gen->frame->max_physical_stack;
     gen->code->max_physical_locals = gen->frame->max_physical_locals;
@@ -9217,28 +9217,28 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
     };
     const u16 source_descriptor_i = jvm_constant_array_push(
         &class_file->constant_pool, &source_descriptor, arena);
-    cg_add_method(class_file, ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+    codegen_add_method(class_file, ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
                   target_method->name, source_descriptor_i, attributes, arena);
   }
 }
 
-static void cg_emit(Resolver *resolver, Class_file *class_file,
+static void codegen_emit(Resolver *resolver, Class_file *class_file,
                     u32 root_i, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  Cg_generator gen = {.resolver = resolver};
+  codegen_generator gen = {.resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
   pg_array_init_reserve(gen.locals, 1 << 12, arena);
 
-  cg_emit_synthetic_class(&gen, class_file, arena);
+  codegen_emit_synthetic_class(&gen, class_file, arena);
 
   if (pg_array_len(resolver->parser->nodes) == 1)
     return;
 
-  cg_emit_node(&gen, class_file, root_i, arena);
+  codegen_emit_node(&gen, class_file, root_i, arena);
 
-  cg_supplement_entrypoint_if_exists(&gen, class_file, arena);
+  codegen_supplement_entrypoint_if_exists(&gen, class_file, arena);
 }
