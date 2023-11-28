@@ -172,7 +172,7 @@ int main(int argc, char *argv[]) {
         .buf = source,
         .lexer = &lexer,
     };
-    const u32 root_i = par_parse(&parser, &arena);
+    const u32 root_i = parser_parse(&parser, &arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
     jvm_write(&class_file, file);
     fclose(file);
 
-    LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu",
+    LOG("nodes=%lu sizeof(parser_ast_node_t)=%lu mem=%lu",
         pg_array_len(parser.nodes), sizeof(Ast),
         pg_array_len(parser.nodes) * sizeof(Ast));
     LOG("types=%lu sizeof(Type)=%lu mem=%lu", pg_array_len(resolver.types),
