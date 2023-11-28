@@ -206,7 +206,7 @@ int main(int argc, char *argv[]) {
       return 1;
 
     // Emit bytecode.
-    cf_class_file_t class_file = {
+    Class_file class_file = {
         .class_file_path = class_file_path,
         .minor_version = 0,
         .major_version =
@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
         return read_res.error;
       }
 
-      cf_class_file_t class_file_verify = {.class_file_path =
+      Class_file class_file_verify = {.class_file_path =
                                                class_file.class_file_path};
       u8 *current = read_res.content.data;
       cf_buf_read_class_file(read_res.content, &current, &class_file_verify,
