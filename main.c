@@ -233,8 +233,8 @@ int main(int argc, char *argv[]) {
     LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu",
         pg_array_len(parser.nodes), sizeof(par_ast_node_t),
         pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
-    LOG("types=%lu sizeof(ty_type_t)=%lu mem=%lu", pg_array_len(resolver.types),
-        sizeof(ty_type_t), pg_array_len(resolver.types) * sizeof(ty_type_t));
+    LOG("types=%lu sizeof(Type)=%lu mem=%lu", pg_array_len(resolver.types),
+        sizeof(Type), pg_array_len(resolver.types) * sizeof(Type));
 
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
 
