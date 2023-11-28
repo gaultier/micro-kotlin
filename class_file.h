@@ -158,7 +158,7 @@ typedef struct {
   // Immutable clone of the frame when the stack map
   // frame was created.
   cg_frame_t *frame;
-} cf_stack_map_frame_t;
+} Stack_map_frame;
 
 enum __attribute__((packed)) ty_type_kind_t {
   TYPE_ANY = 0,
@@ -1210,7 +1210,7 @@ struct cf_attribute_t {
     cf_line_number_table_entry_t
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
-    cf_stack_map_frame_t *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
+    Stack_map_frame *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
     cf_annotation_t *
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
@@ -1516,11 +1516,11 @@ static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
   const u8 *const current_start = *current;
 
   const u16 len = buf_read_be_u16(buf, current);
-  cf_stack_map_frame_t *stack_map_frames = NULL;
+  Stack_map_frame *stack_map_frames = NULL;
   pg_array_init_reserve(stack_map_frames, len, arena);
 
   for (u16 i = 0; i < len; i++) {
-    cf_stack_map_frame_t stack_map_frame = {
+    Stack_map_frame stack_map_frame = {
         .kind = buf_read_u8(buf, current),
     };
 
@@ -2465,7 +2465,7 @@ cf_compute_verification_info_size(cf_verification_info_t verification_info) {
 }
 
 static u32 cf_compute_verification_infos_size(
-    const cf_stack_map_frame_t *stack_map_frame) {
+    const Stack_map_frame *stack_map_frame) {
   pg_assert(stack_map_frame != NULL);
 
   if (stack_map_frame->kind <= 63) // same_frame
@@ -2565,13 +2565,13 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
                sizeof(cf_line_number_table_entry_t);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
-    const cf_stack_map_frame_t *const stack_map_frames =
+    const Stack_map_frame *const stack_map_frames =
         attribute->v.stack_map_table;
     pg_assert(stack_map_frames != NULL);
 
     u32 size = sizeof(u16) /* count */;
     for (u16 i = 0; i < pg_array_len(stack_map_frames); i++) {
-      const cf_stack_map_frame_t *const stack_map_frame = &stack_map_frames[i];
+      const Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
 
       if (stack_map_frame->kind <= 63) // same_frame
       {
@@ -2648,7 +2648,7 @@ cf_write_verification_info(FILE *file,
 }
 
 static void cf_write_stack_map_table_attribute(
-    FILE *file, const cf_stack_map_frame_t *stack_map_frame) {
+    FILE *file, const Stack_map_frame *stack_map_frame) {
   pg_assert(file != NULL);
   pg_assert(stack_map_frame != NULL);
 
@@ -2777,7 +2777,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     file_write_be_u16(file, count);
 
     for (u16 i = 0; i < pg_array_len(attribute->v.stack_map_table); i++) {
-      const cf_stack_map_frame_t *const stack_map_frame =
+      const Stack_map_frame *const stack_map_frame =
           &attribute->v.stack_map_table[i];
       cf_write_stack_map_table_attribute(file, stack_map_frame);
     }
@@ -6870,7 +6870,7 @@ typedef struct {
   cf_attribute_code_t *code;
   cg_frame_t *frame;
   cg_scope_variable_t *locals;
-  cf_stack_map_frame_t *stack_map_frames;
+  Stack_map_frame *stack_map_frames;
   u32 scope_id;
   pg_pad(4);
 } cg_generator_t;
@@ -7782,12 +7782,12 @@ static void cg_begin_scope(cg_generator_t *gen) {
 
 static void
 stack_map_record_frame_at_pc(const cg_frame_t *frame,
-                             cf_stack_map_frame_t **stack_map_frames, u16 pc,
+                             Stack_map_frame **stack_map_frames, u16 pc,
                              Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  const cf_stack_map_frame_t stack_map_frame = {
+  const Stack_map_frame stack_map_frame = {
       .frame = cg_frame_clone(frame, arena),
       .pc = pc,
   };
@@ -8174,14 +8174,14 @@ static int stack_map_frame_sort(const void *a, const void *b) {
   pg_assert(a != NULL);
   pg_assert(b != NULL);
 
-  const cf_stack_map_frame_t *const smp_a = a;
-  const cf_stack_map_frame_t *const smp_b = b;
+  const Stack_map_frame *const smp_a = a;
+  const Stack_map_frame *const smp_b = b;
 
   return (int)smp_a->pc - (int)smp_b->pc;
 }
 
 static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
-                                     cf_stack_map_frame_t *stack_map_frames,
+                                     Stack_map_frame *stack_map_frames,
                                      Arena *arena) {
   pg_assert(first_method_frame != NULL);
   pg_assert(stack_map_frames != NULL);
@@ -8192,10 +8192,10 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
 
   // TODO: Better sort.
   qsort(stack_map_frames, pg_array_len(stack_map_frames),
-        sizeof(cf_stack_map_frame_t), stack_map_frame_sort);
+        sizeof(Stack_map_frame), stack_map_frame_sort);
 
   for (u64 i = 0; i < pg_array_len(stack_map_frames); i++) {
-    cf_stack_map_frame_t *const stack_map_frame = &stack_map_frames[i];
+    Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
     cg_frame_t *const frame = stack_map_frame->frame;
 
     const cg_frame_t *const previous_frame =
