@@ -303,7 +303,7 @@ struct Ast {
   u32 lhs;
   u32 rhs;
   u32 type_i; // TODO: should it be separate?
-  u32 *nodes;
+  Array32(u32) nodes;
   u64 extra_data_i;
   u16 flags;
   Ast_kind kind;
@@ -1837,7 +1837,7 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
     jvm_buf_read_element_value(buf, current, class_file,
                                &element_value_pair.element_value, arena);
 
-    *array32_push(&annotation->element_value_pairs ,arena)= element_value_pair;
+    *array32_push(&annotation->element_value_pairs, arena) = element_value_pair;
   }
 }
 
@@ -4279,7 +4279,7 @@ static u32 parser_parse_navigation_suffix(Parser *parser, u32 *main_token_i,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static void parser_parse_value_arguments(Parser *parser, u32 **nodes,
+static void parser_parse_value_arguments(Parser *parser, Array32(u32) * nodes,
                                          Arena *arena) {
 
   while (!parser_is_at_end(parser)) {
@@ -4292,7 +4292,7 @@ static void parser_parse_value_arguments(Parser *parser, u32 **nodes,
           "arguments");
       return;
     }
-    pg_array_append(*nodes, argument_i, arena);
+    *array32_push(nodes, arena) = argument_i;
 
     if (parser_match_token(parser, TOKEN_KIND_COMMA)) {
     }
@@ -4322,11 +4322,9 @@ static u32 parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
 
   // Calling a function with zero arguments.
   if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
-    pg_array_init_reserve(node.nodes, 0, arena);
     return parser_add_node(parser, &node, arena);
   }
 
-  pg_array_init_reserve(node.nodes, 256, arena);
   parser_parse_value_arguments(parser, &node.nodes, arena);
 
   return parser_add_node(parser, &node, arena);
@@ -4610,11 +4608,10 @@ static u32 parser_parse_statements(Parser *parser, Arena *arena) {
     return node_i;
 
   Ast node = {.kind = AST_KIND_LIST};
-  pg_array_init_reserve(node.nodes, 128, arena);
-  pg_array_append(node.nodes, node_i, arena);
+  *array32_push(&node.nodes, arena) = node_i;
 
   while ((node_i = parser_parse_statement(parser, arena)) != 0)
-    pg_array_append(node.nodes, node_i, arena);
+    *array32_push(&node.nodes, arena) = node_i;
 
   return parser_add_node(parser, &node, arena);
 }
@@ -4709,13 +4706,11 @@ static u32 parser_parse_function_value_parameters(Parser *parser,
     return 0;
 
   Ast node = {.kind = AST_KIND_LIST};
-  pg_array_init_reserve(node.nodes, 128, arena);
 
   const u32 root_i = parser_add_node(parser, &node, arena);
   do {
-    pg_array_append(node.nodes,
-                    parser_parse_function_value_parameter(parser, arena),
-                    arena);
+    *array32_push(&node.nodes, arena) =
+        parser_parse_function_value_parameter(parser, arena);
   } while (parser_match_token(parser, TOKEN_KIND_COMMA));
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
@@ -4874,13 +4869,12 @@ static u32 parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(!array32_is_empty(parser->lexer->tokens));
 
   Ast node = {.kind = AST_KIND_LIST};
-  pg_array_init_reserve(node.nodes, 512, arena);
 
   // TODO: package, import, etc.
 
   u32 node_i = 0;
   while ((node_i = parser_parse_top_level_object(parser, arena)) != 0) {
-    pg_array_append(node.nodes, node_i, arena);
+    *array32_push(&node.nodes, arena) = node_i;
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -5407,6 +5401,7 @@ static void resolver_collect_callables_with_name(const Resolver *resolver,
 static Str resolver_function_to_human_string(const Resolver *resolver,
                                              u32 type_i, Arena *arena) {
 
+  pg_assert(type_i < resolver->types.len);
   const Type *const type = &resolver->types.data[type_i];
 
   if (!(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR))
@@ -5734,32 +5729,32 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
+    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %u children",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset, pg_array_len(node->nodes));
+        token.source_offset, node->nodes.len);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
-      resolver_ast_fprint_node(resolver, node->nodes[i], file, indent + 2,
+    for (u64 i = 0; i < node->nodes.len; i++)
+      resolver_ast_fprint_node(resolver, node->nodes.data[i], file, indent + 2,
                                arena);
     break;
   case AST_KIND_CALL: {
 
     human_type =
         resolver_function_to_human_string(resolver, node->type_i, arena);
-    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %lu children",
+    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %u children",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset, pg_array_len(node->nodes));
+        token.source_offset, node->nodes.len);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++)
-      resolver_ast_fprint_node(resolver, node->nodes[i], file, indent + 2,
+    for (u64 i = 0; i < node->nodes.len; i++)
+      resolver_ast_fprint_node(resolver, node->nodes.data[i], file, indent + 2,
                                arena);
     break;
   }
@@ -6188,10 +6183,10 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
 
     // Resolve arguments.
     Array32(u32) call_site_argument_types_i =
-        array32_make(u32, 0, (u32)pg_array_len(node->nodes), &tmp_arena);
+        array32_make(u32, 0, node->nodes.len, &tmp_arena);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      const u32 node_i = node->nodes[i];
+    for (u64 i = 0; i < node->nodes.len; i++) {
+      const u32 node_i = node->nodes.data[i];
       pg_assert(node_i > 0);
 
       const u32 type_i =
@@ -6341,8 +6336,9 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     }
   }
   case AST_KIND_LIST: {
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      resolver_resolve_node(resolver, node->nodes[i], scratch_arena, arena);
+    for (u64 i = 0; i < node->nodes.len; i++) {
+      resolver_resolve_node(resolver, node->nodes.data[i], scratch_arena,
+                            arena);
       // Clean up after each statement.
       resolver->current_type_i = 0;
     }
@@ -6728,9 +6724,9 @@ static void resolver_collect_user_defined_function_signatures(
       pg_assert(lhs->kind == AST_KIND_LIST);
 
       type.v.method.argument_types_i =
-          array32_make(u32, 0, (u32)pg_array_len(lhs->nodes), arena);
-      for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
-        const u32 node_i = lhs->nodes[i];
+          array32_make(u32, 0, lhs->nodes.len, arena);
+      for (u64 i = 0; i < lhs->nodes.len; i++) {
+        const u32 node_i = lhs->nodes.data[i];
         const u32 type_i = resolver->parser->nodes.data[node_i].type_i;
         *array32_push(&type.v.method.argument_types_i, arena) = type_i;
       }
@@ -8160,8 +8156,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     pg_assert(type->this_class_name.len > 0);
     pg_assert(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR);
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      codegen_emit_node(gen, class_file, node->nodes[i], arena);
+    for (u64 i = 0; i < node->nodes.len; i++) {
+      codegen_emit_node(gen, class_file, node->nodes.data[i], arena);
     }
 
     if (type->flags & TYPE_FLAG_INLINE_ONLY) {
@@ -8170,8 +8166,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 
       u64 stack_index = array32_last_index(gen->frame->stack);
 
-      for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-        const u32 argument_i = node->nodes[i];
+      for (u64 i = 0; i < node->nodes.len; i++) {
+        const u32 argument_i = node->nodes.data[i];
         const Ast *const argument =
             &gen->resolver->parser->nodes.data[argument_i];
 
@@ -8311,10 +8307,10 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         const Ast *const rhs = &gen->resolver->parser->nodes.data[node->rhs];
         pg_assert(rhs->kind == AST_KIND_LIST);
 
-        if (pg_array_len(rhs->nodes) == 0) {
+        if (rhs->nodes.len == 0) {
           codegen_emit_return_nothing(gen, arena);
         } else {
-          const u32 last_node_i = rhs->nodes[pg_array_len(rhs->nodes) - 1];
+          const u32 last_node_i = *array32_last(rhs->nodes);
           const Ast *const last_node =
               &gen->resolver->parser->nodes.data[last_node_i];
 
@@ -8609,8 +8605,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       pg_assert(gen->frame != NULL);
     }
 
-    for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
-      const u32 child_i = node->nodes[i];
+    for (u64 i = 0; i < node->nodes.len; i++) {
+      const u32 child_i = node->nodes.data[i];
 
       if (gen->frame != NULL) {
         pg_assert(array32_is_empty(gen->frame->stack));
