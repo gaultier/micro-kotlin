@@ -161,6 +161,7 @@ typedef struct {
   // frame was created.
   codegen_frame *frame;
 } Stack_map_frame;
+Array32_struct(Stack_map_frame);
 
 enum __attribute__((packed)) Type_kind {
   TYPE_ANY = 0,
@@ -4961,8 +4962,7 @@ static bool jvm_method_has_inline_only_annotation(const Class_file *class_file,
     if (attribute->kind != ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS)
       continue;
 
-    for (u64 j = 0;
-         j < attribute->v.runtime_invisible_annotations.len; j++) {
+    for (u64 j = 0; j < attribute->v.runtime_invisible_annotations.len; j++) {
       const Jvm_annotation *const annotation =
           &attribute->v.runtime_invisible_annotations.data[j];
 
@@ -6773,7 +6773,7 @@ typedef struct {
   Jvm_attribute_code *code;
   codegen_frame *frame;
   codegen_scope_variable *locals;
-  Stack_map_frame *stack_map_frames;
+  Array32(Stack_map_frame) stack_map_frames;
   u32 scope_id;
   pg_pad(4);
 } codegen_generator;
@@ -7692,7 +7692,8 @@ static void codegen_begin_scope(codegen_generator *gen) {
 }
 
 static void stack_map_record_frame_at_pc(const codegen_frame *frame,
-                                         Stack_map_frame **stack_map_frames,
+                                         Array32(Stack_map_frame) *
+                                             stack_map_frames,
                                          u16 pc, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -7701,7 +7702,7 @@ static void stack_map_record_frame_at_pc(const codegen_frame *frame,
       .frame = codegen_frame_clone(frame, arena),
       .pc = pc,
   };
-  pg_array_append(*stack_map_frames, stack_map_frame, arena);
+  *array32_push(stack_map_frames, arena) = stack_map_frame;
 }
 
 static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
@@ -8019,7 +8020,6 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->locals != NULL);
   pg_assert(gen->frame->stack != NULL);
-  pg_assert(gen->stack_map_frames != NULL);
 
   const Ast *const node = &gen->resolver->parser->nodes.data[node_i];
   pg_assert(node->type_i > 0);
@@ -8098,32 +8098,31 @@ static int stack_map_frame_sort(const void *a, const void *b) {
 }
 
 static void stack_map_resolve_frames(const codegen_frame *first_method_frame,
-                                     Stack_map_frame *stack_map_frames,
+                                     Array32(Stack_map_frame) stack_map_frames,
                                      Arena *arena) {
   pg_assert(first_method_frame != NULL);
-  pg_assert(stack_map_frames != NULL);
   pg_assert(arena != NULL);
 
-  if (pg_array_len(stack_map_frames) == 0)
+  if (array32_is_empty(stack_map_frames))
     return;
 
   // TODO: Better sort.
-  qsort(stack_map_frames, pg_array_len(stack_map_frames),
-        sizeof(Stack_map_frame), stack_map_frame_sort);
+  qsort(stack_map_frames.data, stack_map_frames.len, sizeof(Stack_map_frame),
+        stack_map_frame_sort);
 
-  for (u64 i = 0; i < pg_array_len(stack_map_frames); i++) {
-    Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
+  for (u64 i = 0; i < stack_map_frames.len; i++) {
+    Stack_map_frame *const stack_map_frame = &stack_map_frames.data[i];
     codegen_frame *const frame = stack_map_frame->frame;
 
     const codegen_frame *const previous_frame =
-        i > 0 ? stack_map_frames[i - 1].frame : first_method_frame;
+        i > 0 ? stack_map_frames.data[i - 1].frame : first_method_frame;
 
     i16 locals_delta =
         pg_array_len(frame->locals) - pg_array_len(previous_frame->locals);
 
     i32 offset_delta =
         i == 0 ? stack_map_frame->pc
-               : (stack_map_frame->pc - stack_map_frames[i - 1].pc - 1);
+               : (stack_map_frame->pc - stack_map_frames.data[i - 1].pc - 1);
 
     if (offset_delta == -1) // Duplicate jump target, already has a valid
                             // stack map frame, skip.
@@ -8433,12 +8432,12 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
                                          "StackMapTable", arena),
         .v = {.stack_map_table = NULL}};
     pg_array_init_reserve(attribute_stack_map_frames.v.stack_map_table,
-                          pg_array_len(gen->stack_map_frames), arena);
+                          gen->stack_map_frames.len, arena);
 
-    for (u64 i = 0; i < pg_array_len(gen->stack_map_frames); i++) {
-      if (!gen->stack_map_frames[i].tombstone)
+    for (u64 i = 0; i < gen->stack_map_frames.len; i++) {
+      if (!gen->stack_map_frames.data[i].tombstone)
         pg_array_append(attribute_stack_map_frames.v.stack_map_table,
-                        gen->stack_map_frames[i], arena);
+                        gen->stack_map_frames.data[i], arena);
     }
 
     pg_array_append(code.attributes, attribute_stack_map_frames, arena);
@@ -8454,7 +8453,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 
     gen->code = NULL;
     gen->frame = NULL;
-    pg_array_clear(gen->stack_map_frames);
+    array32_clear(&gen->stack_map_frames);
     break;
   }
   case AST_KIND_UNARY: {
@@ -9152,8 +9151,8 @@ static void codegen_emit(Resolver *resolver, Class_file *class_file, u32 root_i,
   pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  codegen_generator gen = {.resolver = resolver};
-  pg_array_init_reserve(gen.stack_map_frames, 64, arena);
+  codegen_generator gen = {.resolver = resolver,
+.stack_map_frames=array32_make(Stack_map_frame,0, 64, arena)};
   pg_array_init_reserve(gen.locals, 1 << 12, arena);
 
   codegen_emit_synthetic_class(&gen, class_file, arena);

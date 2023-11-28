@@ -142,6 +142,8 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 #define array32_last_index(array)                                              \
   (pg_assert(!array32_is_empty(array)), (array).len - 1)
 
+#define array32_clear(array) (array)->len = 0
+
 Array32_struct(u8);
 Array32_struct(u16);
 Array32_struct(u32);
