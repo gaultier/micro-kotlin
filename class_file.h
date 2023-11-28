@@ -612,13 +612,13 @@ static bool resolver_is_type_subtype_of(Resolver *resolver, Type *a,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    Resolver *resolver, const u32 *call_site_argument_types_i,
+    Resolver *resolver, Array32(u32) call_site_argument_types_i,
     const Type *function_definition_type, Arena scratch_arena, Arena *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
   const Method *definition = &function_definition_type->v.method;
 
-  const u8 call_argument_count = (u8)pg_array_len(call_site_argument_types_i);
+  const u8 call_argument_count = (u8)call_site_argument_types_i.len;
   const u8 definition_argument_count = (u8)definition->argument_types_i.len;
 
   // Technically there is no such check in the spec but since we do not
@@ -627,7 +627,7 @@ static bool resolver_is_function_candidate_applicable(
     return false;
 
   for (u8 i = 0; i < call_argument_count; i++) {
-    const u32 call_site_argument_type_i = call_site_argument_types_i[i];
+    const u32 call_site_argument_type_i = call_site_argument_types_i.data[i];
     Type *call_argument = &resolver->types.data[call_site_argument_type_i];
     const Type *definition_argument =
         &resolver->types.data[definition->argument_types_i.data[i]];
@@ -5388,11 +5388,11 @@ static bool resolver_is_package_imported(const Resolver *resolver,
 
 static void resolver_collect_callables_with_name(const Resolver *resolver,
                                                  Str function_name,
-                                                 u32 **candidate_functions_i,
+                                                 Array32(u32) *
+                                                     candidate_functions_i,
                                                  Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(candidate_functions_i != NULL);
-  pg_assert(*candidate_functions_i != NULL);
 
   for (u64 i = 0; i < resolver->types.len; i++) {
     const Type *const type = &resolver->types.data[i];
@@ -5410,7 +5410,7 @@ static void resolver_collect_callables_with_name(const Resolver *resolver,
       if (!resolver_is_package_imported(resolver, type->package_name))
         continue;
 
-      pg_array_append(*candidate_functions_i, (u32)i, arena);
+      *array32_push(candidate_functions_i, arena) = (u32)i;
     }
   }
 
@@ -5485,17 +5485,18 @@ static Str resolver_function_to_human_string(const Resolver *resolver,
 }
 
 static void resolver_remove_non_applicable_function_candidates(
-    Resolver *resolver, u32 *candidate_functions_i,
-    const u32 *call_site_argument_types_i, Arena scratch_arena, Arena *arena) {
+    Resolver *resolver, Array32(u32) * candidate_functions_i,
+    Array32(u32) call_site_argument_types_i, Arena scratch_arena,
+    Arena *arena) {
 
   u64 i = 0;
-  while (i < pg_array_len(candidate_functions_i)) {
+  while (i < candidate_functions_i->len) {
     const Type *const candidate_type =
-        &resolver->types.data[candidate_functions_i[i]];
+        &resolver->types.data[candidate_functions_i->data[i]];
     if (!resolver_is_function_candidate_applicable(
             resolver, call_site_argument_types_i, candidate_type, scratch_arena,
             arena)) {
-      pg_array_swap_remove_at(candidate_functions_i, i);
+      array32_remove_at_unordered(candidate_functions_i, i);
     } else {
       i++;
     }
@@ -5537,23 +5538,22 @@ static Type_applicability resolver_check_applicability_of_candidate_pair(
 }
 
 static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
-                                                            u32 *candidates,
+                                                            Array32(u32)
+                                                                candidates,
                                                             Arena scratch_arena,
                                                             Arena *arena) {
 
-  const u64 candidates_count = pg_array_len(candidates);
+  Array32(bool) tombstones =
+      array32_make(bool, candidates.len, candidates.len, &scratch_arena);
+  u32 tombstones_count = 0;
 
-  Array32(bool) tombstones = array32_make(
-      bool, (u32)candidates_count, (u32)candidates_count, &scratch_arena);
-  u64 tombstones_count = 0;
-
-  while (tombstones_count < candidates_count - 1) {
-    for (u64 i = 0; i < candidates_count; i++) {
+  while (tombstones_count < candidates.len - 1) {
+    for (u64 i = 0; i < candidates.len; i++) {
       for (u64 j = 0; j < i; j++) {
         const u32 a_index = (u32)i;
         const u32 b_index = (u32)j;
-        const u32 a_type_i = candidates[a_index];
-        const u32 b_type_i = candidates[b_index];
+        const u32 a_type_i = candidates.data[a_index];
+        const u32 b_type_i = candidates.data[b_index];
 
         if (tombstones.data[a_index] || tombstones.data[b_index])
           continue;
@@ -5610,7 +5610,7 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
 
   for (u64 i = 0; i < tombstones.len; i++) {
     if (!tombstones.data[i])
-      return candidates[i];
+      return candidates.data[i];
   }
 
   pg_assert(0 && "unreachable");
@@ -5618,10 +5618,12 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
 
 // TODO: Keep track of imported packages (including those imported by
 // default).
-static bool resolver_resolve_free_function(
-    Resolver *resolver, Str method_name, const u32 *call_site_argument_types_i,
-    u32 *picked_method_type_i, u32 **candidate_functions_i, Arena scratch_arena,
-    Arena *arena) {
+static bool resolver_resolve_free_function(Resolver *resolver, Str method_name,
+                                           Array32(u32)
+                                               call_site_argument_types_i,
+                                           u32 *picked_method_type_i,
+                                           Array32(u32) * candidate_functions_i,
+                                           Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
   pg_assert(picked_method_type_i != NULL);
@@ -5629,20 +5631,20 @@ static bool resolver_resolve_free_function(
   resolver_collect_callables_with_name(resolver, method_name,
                                        candidate_functions_i, arena);
 
-  const u64 original_candidates_len = pg_array_len(*candidate_functions_i);
+  const u32 original_candidates_len = candidate_functions_i->len;
 
   resolver_remove_non_applicable_function_candidates(
-      resolver, *candidate_functions_i, call_site_argument_types_i,
+      resolver, candidate_functions_i, call_site_argument_types_i,
       scratch_arena, arena);
 
-  if (pg_array_len(*candidate_functions_i) == 0) {
+  if (candidate_functions_i->len == 0) {
     // Restore the original length to display the possible candidates in the
     // error message.
-    pg_array_header(*candidate_functions_i)->len = original_candidates_len;
+    candidate_functions_i->len = original_candidates_len;
     return false;
   }
-  if (pg_array_len(*candidate_functions_i) == 1) {
-    *picked_method_type_i = (*candidate_functions_i)[0];
+  if (candidate_functions_i->len == 1) {
+    *picked_method_type_i = candidate_functions_i->data[0];
     return true;
   }
 
@@ -6199,9 +6201,8 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     Str name = parser_token_to_str_view(resolver->parser, lhs->main_token_i);
 
     // Resolve arguments.
-    u32 *call_site_argument_types_i = NULL;
-    pg_array_init_reserve(call_site_argument_types_i, pg_array_len(node->nodes),
-                          &tmp_arena);
+    Array32(u32) call_site_argument_types_i =
+        array32_make(u32, 0, (u32)pg_array_len(node->nodes), &tmp_arena);
 
     for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
       const u32 node_i = node->nodes[i];
@@ -6209,13 +6210,13 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
 
       const u32 type_i =
           resolver_resolve_node(resolver, node_i, tmp_arena, arena);
-      pg_array_append(call_site_argument_types_i, type_i, &tmp_arena);
+      *array32_push(&call_site_argument_types_i, &tmp_arena) = type_i;
     }
 
     u32 picked_method_type_i = 0;
     {
-      u32 *candidate_functions_i = NULL;
-      pg_array_init_reserve(candidate_functions_i, 128, &tmp_arena);
+      Array32(u32) candidate_functions_i =
+          array32_make(u32, 0, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
               resolver, name, call_site_argument_types_i, &picked_method_type_i,
@@ -6224,15 +6225,15 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "failed to find matching function", arena);
 
-        if (pg_array_len(candidate_functions_i) == 0) {
+        if (candidate_functions_i.len == 0) {
           error = sb_append_c(
               error, ", could not find any function with this name: ", arena);
           error = sb_append(error, name, arena);
         } else {
           error = sb_append_c(error, ", possible candidates: ", arena);
 
-          for (u64 i = 0; i < pg_array_len(candidate_functions_i); i++) {
-            const u32 candidate_type_i = candidate_functions_i[i];
+          for (u64 i = 0; i < candidate_functions_i.len; i++) {
+            const u32 candidate_type_i = candidate_functions_i.data[i];
 
             error = sb_append_c(error, "\n  ", arena);
             error = sb_append(error,

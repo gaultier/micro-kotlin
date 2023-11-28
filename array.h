@@ -133,7 +133,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                   : NULL,                                                      \
   })
 
-#define array32_is_empty(array) (array.len == 0)
+#define array32_is_empty(array) ((array).len == 0)
 
 #define array32_last(array)                                                    \
   (pg_assert(!array32_is_empty(array) && (array).data != NULL),                \
@@ -157,6 +157,13 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
     *(dst) = array32_make(T, (src).len, (src).len, arena);                     \
     if ((src).len > 0)                                                         \
       memcpy((dst)->data, (src).data, sizeof((src).data[0]) * (src).len);      \
+  } while (0)
+
+#define array32_remove_at_unordered(array, i)                                  \
+  do {                                                                         \
+    pg_assert(i < (array)->len);                                               \
+    (array)->data[i] = *array32_last(*(array)); /* Swap. */                    \
+    array32_drop(array, 1);                                                    \
   } while (0)
 
 Array32_struct(_Bool);
