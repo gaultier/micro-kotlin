@@ -1463,7 +1463,7 @@ static void jvm_buf_read_code_attribute(Str buf, u8 **current,
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
   Str code_slice = buf_read_n_u8(buf, code_len, current);
-  code.bytecode = array32_make_from_c(u8, code_slice.data, code_len, arena);
+  code.bytecode = array32_make_from_slice(u8, code_slice.data, code_len, arena);
 
   jvm_buf_read_code_attribute_exceptions(buf, current, class_file,
                                          &code.exceptions, arena);
@@ -5028,7 +5028,7 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
         const Jvm_attribute *const attribute = &method->attributes.data[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           type.v.method.code =
-              array32_make_from_c(u8, attribute->v.code.bytecode.data,
+              array32_make_from_slice(u8, attribute->v.code.bytecode.data,
                                   attribute->v.code.bytecode.len, arena);
           break;
         }
@@ -8971,7 +8971,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
     const Method target_method_type = {.return_type_i = TYPE_UNIT_I};
 
     Jvm_attribute_code code = {0};
-    code.bytecode=array32_make(u8,0, 4, arena);
+    code.bytecode = array32_make(u8, 0, 4, arena);
 
     gen->code = &code;
     gen->frame =

@@ -123,7 +123,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                   sizeof(*(array)->data), _Alignof(*(array)->data), arena),    \
    (array)->data + (array)->len++ : (array)->data + (array)->len++)
 
-#define array32_make_from_c(T, src, _len, arena)                               \
+#define array32_make_from_slice(T, src, _len, arena)                               \
   ((Array32(T)){                                                               \
       .len = _len,                                                             \
       .cap = _len,                                                             \
