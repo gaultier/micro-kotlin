@@ -2,4 +2,5 @@
 -Wextra
 -Wunused
 -Wpadded
+-Wno-gnu-alignof-expression
 -std=c99

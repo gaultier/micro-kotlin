@@ -87,3 +87,35 @@ typedef struct pg_array_header_t {
     x[i] = x[pg_array_len(x) - 1]; /* Swap. */                                 \
     pg_array_drop_last(x);                                                     \
   } while (0)
+
+// --------------
+
+#define Array32(T) Array32_##T
+
+#define Array32_struct(T)                                                      \
+  typedef struct {                                                             \
+    u32 len, cap;                                                              \
+    T *data;                                                                   \
+  } Array32(T);
+
+#define array32_make(T, _len, _cap, _arena)                                    \
+  ((Array32(T)){                                                               \
+      .len = _len,                                                             \
+      .cap = _cap,                                                             \
+      .data = arena_alloc(_arena, sizeof(T), _Alignof(T), _cap),               \
+  })
+
+static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
+                         u32 item_align, Arena *arena) {
+  *cap = *cap == 0 ? 16 : *cap * 2;
+  void *new_data = arena_alloc(arena, item_size, item_align, *cap);
+  *data = memcpy(new_data, *data, len * item_size);
+}
+
+#define array32_push(array, arena)                                             \
+  ((array)->len >= (array)->cap                                                \
+   ? array32_grow((array)->len, &(array)->cap, (void **)&(array)->data,        \
+                  sizeof(*(array)->data), _Alignof(*(array)->data), arena),    \
+   (array)->data + (array)->len++ : (array)->data + (array)->len++)
+
+// #define array32_foreach(array) for(u32 i=0
