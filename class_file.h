@@ -195,14 +195,14 @@ struct cg_frame_t {
 
 struct Type;
 
-struct cf_constant_array_t;
-typedef struct cf_constant_array_t cf_constant_array_t;
+struct Jvm_constant_pool;
+typedef struct Jvm_constant_pool Jvm_constant_pool;
 
 typedef struct {
   Str name;
   Str source_file_name;
   u8 *code;                           // In case of InlineOnly.
-  cf_constant_array_t *constant_pool; // In case of InlineOnly.
+  Jvm_constant_pool *constant_pool; // In case of InlineOnly.
   u32 *argument_types_i;
   u32 return_type_i;
   u32 this_class_type_i;
@@ -210,18 +210,18 @@ typedef struct {
   u16 access_flags;
   u16 source_line;
   pg_pad(4);
-} ty_type_method_t;
+} Method;
 
 typedef enum {
   TYPE_FLAG_INLINE_ONLY = 1 << 10,
-} ty_type_flag_t;
+} Type_flag;
 
 struct Type {
   Str this_class_name;
   Str super_class_name;
   Str package_name;
   union {
-    ty_type_method_t method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
+    Method method;   // TYPE_METHOD, TYPE_CONSTRUCTOR
     u32 array_type_i;          // TYPE_ARRAY_REFERENCE
     u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
@@ -491,8 +491,8 @@ static bool resolver_are_types_equal(const resolver_t *resolver,
   // Methods: Check that the class name, argument types, and return types, are
   // the same.
   if (lhs->kind == TYPE_METHOD && rhs->kind == TYPE_METHOD) {
-    const ty_type_method_t *const lhs_method = &lhs->v.method;
-    const ty_type_method_t *const rhs_method = &rhs->v.method;
+    const Method *const lhs_method = &lhs->v.method;
+    const Method *const rhs_method = &rhs->v.method;
 
     if (!str_eq(lhs->this_class_name, rhs->this_class_name))
       return false;
@@ -620,7 +620,7 @@ static bool resolver_is_function_candidate_applicable(
     Arena *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
 
-  const ty_type_method_t *definition = &function_definition_type->v.method;
+  const Method *definition = &function_definition_type->v.method;
 
   const u8 call_argument_count = pg_array_len(call_site_argument_types_i);
   const u8 definition_argument_count =
@@ -811,16 +811,16 @@ typedef struct cf_constant_field_ref_t cf_constant_field_ref_t;
 
 typedef enum cp_info_kind_t cp_info_kind_t;
 
-struct cf_constant_array_t {
+struct Jvm_constant_pool {
   u64 len;
   u64 cap;
   cf_constant_t *values;
 };
 
-static cf_constant_array_t cf_constant_array_make(u64 cap, Arena *arena) {
+static Jvm_constant_pool cf_constant_array_make(u64 cap, Arena *arena) {
   pg_assert(arena != NULL);
 
-  return (cf_constant_array_t){
+  return (Jvm_constant_pool){
       .len = 0,
       .cap = cap,
       .values = arena_alloc(arena, sizeof(cf_constant_t),
@@ -828,7 +828,7 @@ static cf_constant_array_t cf_constant_array_make(u64 cap, Arena *arena) {
   };
 }
 
-static u16 cf_constant_array_push(cf_constant_array_t *array,
+static u16 cf_constant_array_push(Jvm_constant_pool *array,
                                   const cf_constant_t *x, Arena *arena) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
@@ -894,11 +894,11 @@ static cg_frame_t *cg_frame_clone(const cg_frame_t *src, Arena *arena) {
   return dst;
 }
 
-static cf_constant_array_t *
-cf_constant_array_clone(const cf_constant_array_t *constant_pool,
+static Jvm_constant_pool *
+cf_constant_array_clone(const Jvm_constant_pool *constant_pool,
                         Arena *arena) {
-  cf_constant_array_t *res = arena_alloc(arena, sizeof(cf_constant_array_t),
-                                         _Alignof(cf_constant_array_t), 1);
+  Jvm_constant_pool *res = arena_alloc(arena, sizeof(Jvm_constant_pool),
+                                         _Alignof(Jvm_constant_pool), 1);
   res->cap = res->len = constant_pool->len;
   res->values = arena_alloc(arena, sizeof(cf_constant_t),
                             _Alignof(cf_constant_t), constant_pool->len);
@@ -916,7 +916,7 @@ cf_constant_array_clone(const cf_constant_array_t *constant_pool,
 }
 
 static const cf_constant_t *
-cf_constant_array_get(const cf_constant_array_t *constant_pool, u16 i) {
+cf_constant_array_get(const Jvm_constant_pool *constant_pool, u16 i) {
   pg_assert(constant_pool != NULL);
   pg_assert(i > 0);
   pg_assert(i <= constant_pool->len);
@@ -978,7 +978,7 @@ static Str_builder cf_fill_descriptor_string(const Type *types,
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
-    const ty_type_method_t *const method_type = &type->v.method;
+    const Method *const method_type = &type->v.method;
     sb = sb_append_char(sb, '(', arena);
 
     for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
@@ -1266,7 +1266,7 @@ struct cf_class_file_t {
   cf_field_t *fields;
   cf_method_t *methods;
   cf_attribute_t *attributes;
-  cf_constant_array_t constant_pool;
+  Jvm_constant_pool constant_pool;
 };
 typedef struct cf_class_file_t Class_file;
 
@@ -1376,7 +1376,7 @@ static u8 buf_read_u8(Str buf, u8 **current) {
 }
 
 static Str
-cf_constant_array_get_as_string(const cf_constant_array_t *constant_pool,
+cf_constant_array_get_as_string(const Jvm_constant_pool *constant_pool,
                                 u16 i) {
   const cf_constant_t *const constant = cf_constant_array_get(constant_pool, i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_UTF8);
@@ -2856,7 +2856,7 @@ static void cf_attribute_code_init(cf_attribute_code_t *code, Arena *arena) {
   pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
-static u16 cf_add_constant_string(cf_constant_array_t *constant_pool, Str s,
+static u16 cf_add_constant_string(Jvm_constant_pool *constant_pool, Str s,
                                   Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(!str_is_empty(s));
@@ -2866,7 +2866,7 @@ static u16 cf_add_constant_string(cf_constant_array_t *constant_pool, Str s,
   return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
-static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
+static u16 cf_add_constant_cstring(Jvm_constant_pool *constant_pool, char *s,
                                    Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
@@ -2876,7 +2876,7 @@ static u16 cf_add_constant_cstring(cf_constant_array_t *constant_pool, char *s,
   return cf_constant_array_push(constant_pool, &constant, arena);
 }
 
-static u16 cf_add_constant_jstring(cf_constant_array_t *constant_pool,
+static u16 cf_add_constant_jstring(Jvm_constant_pool *constant_pool,
                                    u16 constant_utf8_i, Arena *arena) {
   pg_assert(constant_pool != NULL);
   pg_assert(constant_utf8_i > 0);
@@ -3724,7 +3724,7 @@ static Str Typeo_human_string(const Type *types, u32 type_i,
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
-    const ty_type_method_t *const method_type = &type->v.method;
+    const Method *const method_type = &type->v.method;
 
     Str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "(", arena);
@@ -5147,7 +5147,7 @@ static void resolver_load_methods_from_class_file(
   if (has_at_least_one_inline_only_method) {
     // Need each inline-only method to point to a clone of the constant pool to
     // be able to fix-up the referred to constants.
-    cf_constant_array_t *constant_pool_clone =
+    Jvm_constant_pool *constant_pool_clone =
         cf_constant_array_clone(&class_file->constant_pool, arena);
     for (u64 i = initial_types_count; i < pg_array_len(resolver->types); i++) {
       Type *const type = &resolver->types[i];
@@ -5490,7 +5490,7 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
   for (u64 i = 0; i < pg_array_len(resolver->types); i++) {
     const Type *const type = &resolver->types[i];
     if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR) {
-      const ty_type_method_t *const method = &type->v.method;
+      const Method *const method = &type->v.method;
 
       if ((method->access_flags & ACCESS_FLAGS_STATIC) == 0)
         continue;
@@ -5519,7 +5519,7 @@ static Str resolver_function_to_human_string(const resolver_t *resolver,
   if (!(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR))
     return Typeo_human_string(resolver->types, type_i, arena);
 
-  const ty_type_method_t *const method = &type->v.method;
+  const Method *const method = &type->v.method;
 
   const Type *const this_class_type =
       &resolver->types[method->this_class_type_i];
@@ -6905,8 +6905,8 @@ static void cg_frame_locals_push(cg_generator_t *gen,
   pg_array_append(gen->locals, scope_variable, arena);
 }
 
-static u16 cg_import_constant(cf_constant_array_t *dst,
-                              const cf_constant_array_t *src, u16 constant_i,
+static u16 cg_import_constant(Jvm_constant_pool *dst,
+                              const Jvm_constant_pool *src, u16 constant_i,
                               Arena *arena) {
   const cf_constant_t *const constant = cf_constant_array_get(src, constant_i);
 
@@ -7183,7 +7183,7 @@ static void cg_emit_load_variable_object(cg_generator_t *gen, u8 var_i,
 }
 
 static void cg_emit_ldc(cg_generator_t *gen,
-                        const cf_constant_array_t *constant_pool,
+                        const Jvm_constant_pool *constant_pool,
                         u16 constant_i, Arena *arena) {
 
   cf_code_array_push_u8(&gen->code->code, BYTECODE_LDC_W, arena);
@@ -7246,7 +7246,7 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
 }
 
 static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
-                                   const ty_type_method_t *method_type,
+                                   const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7275,7 +7275,7 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
 }
 
 static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
-                                  const ty_type_method_t *method_type,
+                                  const Method *method_type,
                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7304,7 +7304,7 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
 }
 
 static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
-                                   const ty_type_method_t *method_type,
+                                   const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7358,7 +7358,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
   pg_assert(method_type->kind == TYPE_METHOD);
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
 
-  const ty_type_method_t *const method = &method_type->v.method;
+  const Method *const method = &method_type->v.method;
   pg_assert(method->code != NULL);
   pg_assert(pg_array_len(method->code) > 0);
   pg_assert(method->constant_pool != NULL);
@@ -9143,7 +9143,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     const u16 target_method_ref_i = cf_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
-    const ty_type_method_t target_method_type = {.return_type_i = TYPE_UNIT_I};
+    const Method target_method_type = {.return_type_i = TYPE_UNIT_I};
 
     cf_attribute_code_t code = {0};
     pg_array_init_reserve(code.code, 4, arena);
