@@ -204,7 +204,7 @@ typedef struct Jvm_constant_pool Jvm_constant_pool;
 typedef struct {
   Str name;
   Str source_file_name;
-  u8 *code;                         // In case of InlineOnly.
+  Array32(u8) code;                 // In case of InlineOnly.
   Jvm_constant_pool *constant_pool; // In case of InlineOnly.
   u32 *argument_types_i;
   u32 return_type_i;
@@ -5028,11 +5028,13 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
         const Jvm_attribute *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
-          pg_array_clone(type.v.method.code, attribute->v.code.bytecode, arena);
+          type.v.method.code = array32_make_from_c(
+              u8, attribute->v.code.bytecode,
+              pg_array_len(attribute->v.code.bytecode), arena);
           break;
         }
       }
-      pg_assert(pg_array_len(type.v.method.code) > 0);
+      pg_assert(!array32_is_empty(type.v.method.code));
     }
 
     const u32 type_i = resolver_add_type(resolver, &type, arena);
@@ -7269,23 +7271,22 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
 
   const Method *const method = &method_type->v.method;
-  pg_assert(method->code != NULL);
-  pg_assert(pg_array_len(method->code) > 0);
+  pg_assert(!array32_is_empty(method->code));
   pg_assert(method->constant_pool != NULL);
 
-  const u32 code_size = pg_array_len(method->code);
-  u8 *code = method->code;
-  u8 *current = code;
+  const u32 code_size = method->code.len;
+  Array32(u8) code = method->code;
+  u8 *current = code.data;
 
   u64 stack_size_before_inline_snippet = pg_array_len(gen->frame->stack);
 
-  while (current < code + code_size) {
-    const u8 opcode = buf_read_u8(str_new(code, code_size), &current);
+  while (current < array32_last(code)) {
+    const u8 opcode = buf_read_u8(str_new(code.data, code_size), &current);
 
     switch (opcode) {
     case BYTECODE_GET_STATIC: {
       const u16 field_ref_i =
-          buf_read_be_u16(str_new(code, code_size), &current);
+          buf_read_be_u16(str_new(code.data, code_size), &current);
       const u16 field_ref_gen_i =
           codegen_import_constant(&class_file->constant_pool,
                                   method->constant_pool, field_ref_i, arena);
@@ -7301,7 +7302,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
     }
     case BYTECODE_INVOKE_VIRTUAL: {
       const u16 method_ref_i =
-          buf_read_be_u16(str_new(code, code_size), &current);
+          buf_read_be_u16(str_new(code.data, code_size), &current);
       const u16 method_ref_gen_i =
           codegen_import_constant(&class_file->constant_pool,
                                   method->constant_pool, method_ref_i, arena);
@@ -7367,7 +7368,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
 
     case BYTECODE_LDC: {
       const u16 constant_i =
-          (u16)buf_read_u8(str_new(code, code_size), &current);
+          (u16)buf_read_u8(str_new(code.data, code_size), &current);
       const u16 constant_gen_i = codegen_import_constant(
           &class_file->constant_pool, method->constant_pool, constant_i, arena);
 
@@ -7382,7 +7383,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
     }
     case BYTECODE_INVOKE_STATIC: {
       const u16 method_ref_i =
-          buf_read_be_u16(str_new(code, code_size), &current);
+          buf_read_be_u16(str_new(code.data, code_size), &current);
       const u16 method_ref_gen_i =
           codegen_import_constant(&class_file->constant_pool,
                                   method->constant_pool, method_ref_i, arena);
@@ -9152,7 +9153,8 @@ static void codegen_emit(Resolver *resolver, Class_file *class_file, u32 root_i,
   pg_assert(arena != NULL);
 
   codegen_generator gen = {.resolver = resolver,
-.stack_map_frames=array32_make(Stack_map_frame,0, 64, arena)};
+                           .stack_map_frames =
+                               array32_make(Stack_map_frame, 0, 64, arena)};
   pg_array_init_reserve(gen.locals, 1 << 12, arena);
 
   codegen_emit_synthetic_class(&gen, class_file, arena);
