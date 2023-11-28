@@ -292,18 +292,20 @@ static Str ast_kind_to_string[AST_KIND_MAX] = {
 };
 
 // TODO: compact fields.
-typedef struct {
+typedef struct Ast Ast;
+struct Ast {
+  LIST;
+
   u32 main_token_i;
   u32 lhs;
   u32 rhs;
   u32 type_i; // TODO: should it be separate?
-  // TODO: should it be separate?
-  u32 *nodes; // AST_KIND_LIST
+  u32 *nodes;
   u64 extra_data_i;
   u16 flags;
   Ast_kind kind;
   pg_pad(5);
-} Ast;
+};
 Array32_struct(Ast);
 
 typedef enum __attribute__((packed)) {

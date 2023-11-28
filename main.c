@@ -47,6 +47,15 @@ Array32_struct(int);
 int main(int argc, char *argv[]) {
   pg_assert(argc > 0);
 
+  Ast node1 = {.lhs = 1}, node2 = {.lhs = 2}, node3 = {.lhs = 3};
+  list_append(&node1, &node2);
+  list_append(&node1, &node3);
+
+  list_for_each((List *)&node1) {
+    Ast *node = (Ast *)it;
+    printf("%u ", node->lhs);
+  }
+
   int opt = 0;
   Str cli_classpath = str_from_c(".");
   Str cli_java_home = {0};
