@@ -209,7 +209,7 @@ typedef struct {
   Str source_file_name;
   Array32(u8) code;                 // In case of InlineOnly.
   Jvm_constant_pool *constant_pool; // In case of InlineOnly.
-  u32 *argument_types_i;
+  Array32(u32) argument_types_i;
   u32 return_type_i;
   u32 this_class_type_i;
   // TODO: Move to `type.flags` to reduce size?
@@ -501,13 +501,12 @@ static bool resolver_are_types_equal(const Resolver *resolver, const Type *lhs,
             &resolver->types.data[rhs_method->return_type_i]))
       return false;
 
-    if (pg_array_len(lhs_method->argument_types_i) !=
-        pg_array_len(rhs_method->argument_types_i))
+    if (lhs_method->argument_types_i.len != rhs_method->argument_types_i.len)
       return false;
 
-    for (u64 i = 0; i < pg_array_len(lhs_method->argument_types_i); i++) {
-      const u32 lhs_arg_i = lhs_method->argument_types_i[i];
-      const u32 rhs_arg_i = rhs_method->argument_types_i[i];
+    for (u64 i = 0; i < lhs_method->argument_types_i.len; i++) {
+      const u32 lhs_arg_i = lhs_method->argument_types_i.data[i];
+      const u32 rhs_arg_i = rhs_method->argument_types_i.data[i];
 
       if (!resolver_are_types_equal(resolver, &resolver->types.data[lhs_arg_i],
                                     &resolver->types.data[rhs_arg_i]))
@@ -619,8 +618,7 @@ static bool resolver_is_function_candidate_applicable(
   const Method *definition = &function_definition_type->v.method;
 
   const u8 call_argument_count = (u8)pg_array_len(call_site_argument_types_i);
-  const u8 definition_argument_count =
-      (u8)pg_array_len(definition->argument_types_i);
+  const u8 definition_argument_count = (u8)definition->argument_types_i.len;
 
   // Technically there is no such check in the spec but since we do not
   // implement varargs or default arguments yet, this will do for now.
@@ -631,7 +629,7 @@ static bool resolver_is_function_candidate_applicable(
     const u32 call_site_argument_type_i = call_site_argument_types_i[i];
     Type *call_argument = &resolver->types.data[call_site_argument_type_i];
     const Type *definition_argument =
-        &resolver->types.data[definition->argument_types_i[i]];
+        &resolver->types.data[definition->argument_types_i.data[i]];
 
     const bool is_call_argument_subtype_of_definition_argument =
         resolver_is_type_subtype_of(resolver, call_argument,
@@ -971,9 +969,9 @@ static Str_builder jvm_fill_descriptor_string(Array32(Type) types,
     const Method *const method_type = &type->v.method;
     sb = sb_append_char(sb, '(', arena);
 
-    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
-      sb = jvm_fill_descriptor_string(types, sb,
-                                      method_type->argument_types_i[i], arena);
+    for (u64 i = 0; i < method_type->argument_types_i.len; i++) {
+      sb = jvm_fill_descriptor_string(
+          types, sb, method_type->argument_types_i.data[i], arena);
     }
 
     sb = sb_append_char(sb, ')', arena);
@@ -1095,8 +1093,8 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
     type->kind = TYPE_METHOD;
     remaining = str_advance(remaining, 1);
 
-    u32 *argument_types_i = NULL;
-    pg_array_init_reserve(argument_types_i, remaining.len, arena);
+    Array32(u32) argument_types_i =
+        array32_make(u32, 0, (u32)remaining.len, arena);
 
     for (u64 i = 0; i < 255; i++) {
       if (str_first(remaining) == ')')
@@ -1107,7 +1105,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
           jvm_parse_descriptor(resolver, remaining, &argument_type, arena);
       const u32 argument_type_i =
           resolver_add_type(resolver, &argument_type, arena);
-      pg_array_append(argument_types_i, argument_type_i, arena);
+      *array32_push(&argument_types_i, arena) = argument_type_i;
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] = ')');
@@ -3718,12 +3716,12 @@ static Str type_to_human_string(Array32(Type) types, u32 type_i, Arena *arena) {
 
     Str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "(", arena);
-    for (u64 i = 0; i < pg_array_len(method_type->argument_types_i); i++) {
-      const u32 argument_type_i = method_type->argument_types_i[i];
+    for (u64 i = 0; i < method_type->argument_types_i.len; i++) {
+      const u32 argument_type_i = method_type->argument_types_i.data[i];
       res = sb_append(res, type_to_human_string(types, argument_type_i, arena),
                       arena);
 
-      if (i < pg_array_len(method_type->argument_types_i) - 1)
+      if (i < method_type->argument_types_i.len - 1)
         res = sb_append_c(res, ", ", arena);
     }
     res = sb_append_c(res, ") : ", arena);
@@ -5454,10 +5452,10 @@ static Str resolver_function_to_human_string(const Resolver *resolver,
   res = sb_append(res, method->name, arena);
   res = sb_append_c(res, "(", arena);
 
-  const u8 argument_count = (u8)pg_array_len(method->argument_types_i);
+  const u8 argument_count = (u8)method->argument_types_i.len;
   for (u8 i = 0; i < argument_count; i++) {
     Str argument_type_string = type_to_human_string(
-        resolver->types, method->argument_types_i[i], arena);
+        resolver->types, method->argument_types_i.data[i], arena);
 
     res = sb_append(res, argument_type_string, arena);
 
@@ -5514,21 +5512,20 @@ static Type_applicability resolver_check_applicability_of_candidate_pair(
     Resolver *resolver, const Type *a, const Type *b, Arena scratch_arena,
     Arena *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
-  pg_assert(a->v.method.argument_types_i != NULL);
   pg_assert(a->this_class_name.data != NULL);
   pg_assert(a->this_class_name.len > 0);
-  const u8 call_argument_count = (u8)pg_array_len(a->v.method.argument_types_i);
+  const u8 call_argument_count = (u8)a->v.method.argument_types_i.len;
 
   pg_assert(b->kind == TYPE_METHOD || b->kind == TYPE_CONSTRUCTOR);
-  pg_assert(b->v.method.argument_types_i != NULL);
   pg_assert(b->this_class_name.data != NULL);
   pg_assert(b->this_class_name.len > 0);
-  pg_assert(pg_array_len(b->v.method.argument_types_i) == call_argument_count);
+  pg_assert(b->v.method.argument_types_i.len == call_argument_count);
 
   for (u64 k = 0; k < call_argument_count; k++) {
-    Type *argument_a = &resolver->types.data[a->v.method.argument_types_i[k]];
+    Type *argument_a =
+        &resolver->types.data[a->v.method.argument_types_i.data[k]];
     const Type *argument_b =
-        &resolver->types.data[b->v.method.argument_types_i[k]];
+        &resolver->types.data[b->v.method.argument_types_i.data[k]];
 
     if (!resolver_is_type_subtype_of(resolver, argument_a, argument_b,
                                      scratch_arena, arena)) {
@@ -6745,12 +6742,12 @@ static void resolver_collect_user_defined_function_signatures(
       const Ast *const lhs = &resolver->parser->nodes.data[node->lhs];
       pg_assert(lhs->kind == AST_KIND_LIST);
 
-      pg_array_init_reserve(type.v.method.argument_types_i,
-                            pg_array_len(lhs->nodes), arena);
+      type.v.method.argument_types_i =
+          array32_make(u32, 0, (u32)pg_array_len(lhs->nodes), arena);
       for (u64 i = 0; i < pg_array_len(lhs->nodes); i++) {
         const u32 node_i = lhs->nodes[i];
         const u32 type_i = resolver->parser->nodes.data[node_i].type_i;
-        pg_array_append(type.v.method.argument_types_i, type_i, arena);
+        *array32_push(&type.v.method.argument_types_i, arena) = type_i;
       }
     }
 
@@ -7145,7 +7142,7 @@ static void codegen_emit_invoke_virtual(codegen_generator *gen,
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_VIRTUAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
-  for (u8 i = 0; i < 1 + pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < 1 + method_type->argument_types_i.len; i++)
     codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
@@ -7174,7 +7171,7 @@ static void codegen_emit_invoke_static(codegen_generator *gen, u16 method_ref_i,
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_STATIC, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
-  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < method_type->argument_types_i.len; i++)
     codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
@@ -7204,7 +7201,7 @@ static void codegen_emit_invoke_special(codegen_generator *gen,
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_SPECIAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
-  for (u8 i = 0; i < pg_array_len(method_type->argument_types_i); i++)
+  for (u8 i = 0; i < method_type->argument_types_i.len; i++)
     codegen_frame_stack_pop(gen->frame);
 
   const Type *const return_type =
