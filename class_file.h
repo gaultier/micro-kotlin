@@ -1157,11 +1157,12 @@ typedef struct {
   pg_pad(6);
   Jvm_element_value element_value;
 } Jvm_element_value_pair;
+Array32_struct(Jvm_element_value_pair);
 
 struct Jvm_annotation {
   u16 type_index;
   pg_pad(6);
-  Jvm_element_value_pair *element_value_pairs;
+  Array32(Jvm_element_value_pair) element_value_pairs;
 };
 
 typedef struct Jvm_attribute Jvm_attribute;
@@ -1826,8 +1827,8 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
   annotation->type_index = buf_read_be_u16(buf, current);
   const u16 num_element_value_pairs = buf_read_be_u16(buf, current);
 
-  pg_array_init_reserve(annotation->element_value_pairs,
-                        num_element_value_pairs, arena);
+  annotation->element_value_pairs =
+      array32_make(Jvm_element_value_pair, 0, num_element_value_pairs, arena);
 
   for (u64 i = 0; i < num_element_value_pairs; i++) {
     Jvm_element_value_pair element_value_pair = {
@@ -1836,7 +1837,7 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
     jvm_buf_read_element_value(buf, current, class_file,
                                &element_value_pair.element_value, arena);
 
-    pg_array_append(annotation->element_value_pairs, element_value_pair, arena);
+    *array32_push(&annotation->element_value_pairs ,arena)= element_value_pair;
   }
 }
 
