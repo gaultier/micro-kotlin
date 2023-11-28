@@ -244,7 +244,8 @@ typedef struct {
   u16 end_pc;
   u16 handler_pc;
   u16 catch_type;
-} Jvm_Exception;
+} Jvm_exception;
+Array32_struct(Jvm_exception);
 
 typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
@@ -1191,7 +1192,7 @@ struct Jvm_attribute {
       u16 max_physical_locals;
       pg_pad(4);
       u8 *bytecode;
-      Jvm_Exception *exceptions;
+      Array32(Jvm_exception) exceptions;
       Array32(Jvm_attribute) attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
@@ -1410,7 +1411,8 @@ jvm_buf_read_sourcefile_attribute(Str buf, u8 **current, Class_file *class_file,
 
 static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
                                                    Class_file *class_file,
-                                                   Jvm_Exception **exceptions,
+                                                   Array32(Jvm_exception) *
+                                                       exceptions,
                                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1420,17 +1422,17 @@ static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
-  pg_array_init_reserve(*exceptions, table_len, arena);
+  *exceptions = array32_make(Jvm_exception, 0, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
-    Jvm_Exception exception = {0};
+    Jvm_exception exception = {0};
 
     exception.start_pc = buf_read_be_u16(buf, current);
     exception.end_pc = buf_read_be_u16(buf, current);
     exception.handler_pc = buf_read_be_u16(buf, current);
     exception.catch_type = buf_read_be_u16(buf, current);
 
-    pg_array_append(*exceptions, exception, arena);
+    *array32_push(&*exceptions, arena) = exception;
   }
 
   const u8 *const current_end = *current;
@@ -2546,7 +2548,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
         (u32)sizeof(code->max_physical_locals) + (u32)sizeof(u32) +
         (u32)pg_array_len(code->bytecode) +
         (u32)sizeof(u16) /* exception count */ +
-        +(u32)pg_array_len(code->exceptions) * (u32)sizeof(Jvm_Exception) +
+        +(u32)code->exceptions.len * (u32)sizeof(Jvm_exception) +
         (u32)sizeof(u16) // attributes length
         ;
 
@@ -2748,9 +2750,9 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
     file_write_be_u32(file, (u32)pg_array_len(code->bytecode));
     fwrite(code->bytecode, pg_array_len(code->bytecode), sizeof(u8), file);
 
-    pg_assert(pg_array_len(code->exceptions) <= UINT16_MAX);
-    file_write_be_u16(file, (u16)pg_array_len(code->exceptions));
-    pg_assert(pg_array_len(code->exceptions) == 0 && "todo");
+    pg_assert(code->exceptions.len <= UINT16_MAX);
+    file_write_be_u16(file, (u16)code->exceptions.len);
+    pg_assert(code->exceptions.len == 0 && "todo");
 
     jvm_write_attributes(file, code->attributes);
 
@@ -2856,7 +2858,6 @@ static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
 
   pg_array_init_reserve(code->bytecode, 512, arena);
   code->attributes = array32_make(Jvm_attribute, 0, 4, arena);
-  pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
 static u16 jvm_add_constant_string(Jvm_constant_pool *constant_pool, Str s,
