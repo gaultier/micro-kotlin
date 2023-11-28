@@ -237,7 +237,7 @@ typedef struct {
   u16 end_pc;
   u16 handler_pc;
   u16 catch_type;
-} cf_exception_t;
+} Jvm_Exception;
 
 typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
@@ -262,9 +262,9 @@ typedef enum __attribute__((packed)) {
   AST_KIND_RETURN,
   AST_KIND_CALL,
   AST_KIND_MAX,
-} par_ast_node_kind_t;
+} Ast_kind;
 
-static Str par_ast_node_kind_to_string[AST_KIND_MAX] = {
+static Str ast_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_NONE] = str_from_c_literal("NONE"),
     [AST_KIND_NUMBER] = str_from_c_literal("NUMBER"),
     [AST_KIND_BOOL] = str_from_c_literal("BOOL"),
@@ -298,7 +298,7 @@ typedef struct {
   u32 *nodes; // AST_KIND_LIST
   u64 extra_data_i;
   u16 flags;
-  par_ast_node_kind_t kind;
+  Ast_kind kind;
   pg_pad(5);
 } par_ast_node_t;
 
@@ -1199,7 +1199,7 @@ struct cf_attribute_t {
       u16 max_physical_locals;
       pg_pad(4);
       u8 *code;
-      cf_exception_t *exceptions;
+      Jvm_Exception *exceptions;
       cf_attribute_t *attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
@@ -1416,7 +1416,7 @@ static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
 
 static void cf_buf_read_code_attribute_exceptions(Str buf, u8 **current,
                                                   Class_file *class_file,
-                                                  cf_exception_t **exceptions,
+                                                  Jvm_Exception **exceptions,
                                                   Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1429,7 +1429,7 @@ static void cf_buf_read_code_attribute_exceptions(Str buf, u8 **current,
   pg_array_init_reserve(*exceptions, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
-    cf_exception_t exception = {0};
+    Jvm_Exception exception = {0};
 
     exception.start_pc = buf_read_be_u16(buf, current);
     exception.end_pc = buf_read_be_u16(buf, current);
@@ -2548,7 +2548,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
     u32 size = sizeof(code->max_physical_stack) +
                sizeof(code->max_physical_locals) + sizeof(u32) +
                pg_array_len(code->code) + sizeof(u16) /* exception count */ +
-               +pg_array_len(code->exceptions) * sizeof(cf_exception_t) +
+               +pg_array_len(code->exceptions) * sizeof(Jvm_Exception) +
                sizeof(u16) // attributes length
         ;
 
@@ -5819,7 +5819,7 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   if (node->kind == AST_KIND_NONE)
     return;
 
-  const Str kind_string = par_ast_node_kind_to_string[node->kind];
+  const Str kind_string = ast_kind_to_string[node->kind];
   const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
   u32 line = 0;
   u32 column = 0;
