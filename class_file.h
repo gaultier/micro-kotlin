@@ -294,8 +294,6 @@ static Str ast_kind_to_string[AST_KIND_MAX] = {
 // TODO: compact fields.
 typedef struct Ast Ast;
 struct Ast {
-  LIST;
-
   u32 main_token_i;
   u32 lhs;
   u32 rhs;

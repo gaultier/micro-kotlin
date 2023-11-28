@@ -165,6 +165,6 @@ struct List {
     List *new = (List *)_new;                                                  \
     List *last = list->last ? list->last : list;                               \
     list->last = last->next = new;                                             \
-  }while(0)
+  } while (0)
 
 #define list_for_each(l) for (List *it = l; it; it = it->next)
