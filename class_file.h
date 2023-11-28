@@ -6749,13 +6749,14 @@ static void resolver_collect_user_defined_function_signatures(
 typedef struct {
   Jvm_variable variable;
   u32 scope_id;
-} codegen_scope_variable;
+} Codegen_scope_variable;
+Array32_struct(Codegen_scope_variable);
 
 typedef struct {
   Resolver *resolver;
   Jvm_attribute_code *code;
   codegen_frame *frame;
-  codegen_scope_variable *locals;
+  Array32(Codegen_scope_variable) locals;
   Array32(Stack_map_frame) stack_map_frames;
   u32 scope_id;
   pg_pad(4);
@@ -6786,9 +6787,9 @@ static void codegen_frame_locals_push(codegen_generator *gen,
   gen->frame->max_physical_locals = pg_max(gen->frame->max_physical_locals,
                                            gen->frame->locals_physical_count);
 
-  codegen_scope_variable scope_variable = {.variable = *variable,
+  Codegen_scope_variable scope_variable = {.variable = *variable,
                                            .scope_id = gen->scope_id};
-  pg_array_append(gen->locals, scope_variable, arena);
+  *array32_push(&gen->locals, arena) = scope_variable;
 }
 
 static u16 codegen_import_constant(Jvm_constant_pool *dst,
@@ -8250,7 +8251,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
-    pg_array_clear(gen->locals);
+    array32_clear(&gen->locals);
 
     const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i < gen->resolver->parser->lexer->tokens.len);
@@ -9047,10 +9048,11 @@ static void codegen_emit(Resolver *resolver, Class_file *class_file, u32 root_i,
   pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  codegen_generator gen = {.resolver = resolver,
-                           .stack_map_frames =
-                               array32_make(Stack_map_frame, 0, 64, arena)};
-  pg_array_init_reserve(gen.locals, 1 << 12, arena);
+  codegen_generator gen = {
+      .resolver = resolver,
+      .stack_map_frames = array32_make(Stack_map_frame, 0, 64, arena),
+      .locals = array32_make(Codegen_scope_variable, 0, 1 << 12, arena),
+  };
 
   codegen_emit_synthetic_class(&gen, class_file, arena);
 

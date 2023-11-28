@@ -147,7 +147,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 #define array32_last_index(array)                                              \
   (pg_assert(!array32_is_empty(array)), (array).len - 1)
 
-#define array32_clear(array) (array)->len = 0
+#define array32_clear(array) ((array)->len = 0)
 
 #define array32_drop(array, n)                                                 \
   (pg_assert(n <= (array)->len), (array)->len -= (n),                          \
