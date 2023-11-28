@@ -6991,7 +6991,6 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack.len > 0);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
@@ -7005,7 +7004,6 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
 
 static void codegen_emit_store_variable(codegen_generator *gen, u8 var_i,
                                         Arena *arena) {
-  pg_assert(gen->frame->stack.len > 0);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
