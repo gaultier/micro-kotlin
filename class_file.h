@@ -726,13 +726,13 @@ static void codegen_frame_stack_pop(codegen_frame *frame) {
 static codegen_frame *codegen_frame_clone(const codegen_frame *src,
                                           Arena *arena);
 
-static void jvm_code_array_push_u8(u8 **array, u8 x, Arena *arena) {
-  pg_array_append(*array, x, arena);
+static void jvm_code_push_u8(Array32(u8) * array, u8 x, Arena *arena) {
+  *array32_push(array, arena) = x;
 }
 
-static void jvm_code_array_push_u16(u8 **array, u16 x, Arena *arena) {
-  jvm_code_array_push_u8(array, (u8)((x & 0xff00) >> 8), arena);
-  jvm_code_array_push_u8(array, (u8)(x & 0x00ff), arena);
+static void jvm_code_array_push_u16(Array32(u8) * array, u16 x, Arena *arena) {
+  jvm_code_push_u8(array, (u8)((x & 0xff00) >> 8), arena);
+  jvm_code_push_u8(array, (u8)(x & 0x00ff), arena);
 }
 
 typedef enum __attribute__((packed)) {
@@ -1191,7 +1191,7 @@ struct Jvm_attribute {
       u16 max_physical_stack;
       u16 max_physical_locals;
       pg_pad(4);
-      u8 *bytecode;
+      Array32(u8) bytecode;
       Array32(Jvm_exception) exceptions;
       Array32(Jvm_attribute) attributes;
     } code; // ATTRIBUTE_KIND_CODE
@@ -1462,10 +1462,8 @@ static void jvm_buf_read_code_attribute(Str buf, u8 **current,
   pg_assert(*current + code_len <= buf.data + buf.len);
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
-  pg_array_init_reserve(code.bytecode, code_len, arena);
   Str code_slice = buf_read_n_u8(buf, code_len, current);
-  memmove(code.bytecode, code_slice.data, code_slice.len);
-  pg_array_header(code.bytecode)->len = code_len;
+  code.bytecode = array32_make_from_c(u8, code_slice.data, code_len, arena);
 
   jvm_buf_read_code_attribute_exceptions(buf, current, class_file,
                                          &code.exceptions, arena);
@@ -2545,9 +2543,8 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
 
     u32 size = (u32)sizeof(code->max_physical_stack) +
                (u32)sizeof(code->max_physical_locals) + (u32)sizeof(u32) +
-               (u32)pg_array_len(code->bytecode) +
-               (u32)sizeof(u16) /* exception count */ +
-               +(u32)code->exceptions.len * (u32)sizeof(Jvm_exception) +
+               code->bytecode.len + (u32)sizeof(u16) /* exception count */ +
+               +code->exceptions.len * (u32)sizeof(Jvm_exception) +
                (u32)sizeof(u16) // attributes length
         ;
 
@@ -2745,9 +2742,9 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
 
     file_write_be_u16(file, code->max_physical_locals);
 
-    pg_assert(pg_array_len(code->bytecode) <= UINT32_MAX);
-    file_write_be_u32(file, (u32)pg_array_len(code->bytecode));
-    fwrite(code->bytecode, pg_array_len(code->bytecode), sizeof(u8), file);
+    pg_assert(code->bytecode.len <= UINT32_MAX);
+    file_write_be_u32(file, code->bytecode.len);
+    fwrite(code->bytecode.data, code->bytecode.len, sizeof(u8), file);
 
     pg_assert(code->exceptions.len <= UINT16_MAX);
     file_write_be_u16(file, (u16)code->exceptions.len);
@@ -2855,7 +2852,7 @@ static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
-  pg_array_init_reserve(code->bytecode, 512, arena);
+  code->bytecode = array32_make(u8, 0, 512, arena);
   code->attributes = array32_make(Jvm_attribute, 0, 4, arena);
 }
 
@@ -5030,9 +5027,9 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
       for (u64 i = 0; i < method->attributes.len; i++) {
         const Jvm_attribute *const attribute = &method->attributes.data[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
-          type.v.method.code = array32_make_from_c(
-              u8, attribute->v.code.bytecode,
-              (u32)pg_array_len(attribute->v.code.bytecode), arena);
+          type.v.method.code =
+              array32_make_from_c(u8, attribute->v.code.bytecode.data,
+                                  attribute->v.code.bytecode.len, arena);
           break;
         }
       }
@@ -6896,14 +6893,13 @@ static u16 codegen_emit_jump_conditionally(codegen_generator *gen,
                                            u8 jump_opcode, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, jump_opcode, arena);
-  const u16 jump_from_i = (u16)pg_array_len(gen->code->bytecode);
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP1, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP2, arena);
+  jvm_code_push_u8(&gen->code->bytecode, jump_opcode, arena);
+  const u16 jump_from_i = (u16)gen->code->bytecode.len;
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP1, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP2, arena);
 
   switch (jump_opcode) {
   case BYTECODE_IF_ICMPEQ:
@@ -6929,14 +6925,13 @@ static u16 codegen_emit_jump_conditionally(codegen_generator *gen,
 static u16 codegen_emit_jump(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_GOTO, arena);
-  const u16 from_location = (u16)pg_array_len(gen->code->bytecode);
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP1, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP2, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_GOTO, arena);
+  const u16 from_location = (u16)gen->code->bytecode.len;
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP1, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IMPDEP2, arena);
 
   return from_location;
 }
@@ -6944,11 +6939,10 @@ static u16 codegen_emit_jump(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_pop(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_POP, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_POP, arena);
 
   codegen_frame_stack_pop(gen->frame);
 }
@@ -6957,7 +6951,6 @@ static void codegen_emit_store_variable_int(codegen_generator *gen, u8 var_i,
                                             Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len > 0);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
@@ -6965,8 +6958,8 @@ static void codegen_emit_store_variable_int(codegen_generator *gen, u8 var_i,
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ISTORE, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ISTORE, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_pop(gen->frame);
 }
@@ -6975,7 +6968,6 @@ static void codegen_emit_store_variable_object(codegen_generator *gen, u8 var_i,
                                                Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len > 0);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
@@ -6983,8 +6975,8 @@ static void codegen_emit_store_variable_object(codegen_generator *gen, u8 var_i,
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_OBJECT);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ASTORE, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ASTORE, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_pop(gen->frame);
 }
@@ -6993,15 +6985,14 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
                                              Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_LONG);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LSTORE, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LSTORE, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_pop(gen->frame);
 }
@@ -7032,14 +7023,13 @@ static void codegen_emit_load_variable_int(codegen_generator *gen, u8 var_i,
                                            Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(gen->frame->locals.len > 0);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ILOAD, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ILOAD, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_push(
       gen->frame, (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
@@ -7050,14 +7040,13 @@ static void codegen_emit_load_variable_object(codegen_generator *gen, u8 var_i,
                                               Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(gen->frame->locals.len > 0);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ALOAD, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ALOAD, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_push(gen->frame,
                            (Jvm_verification_info){
@@ -7071,7 +7060,7 @@ static void codegen_emit_ldc(codegen_generator *gen,
                              const Jvm_constant_pool *constant_pool,
                              u16 constant_i, Arena *arena) {
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
 
   const Jvm_constant_pool_entry *const constant =
       jvm_constant_array_get(constant_pool, constant_i);
@@ -7091,14 +7080,13 @@ static void codegen_emit_load_variable_long(codegen_generator *gen, u8 var_i,
                                             Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
   pg_assert(gen->frame->locals.len > 0);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LLOAD, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LLOAD, arena);
+  jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
 
   codegen_frame_stack_push(
       gen->frame, (Jvm_verification_info){.kind = VERIFICATION_INFO_LONG},
@@ -7109,13 +7097,12 @@ static void codegen_emit_get_static(codegen_generator *gen, u16 field_i,
                                     u16 class_i, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(field_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
   pg_assert(arena != NULL);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_GET_STATIC, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_GET_STATIC, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, field_i, arena);
 
   pg_assert(gen->frame->stack.len < UINT16_MAX);
@@ -7133,12 +7120,11 @@ static void codegen_emit_invoke_virtual(codegen_generator *gen,
                                         Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_VIRTUAL, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_VIRTUAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
   for (u8 i = 0; i < 1 + method_type->argument_types_i.len; i++)
@@ -7162,12 +7148,11 @@ static void codegen_emit_invoke_static(codegen_generator *gen, u16 method_ref_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_STATIC, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_STATIC, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
   for (u8 i = 0; i < method_type->argument_types_i.len; i++)
@@ -7192,12 +7177,11 @@ static void codegen_emit_invoke_special(codegen_generator *gen,
                                         Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_SPECIAL, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_SPECIAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
 
   for (u8 i = 0; i < method_type->argument_types_i.len; i++)
@@ -7392,7 +7376,6 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
 static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
@@ -7406,10 +7389,10 @@ static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IADD, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IADD, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LADD, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LADD, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7421,17 +7404,16 @@ static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_neg(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
   const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INEG, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_INEG, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LNEG, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LNEG, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7441,11 +7423,10 @@ static void codegen_emit_neg(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_lcmp(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(arena != NULL);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LCMP, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LCMP, arena);
 
   codegen_frame_stack_pop(gen->frame);
   codegen_frame_stack_pop(gen->frame);
@@ -7459,12 +7440,11 @@ static void codegen_emit_bipush(codegen_generator *gen, u8 value,
                                 Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(arena != NULL);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_BIPUSH, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, value, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_BIPUSH, arena);
+  jvm_code_push_u8(&gen->code->bytecode, value, arena);
 
   codegen_frame_stack_push(
       gen->frame, (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
@@ -7474,7 +7454,6 @@ static void codegen_emit_bipush(codegen_generator *gen, u8 value,
 static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len >= 2);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
@@ -7482,7 +7461,7 @@ static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
   pg_assert(array32_penultimate(gen->frame->stack)->kind ==
             VERIFICATION_INFO_INT);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IXOR, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IXOR, arena);
 
   codegen_frame_stack_pop(gen->frame);
 }
@@ -7490,7 +7469,6 @@ static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
@@ -7503,10 +7481,10 @@ static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IMUL, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IMUL, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LMUL, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LMUL, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7518,7 +7496,6 @@ static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
@@ -7532,10 +7509,10 @@ static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IDIV, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IDIV, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDIV, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LDIV, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7547,7 +7524,6 @@ static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
 static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
@@ -7561,10 +7537,10 @@ static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
 
   switch (kind_a) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IREM, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IREM, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LREM, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LREM, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7579,13 +7555,12 @@ codegen_emit_load_constant_single_word(codegen_generator *gen, u16 constant_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(constant_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(jvm_verification_info_kind_word_count(verification_info.kind) == 1);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, constant_i, arena);
 
   pg_assert(gen->frame->stack.len < UINT16_MAX);
@@ -7599,13 +7574,12 @@ codegen_emit_load_constant_double_word(codegen_generator *gen, u16 constant_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(constant_i > 0);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(jvm_verification_info_kind_word_count(verification_info.kind) == 2);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDC2_W, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LDC2_W, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, constant_i, arena);
 
   pg_assert(gen->frame->stack.len < UINT16_MAX);
@@ -7616,16 +7590,14 @@ codegen_emit_load_constant_double_word(codegen_generator *gen, u16 constant_i,
 static void codegen_emit_return_nothing(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(arena != NULL);
 
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_RETURN, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_RETURN, arena);
 }
 
 static void codegen_emit_return_value(codegen_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(arena != NULL);
 
   pg_assert(gen->frame->stack.len >= 1);
@@ -7634,10 +7606,10 @@ static void codegen_emit_return_value(codegen_generator *gen, Arena *arena) {
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IRETURN, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IRETURN, arena);
     break;
   case VERIFICATION_INFO_LONG:
-    jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LRETURN, arena);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LRETURN, arena);
     break;
   default:
     pg_assert(0 && "todo");
@@ -7725,13 +7697,12 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 static void codegen_patch_jump_at(codegen_generator *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
-  pg_assert(gen->code->bytecode != NULL);
   pg_assert(at > 0);
   pg_assert(target > 0);
 
   const i16 jump_offset = (i16)target - (i16)(at - 1);
-  gen->code->bytecode[at + 0] = (u8)(((u16)(jump_offset & 0xff00)) >> 8);
-  gen->code->bytecode[at + 1] = (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
+  gen->code->bytecode.data[at + 0] = (u8)(((u16)(jump_offset & 0xff00)) >> 8);
+  gen->code->bytecode.data[at + 1] = (u8)(((u16)(jump_offset & 0x00ff)) >> 0);
 }
 
 // TODO: Make a primitive emerge to use here and in codegen_emit_if_then_else.
@@ -7740,9 +7711,9 @@ static void codegen_emit_synthetic_if_then_else(codegen_generator *gen,
                                                 Arena *arena) {
   // Assume the condition is already on the stack
 
-  jvm_code_array_push_u8(&gen->code->bytecode, conditional_jump_opcode, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, 0, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, 3 + 2 + 3, arena);
+  jvm_code_push_u8(&gen->code->bytecode, conditional_jump_opcode, arena);
+  jvm_code_push_u8(&gen->code->bytecode, 0, arena);
+  jvm_code_push_u8(&gen->code->bytecode, 3 + 2 + 3, arena);
 
   switch (conditional_jump_opcode) {
   case BYTECODE_IF_ICMPEQ:
@@ -7766,21 +7737,19 @@ static void codegen_emit_synthetic_if_then_else(codegen_generator *gen,
       codegen_frame_clone(gen->frame, arena);
 
   codegen_emit_bipush(gen, true, arena); // Then.
-  jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_GOTO, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, 0, arena);
-  jvm_code_array_push_u8(&gen->code->bytecode, 3 + 2, arena);
+  jvm_code_push_u8(&gen->code->bytecode, BYTECODE_GOTO, arena);
+  jvm_code_push_u8(&gen->code->bytecode, 0, arena);
+  jvm_code_push_u8(&gen->code->bytecode, 3 + 2, arena);
 
   const codegen_frame *const frame_after_then =
       codegen_frame_clone(gen->frame, arena);
 
   gen->frame = codegen_frame_clone(frame_before_then_else, arena);
 
-  const u16 conditional_jump_target_absolute =
-      (u16)pg_array_len(gen->code->bytecode);
+  const u16 conditional_jump_target_absolute = (u16)gen->code->bytecode.len;
   codegen_emit_bipush(gen, false, arena); // Else.
 
-  const u16 unconditional_jump_target_absolute =
-      (u16)pg_array_len(gen->code->bytecode);
+  const u16 unconditional_jump_target_absolute = (u16)gen->code->bytecode.len;
 
   stack_map_record_frame_at_pc(frame_before_then_else, &gen->stack_map_frames,
                                conditional_jump_target_absolute, arena);
@@ -7998,8 +7967,7 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
 
   codegen_emit_node(gen, class_file, rhs->lhs, arena);
   const u16 jump_from_i = (rhs->rhs > 0) ? codegen_emit_jump(gen, arena) : 0;
-  const u16 conditional_jump_target_absolute =
-      (u16)pg_array_len(gen->code->bytecode);
+  const u16 conditional_jump_target_absolute = (u16)gen->code->bytecode.len;
 
   // Save a clone of the frame after the `then` branch executed so that we
   // can generate a stack map frame later.
@@ -8011,8 +7979,7 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
   gen->frame = codegen_frame_clone(frame_before_then_else, arena);
 
   codegen_emit_node(gen, class_file, rhs->rhs, arena);
-  const u16 unconditional_jump_target_absolute =
-      (u16)pg_array_len(gen->code->bytecode);
+  const u16 unconditional_jump_target_absolute = (u16)gen->code->bytecode.len;
 
   gen->frame->max_physical_stack = pg_max(frame_after_then->max_physical_stack,
                                           gen->frame->max_physical_stack);
@@ -8159,7 +8126,6 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     pg_assert(gen->code != NULL);
-    pg_assert(gen->code->bytecode != NULL);
     pg_assert(gen->frame != NULL);
 
     const Jvm_verification_info verification_info = {.kind =
@@ -8503,9 +8469,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       // clang-format on
       codegen_emit_node(gen, class_file, node->lhs, arena);
 
-      jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IFEQ, arena);
-      const u16 conditional_jump_location =
-          (u16)pg_array_len(gen->code->bytecode);
+      jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFEQ, arena);
+      const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
       jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
       codegen_frame_stack_pop(gen->frame);
 
@@ -8518,7 +8483,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
       {
-        const u16 pc_end = (u16)pg_array_len(gen->code->bytecode);
+        const u16 pc_end = (u16)gen->code->bytecode.len;
         codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
@@ -8529,7 +8494,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       codegen_emit_bipush(gen, false, arena);
 
       {
-        const u16 pc_end = (u16)pg_array_len(gen->code->bytecode);
+        const u16 pc_end = (u16)gen->code->bytecode.len;
         codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
@@ -8575,9 +8540,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       // clang-format on
       codegen_emit_node(gen, class_file, node->lhs, arena);
 
-      jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IFNE, arena);
-      const u16 conditional_jump_location =
-          (u16)pg_array_len(gen->code->bytecode);
+      jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFNE, arena);
+      const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
       jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
       codegen_frame_stack_pop(gen->frame);
 
@@ -8590,7 +8554,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
       {
-        const u16 pc_end = (u16)pg_array_len(gen->code->bytecode);
+        const u16 pc_end = (u16)gen->code->bytecode.len;
         codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
@@ -8601,7 +8565,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       codegen_emit_bipush(gen, true, arena);
 
       {
-        const u16 pc_end = (u16)pg_array_len(gen->code->bytecode);
+        const u16 pc_end = (u16)gen->code->bytecode.len;
         codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
         stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
                                      pc_end, arena);
@@ -8735,7 +8699,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_WHILE_LOOP: {
-    const u16 pc_start = (u16)pg_array_len(gen->code->bytecode);
+    const u16 pc_start = (u16)gen->code->bytecode.len;
     const codegen_frame *const frame_before_loop =
         codegen_frame_clone(gen->frame, arena);
 
@@ -8747,12 +8711,12 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 
     const i16 unconditional_jump_delta =
         -((i16)unconditional_jump - (i16)1 - (i16)pc_start);
-    gen->code->bytecode[unconditional_jump + 0] =
+    gen->code->bytecode.data[unconditional_jump + 0] =
         (u8)(((u16)(unconditional_jump_delta & 0xff00)) >> 8);
-    gen->code->bytecode[unconditional_jump + 1] =
+    gen->code->bytecode.data[unconditional_jump + 1] =
         (u8)(((u16)(unconditional_jump_delta & 0x00ff)) >> 0);
 
-    const u16 pc_end = (u16)pg_array_len(gen->code->bytecode);
+    const u16 pc_end = (u16)gen->code->bytecode.len;
 
     // This stack map frame covers the unconditional jump.
     stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
@@ -9007,7 +8971,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
     const Method target_method_type = {.return_type_i = TYPE_UNIT_I};
 
     Jvm_attribute_code code = {0};
-    pg_array_init_reserve(code.bytecode, 4, arena);
+    code.bytecode=array32_make(u8,0, 4, arena);
 
     gen->code = &code;
     gen->frame =

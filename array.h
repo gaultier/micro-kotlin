@@ -166,6 +166,8 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
     array32_drop(array, 1);                                                    \
   } while (0)
 
+#define array32_append_slice(array, src,src_len)
+
 Array32_struct(_Bool);
 typedef Array32(_Bool) Array32(bool);
 Array32_struct(u8);
