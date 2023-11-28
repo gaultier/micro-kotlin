@@ -51,15 +51,7 @@ static bool cli_log_verbose = false;
 
 #define pg_unused(x) (void)(x)
 
-#define pg_assert(condition)                                                   \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fflush(stdout);                                                          \
-      fflush(stderr);                                                          \
-      fprintf(stderr, "Pre-condition failed, aborting.\n");                    \
-      abort();                                                                 \
-    }                                                                          \
-  } while (0)
+#define pg_assert(condition) (condition) ? 0 : abort()
 
 #define pg_max(a, b) (((a) > (b)) ? (a) : (b))
 

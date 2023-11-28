@@ -37,6 +37,7 @@ __attribute__((warn_unused_result)) static u32 str_count(Str s, u8 c) {
   }
   return res;
 }
+
 __attribute__((warn_unused_result)) static Str str_from_c(char *s) {
   return (Str){.data = (u8 *)s, .len = s == NULL ? 0 : strlen(s)};
 }
