@@ -1166,6 +1166,7 @@ struct Jvm_annotation {
   Jvm_element_value_pair *element_value_pairs;
 };
 typedef struct Jvm_annotation Jvm_annotation;
+Array32_struct(Jvm_annotation);
 
 typedef struct Jvm_attribute Jvm_attribute;
 
@@ -1205,7 +1206,7 @@ struct Jvm_attribute {
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
     Stack_map_frame *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
-    Jvm_annotation *
+    Array32(Jvm_annotation)
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
     Array32(u16) exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
@@ -1853,15 +1854,15 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
 
   Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
+      .v.runtime_invisible_annotations =
+          array32_make(Jvm_annotation, 0, table_len, arena),
   };
-  pg_array_init_reserve(attribute.v.runtime_invisible_annotations, table_len,
-                        arena);
 
   for (u64 i = 0; i < table_len; i++) {
     Jvm_annotation annotation = {0};
     jvm_buf_read_annotation(buf, current, class_file, &annotation, arena);
-    pg_array_append(attribute.v.runtime_invisible_annotations, annotation,
-                    arena);
+    *array32_push(&attribute.v.runtime_invisible_annotations, arena) =
+        annotation;
   }
   pg_array_append(*attributes, attribute, arena);
 
@@ -4961,9 +4962,9 @@ static bool jvm_method_has_inline_only_annotation(const Class_file *class_file,
       continue;
 
     for (u64 j = 0;
-         j < pg_array_len(attribute->v.runtime_invisible_annotations); j++) {
+         j < attribute->v.runtime_invisible_annotations.len; j++) {
       const Jvm_annotation *const annotation =
-          &attribute->v.runtime_invisible_annotations[j];
+          &attribute->v.runtime_invisible_annotations.data[j];
 
       Str descriptor = jvm_constant_array_get_as_string(
           &class_file->constant_pool, annotation->type_index);
