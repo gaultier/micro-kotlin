@@ -383,7 +383,7 @@ typedef struct {
   Parser *parser;
   Str this_class_name;
   Array32(Str) class_path_entries;
-  Str *imported_package_names;
+  Array32(Str) imported_package_names;
   u64 class_file_loaded_count;
   Type_variable *variables;
   Array32(Type) types;
@@ -406,32 +406,30 @@ static void resolver_init(Resolver *resolver, Parser *parser,
 
   pg_array_init_reserve(resolver->variables, 512, arena);
   resolver->types = array32_make(Type, 0, 1 << 16, arena);
-  pg_array_init_reserve(resolver->imported_package_names, 256, arena);
+  resolver->imported_package_names = array32_make(Str, 0, 256, arena);
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin");
 
-  pg_array_append(resolver->imported_package_names, str_from_c("kotlin"),
-                  arena);
-  pg_array_append(resolver->imported_package_names,
-                  str_from_c("kotlin.annotation"), arena);
-  pg_array_append(resolver->imported_package_names,
-                  str_from_c("kotlin.collections"), arena);
-  pg_array_append(resolver->imported_package_names,
-                  str_from_c("kotlin.comparisons"), arena);
-  pg_array_append(resolver->imported_package_names, str_from_c("kotlin.io"),
-                  arena);
-  pg_array_append(resolver->imported_package_names, str_from_c("kotlin.ranges"),
-                  arena);
-  pg_array_append(resolver->imported_package_names,
-                  str_from_c("kotlin.sequences"), arena);
-  pg_array_append(resolver->imported_package_names, str_from_c("kotlin.text"),
-                  arena);
-
-  pg_array_append(resolver->imported_package_names, str_from_c("java.lang"),
-                  arena);
-  pg_array_append(resolver->imported_package_names, str_from_c("kotlin.jvm"),
-                  arena);
-
-  pg_array_append(resolver->imported_package_names, parser->current_package,
-                  arena);
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.annotation");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.collections");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.comparisons");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.io");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.ranges");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.sequences");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.text");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("java.lang");
+  *array32_push(&resolver->imported_package_names, arena) =
+      str_from_c("kotlin.jvm");
+  *array32_push(&resolver->imported_package_names, arena) =
+      parser->current_package;
 }
 
 static void type_init_package_and_name(Str fully_qualified_jvm_name,
@@ -5372,8 +5370,8 @@ static bool jvm_read_jar_file(Resolver *resolver, Str path, Arena scratch_arena,
 
 static bool resolver_is_package_imported(const Resolver *resolver,
                                          Str package_name) {
-  for (u64 i = 0; i < pg_array_len(resolver->imported_package_names); i++) {
-    if (str_eq(resolver->imported_package_names[i], package_name))
+  for (u64 i = 0; i < resolver->imported_package_names.len; i++) {
+    if (str_eq(resolver->imported_package_names.data[i], package_name))
       return true;
   }
 
