@@ -114,13 +114,13 @@ typedef enum __attribute__((packed)) {
   BYTECODE_INVOKE_STATIC = 0xb8,
   BYTECODE_IMPDEP1 = 0xfe,
   BYTECODE_IMPDEP2 = 0xff,
-} cf_op_kind_t;
+} Cf_op_kind;
 
 typedef struct {
   u32 scope_depth;
   u32 var_definition_node_i;
   Str name;
-} ty_variable_t;
+} Ty_variable;
 
 typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
@@ -137,17 +137,17 @@ typedef struct {
   Jvm_verification_info kind;
   pg_pad(1);
   u16 extra_data;
-} cf_verification_info_t;
+} Cf_verification_info;
 
 typedef struct {
   u32 node_i;
   u32 type_i;
   u32 scope_depth;
-  cf_verification_info_t verification_info;
-} cf_variable_t;
+  Cf_verification_info verification_info;
+} Cf_variable;
 
-struct cg_frame_t;
-typedef struct cg_frame_t cg_frame_t;
+struct Cg_frame;
+typedef struct Cg_frame Cg_frame;
 typedef struct {
   u16 pc;
   // TODO: Should we actually memoize this or not?
@@ -157,7 +157,7 @@ typedef struct {
   pg_pad(2);
   // Immutable clone of the frame when the stack map
   // frame was created.
-  cg_frame_t *frame;
+  Cg_frame *frame;
 } Stack_map_frame;
 
 enum __attribute__((packed)) Type_kind {
@@ -182,9 +182,9 @@ typedef enum Type_kind Type_kind;
 
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
-struct cg_frame_t {
-  cf_variable_t *locals;
-  cf_verification_info_t *stack;
+struct Cg_frame {
+  Cf_variable *locals;
+  Cf_verification_info *stack;
   u16 max_physical_stack;
   u16 max_physical_locals;
   u32 scope_depth;
@@ -300,14 +300,14 @@ typedef struct {
   u16 flags;
   Ast_kind kind;
   pg_pad(5);
-} par_ast_node_t;
+} Ast;
 
 typedef enum __attribute__((packed)) {
   PARSER_STATE_OK,
   PARSER_STATE_ERROR,
   PARSER_STATE_PANIC,
   PARSER_STATE_SYNCED,
-} par_parser_state_t;
+} Parser_state;
 
 typedef enum __attribute__((packed)) {
   TOKEN_KIND_NONE,
@@ -346,56 +346,50 @@ typedef enum __attribute__((packed)) {
   TOKEN_KIND_GE,
   TOKEN_KIND_GT,
   TOKEN_KIND_STRING_LITERAL,
-} lex_token_kind_t;
+} Token_kind;
 
 typedef struct {
   u32 source_offset;
-  lex_token_kind_t kind;
+  Token_kind kind;
   pg_pad(3);
-} lex_token_t;
+} Token;
 
 typedef struct {
   Str file_path;
-  lex_token_t *tokens;
+  Token *tokens;
   u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
-} lex_lexer_t;
+} Lexer;
 
 typedef struct {
-  Str super_class_name;
-  u32 this_class_type_i;
-  pg_pad(4);
-} resolver_super_class_to_resolve_t;
-
-typedef struct {
-  // FIXME: Use str_t
+  // FIXME: Use Str
   Str buf;
-  lex_lexer_t *lexer;
+  Lexer *lexer;
   Str current_package;
-  par_ast_node_t *nodes;
+  Ast *nodes;
   u32 current_function_i;
   u32 buf_len;
   u32 tokens_i;
-  par_parser_state_t state;
+  Parser_state state;
   pg_pad(3);
-} parser_t;
+} Parser;
 
 typedef struct {
-  parser_t *parser;
+  Parser *parser;
   Str this_class_name;
   Str *class_path_entries;
   Str *imported_package_names;
   u64 class_file_loaded_count;
-  ty_variable_t *variables;
+  Ty_variable *variables;
   Type *types;
   u32 current_type_i;
   u32 scope_depth;
   u32 current_function_i;
   pg_pad(4);
-} resolver_t;
+} Resolver;
 
 static Str cg_make_class_name_from_path(Str path, Arena *arena);
 
-static void resolver_init(resolver_t *resolver, parser_t *parser,
+static void resolver_init(Resolver *resolver, Parser *parser,
                           Str *class_path_entries, Str class_file_path,
                           Arena *arena) {
 
@@ -454,7 +448,7 @@ static void type_init_package_and_name(Str fully_qualified_jvm_name,
   *name = str_clone(slash_rplit_res.right, arena);
 }
 
-static const Type *resolver_eval_type(resolver_t *resolver,
+static const Type *resolver_eval_type(Resolver *resolver,
                                            const Type *in) {
   if (in->kind != TYPE_METHOD)
     return in;
@@ -477,7 +471,7 @@ static bool resolver_is_type_integer(const Type *type) {
   }
 }
 
-static bool resolver_are_types_equal(const resolver_t *resolver,
+static bool resolver_are_types_equal(const Resolver *resolver,
                                      const Type *lhs,
                                      const Type *rhs) {
   if (lhs->kind != rhs->kind)
@@ -559,11 +553,11 @@ static bool resolver_is_integer_type_subtype_of(const Type *a,
          resolver_widen_integer_type(b);
 }
 
-static bool resolver_resolve_super_lazily(resolver_t *resolver, Type *type,
+static bool resolver_resolve_super_lazily(Resolver *resolver, Type *type,
                                           Arena scratch_arena,
                                           Arena *arena);
 
-static bool resolver_is_type_subtype_of(resolver_t *resolver, Type *a,
+static bool resolver_is_type_subtype_of(Resolver *resolver, Type *a,
                                         const Type *b,
                                         Arena scratch_arena, Arena *arena) {
   // `A <: A` always.
@@ -615,7 +609,7 @@ static bool resolver_is_type_subtype_of(resolver_t *resolver, Type *a,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    resolver_t *resolver, const u32 *call_site_argument_types_i,
+    Resolver *resolver, const u32 *call_site_argument_types_i,
     const Type *function_definition_type, Arena scratch_arena,
     Arena *arena) {
   pg_assert(function_definition_type->kind == TYPE_METHOD);
@@ -653,7 +647,7 @@ static bool resolver_is_function_candidate_applicable(
   return true;
 }
 
-static u32 resolver_add_type(resolver_t *resolver, Type *new_type,
+static u32 resolver_add_type(Resolver *resolver, Type *new_type,
                              Arena *arena);
 
 static u16
@@ -673,7 +667,7 @@ cf_verification_info_kind_word_count(Jvm_verification_info kind) {
   pg_assert(0 && "unreachable");
 }
 
-static cf_verification_info_t
+static Cf_verification_info
 cg_type_to_verification_info(const Type *type) {
 
   switch (type->kind) {
@@ -682,16 +676,16 @@ cg_type_to_verification_info(const Type *type) {
   case TYPE_CHAR:
   case TYPE_SHORT:
   case TYPE_INT:
-    return (cf_verification_info_t){.kind = VERIFICATION_INFO_INT};
+    return (Cf_verification_info){.kind = VERIFICATION_INFO_INT};
   case TYPE_LONG:
-    return (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG};
+    return (Cf_verification_info){.kind = VERIFICATION_INFO_LONG};
   case TYPE_FLOAT:
-    return (cf_verification_info_t){.kind = VERIFICATION_INFO_FLOAT};
+    return (Cf_verification_info){.kind = VERIFICATION_INFO_FLOAT};
   case TYPE_DOUBLE:
-    return (cf_verification_info_t){.kind = VERIFICATION_INFO_DOUBLE};
+    return (Cf_verification_info){.kind = VERIFICATION_INFO_DOUBLE};
   case TYPE_INSTANCE:
   case TYPE_STRING:
-    return (cf_verification_info_t){
+    return (Cf_verification_info){
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = 0, // Patched later.
     };
@@ -701,8 +695,8 @@ cg_type_to_verification_info(const Type *type) {
   }
 }
 
-static void cg_frame_stack_push(cg_frame_t *frame,
-                                cf_verification_info_t verification_info,
+static void cg_frame_stack_push(Cg_frame *frame,
+                                Cf_verification_info verification_info,
                                 Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -718,7 +712,7 @@ static void cg_frame_stack_push(cg_frame_t *frame,
       pg_max(frame->max_physical_stack, frame->stack_physical_count);
 }
 
-static void cg_frame_stack_pop(cg_frame_t *frame) {
+static void cg_frame_stack_pop(Cg_frame *frame) {
   pg_assert(frame != NULL);
   pg_assert(pg_array_len(frame->stack) >= 1);
   pg_assert(frame->stack_physical_count >= 1);
@@ -729,7 +723,7 @@ static void cg_frame_stack_pop(cg_frame_t *frame) {
   frame->stack_physical_count -= 1;
 }
 
-static cg_frame_t *cg_frame_clone(const cg_frame_t *src, Arena *arena);
+static Cg_frame *cg_frame_clone(const Cg_frame *src, Arena *arena);
 
 static void cf_code_array_push_u8(u8 **array, u8 x, Arena *arena) {
   pg_array_append(*array, x, arena);
@@ -760,28 +754,28 @@ typedef enum __attribute__((packed)) {
   ACCESS_FLAGS_ANNOTATION = 0x2000,
   ACCESS_FLAGS_ENUM = 0x4000,
   ACCESS_FLAGS_MODULE = 0x8000,
-} cf_access_flags_t;
+} Jvm_access_flags;
 
 typedef struct {
   union {
     u64 number;        // CONSTANT_POOL_KIND_INT
     Str s;             // CONSTANT_POOL_KIND_UTF8
     u16 string_utf8_i; // CONSTANT_POOL_KIND_STRING
-    struct cf_constant_method_ref_t {
+    struct Jvm_constant_method_ref {
       u16 class;
       u16 name_and_type;
     } method_ref;        // CONSTANT_POOL_KIND_METHOD_REF
     u16 java_class_name; // CONSTANT_POOL_KIND_CLASS_INFO
-    struct cf_constant_name_and_type_t {
+    struct Jvm_constant_name_and_type {
       u16 name;
       u16 descriptor;
     } name_and_type; // CONSTANT_POOL_KIND_NAME_AND_TYPE
-    struct cf_constant_field_ref_t {
+    struct Jvm_constant_field_ref {
       u16 name;
       u16 descriptor;
     } field_ref; // CONSTANT_POOL_KIND_FIELD_REF
   } v;
-  enum __attribute__((packed)) cp_info_kind_t {
+  enum __attribute__((packed)) Jvm_constant_pool_kind {
     CONSTANT_POOL_KIND_UTF8 = 1,
     CONSTANT_POOL_KIND_INT = 3,
     CONSTANT_POOL_KIND_FLOAT = 4,
@@ -801,20 +795,20 @@ typedef struct {
     CONSTANT_POOL_KIND_PACKAGE = 20,
   } kind;
   pg_pad(7);
-} cf_constant_t;
+} Jvm_constant_pool_entry;
 
-typedef struct cf_constant_method_ref_t cf_constant_method_ref_t;
+typedef struct Jvm_constant_method_ref Jvm_constant_method_ref;
 
-typedef struct cf_constant_name_and_type_t cf_constant_name_and_type_t;
+typedef struct Jvm_constant_name_and_type Jvm_constant_name_and_type;
 
-typedef struct cf_constant_field_ref_t cf_constant_field_ref_t;
+typedef struct Jvm_constant_field_ref Jvm_constant_field_ref;
 
-typedef enum cp_info_kind_t cp_info_kind_t;
+typedef enum Jvm_constant_pool_kind Jvm_constant_pool_kind;
 
 struct Jvm_constant_pool {
   u64 len;
   u64 cap;
-  cf_constant_t *values;
+  Jvm_constant_pool_entry *values;
 };
 
 static Jvm_constant_pool cf_constant_array_make(u64 cap, Arena *arena) {
@@ -823,13 +817,13 @@ static Jvm_constant_pool cf_constant_array_make(u64 cap, Arena *arena) {
   return (Jvm_constant_pool){
       .len = 0,
       .cap = cap,
-      .values = arena_alloc(arena, sizeof(cf_constant_t),
-                            _Alignof(cf_constant_t), cap),
+      .values = arena_alloc(arena, sizeof(Jvm_constant_pool_entry),
+                            _Alignof(Jvm_constant_pool_entry), cap),
   };
 }
 
 static u16 cf_constant_array_push(Jvm_constant_pool *array,
-                                  const cf_constant_t *x, Arena *arena) {
+                                  const Jvm_constant_pool_entry *x, Arena *arena) {
   pg_assert(array != NULL);
   pg_assert(x != NULL);
   pg_assert(array->len < UINT16_MAX);
@@ -839,11 +833,11 @@ static u16 cf_constant_array_push(Jvm_constant_pool *array,
 
   if (array->len == array->cap) {
     const u64 new_cap = array->cap * 2;
-    cf_constant_t *const new_array = arena_alloc(
-        arena, sizeof(cf_constant_t), _Alignof(cf_constant_t), new_cap);
+    Jvm_constant_pool_entry *const new_array = arena_alloc(
+        arena, sizeof(Jvm_constant_pool_entry), _Alignof(Jvm_constant_pool_entry), new_cap);
     pg_assert(new_array != NULL);
     array->values =
-        memmove(new_array, array->values, array->len * sizeof(cf_constant_t));
+        memmove(new_array, array->values, array->len * sizeof(Jvm_constant_pool_entry));
     pg_assert(array->values != NULL);
     pg_assert(((u64)(array->values)) % 16 == 0);
     array->cap = new_cap;
@@ -857,7 +851,7 @@ static u16 cf_constant_array_push(Jvm_constant_pool *array,
   return index;
 }
 
-static void cg_frame_init(cg_frame_t *frame, Arena *arena) {
+static void cg_frame_init(Cg_frame *frame, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
@@ -865,15 +859,15 @@ static void cg_frame_init(cg_frame_t *frame, Arena *arena) {
   pg_array_init_reserve(frame->stack, 256, arena);
 }
 
-static cg_frame_t *cg_frame_clone(const cg_frame_t *src, Arena *arena) {
+static Cg_frame *cg_frame_clone(const Cg_frame *src, Arena *arena) {
   pg_assert(src != NULL);
   pg_assert(src->stack != NULL);
   pg_assert(pg_array_len(src->stack) <= UINT16_MAX);
   pg_assert(src->locals != NULL);
   pg_assert(arena != NULL);
 
-  cg_frame_t *dst =
-      arena_alloc(arena, sizeof(cg_frame_t), _Alignof(cg_frame_t), 1);
+  Cg_frame *dst =
+      arena_alloc(arena, sizeof(Cg_frame), _Alignof(Cg_frame), 1);
   cg_frame_init(dst, arena);
 
   dst->max_physical_stack = src->max_physical_stack;
@@ -900,11 +894,11 @@ cf_constant_array_clone(const Jvm_constant_pool *constant_pool,
   Jvm_constant_pool *res = arena_alloc(arena, sizeof(Jvm_constant_pool),
                                          _Alignof(Jvm_constant_pool), 1);
   res->cap = res->len = constant_pool->len;
-  res->values = arena_alloc(arena, sizeof(cf_constant_t),
-                            _Alignof(cf_constant_t), constant_pool->len);
+  res->values = arena_alloc(arena, sizeof(Jvm_constant_pool_entry),
+                            _Alignof(Jvm_constant_pool_entry), constant_pool->len);
 
   for (u64 i = 0; i < res->len; i++) {
-    const cf_constant_t constant = constant_pool->values[i];
+    const Jvm_constant_pool_entry constant = constant_pool->values[i];
     res->values[i] = constant;
 
     if (constant.kind == CONSTANT_POOL_KIND_UTF8) {
@@ -915,7 +909,7 @@ cf_constant_array_clone(const Jvm_constant_pool *constant_pool,
   return res;
 }
 
-static const cf_constant_t *
+static const Jvm_constant_pool_entry *
 cf_constant_array_get(const Jvm_constant_pool *constant_pool, u16 i) {
   pg_assert(constant_pool != NULL);
   pg_assert(i > 0);
@@ -996,7 +990,7 @@ static Str_builder cf_fill_descriptor_string(const Type *types,
   }
 }
 
-static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
+static Str cf_parse_descriptor(Resolver *resolver, Str descriptor,
                                Type *type, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(type != NULL);
@@ -1140,84 +1134,84 @@ static Str cf_parse_descriptor(resolver_t *resolver, Str descriptor,
   __builtin_unreachable();
 }
 
-struct cf_annotation_t;
+struct Cf_annotation;
 
 typedef struct {
   u16 type_name_index;
   u16 const_name_index;
-} cf_enum_const_value_t;
+} Cf_enum_const_value;
 
-struct cf_element_value_t {
+struct Cf_element_value {
   union {
     u16 const_value_index;
-    cf_enum_const_value_t enum_const_value;
+    Cf_enum_const_value enum_const_value;
     u16 class_info_index;
-    struct cf_annotation_t *annotation_value;
-    struct cf_element_value_t *array_value;
+    struct Cf_annotation *annotation_value;
+    struct Cf_element_value *array_value;
   } v;
   u8 tag;
   pg_pad(7);
 };
-typedef struct cf_element_value_t cf_element_value_t;
+typedef struct Cf_element_value Cf_element_value;
 
 typedef struct {
   u16 element_name_index;
   pg_pad(6);
-  cf_element_value_t element_value;
-} cf_element_value_pair_t;
+  Cf_element_value element_value;
+} Cf_element_value_pair;
 
-struct cf_annotation_t {
+struct Cf_annotation {
   u16 type_index;
   pg_pad(6);
-  cf_element_value_pair_t *element_value_pairs;
+  Cf_element_value_pair *element_value_pairs;
 };
-typedef struct cf_annotation_t cf_annotation_t;
+typedef struct Cf_annotation Cf_annotation;
 
-typedef struct cf_attribute_t cf_attribute_t;
+typedef struct Cf_attribute Cf_attribute;
 
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  cf_attribute_t *attributes;
-} cf_field_t;
+  Cf_attribute *attributes;
+} Cf_field;
 
-typedef struct cf_method_t cf_method_t;
+typedef struct Cf_method Cf_method;
 
-typedef struct cf_interfaces_t cf_interfaces_t;
+typedef struct Cf_interfaces Cf_interfaces;
 
 typedef struct {
   u16 start_pc;
   u16 line_number;
-} cf_line_number_table_entry_t;
+} Cf_line_number_table_entry;
 
-struct cf_attribute_t {
+struct Cf_attribute {
   union {
-    struct cf_attribute_code_t {
+    struct Cf_attribute_code {
       u16 max_physical_stack;
       u16 max_physical_locals;
       pg_pad(4);
       u8 *code;
       Jvm_Exception *exceptions;
-      cf_attribute_t *attributes;
+      Cf_attribute *attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
-    struct cf_attribute_source_file_t {
+    struct Cf_attribute_source_file {
       u16 source_file;
     } source_file; // ATTRIBUTE_KIND_SOURCE_FILE
 
-    cf_line_number_table_entry_t
+    Cf_line_number_table_entry
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
     Stack_map_frame *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
-    cf_annotation_t *
+    Cf_annotation *
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
     u16 *exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
   } v;
   u16 name;
-  enum __attribute__((packed)) cf_attribute_kind_t {
+  enum __attribute__((packed)) Cf_attribute_kind {
     ATTRIBUTE_KIND_SOURCE_FILE,
     ATTRIBUTE_KIND_CODE,
     ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
@@ -1228,21 +1222,21 @@ struct cf_attribute_t {
   pg_pad(5);
 };
 
-typedef enum cf_attribute_kind_t cf_attribute_kind_t;
+typedef enum Cf_attribute_kind Cf_attribute_kind;
 
-typedef struct cf_attribute_line_number_table_t
-    cf_attribute_line_number_table_t;
+typedef struct Cf_attribute_line_number_table
+    Cf_attribute_line_number_table;
 
-typedef struct cf_attribute_code_t cf_attribute_code_t;
+typedef struct Cf_attribute_code Cf_attribute_code;
 
-typedef struct cf_attribute_source_file_t cf_attribute_source_file_t;
+typedef struct Cf_attribute_source_file Cf_attribute_source_file;
 
-struct cf_method_t {
+struct Cf_method {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  cf_attribute_t *attributes;
+  Cf_attribute *attributes;
 };
 
 const u32 cf_MAGIC_NUMBER = 0xbebafeca;
@@ -1250,7 +1244,7 @@ const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
-struct cf_class_file_t {
+struct Cf_class_file {
   Str archive_file_path;
   Str class_file_path;
   Str class_name;
@@ -1263,12 +1257,12 @@ struct cf_class_file_t {
   u16 fields_count;
   pg_pad(2);
   u16 *interfaces;
-  cf_field_t *fields;
-  cf_method_t *methods;
-  cf_attribute_t *attributes;
+  Cf_field *fields;
+  Cf_method *methods;
+  Cf_attribute *attributes;
   Jvm_constant_pool constant_pool;
 };
-typedef struct cf_class_file_t Class_file;
+typedef struct Cf_class_file Class_file;
 
 static void file_write_u8(FILE *file, u8 x) {
   pg_assert(file != NULL);
@@ -1378,18 +1372,18 @@ static u8 buf_read_u8(Str buf, u8 **current) {
 static Str
 cf_constant_array_get_as_string(const Jvm_constant_pool *constant_pool,
                                 u16 i) {
-  const cf_constant_t *const constant = cf_constant_array_get(constant_pool, i);
+  const Jvm_constant_pool_entry *const constant = cf_constant_array_get(constant_pool, i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_UTF8);
   return constant->v.s;
 }
 
 static void cf_buf_read_attributes(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   cf_attribute_t **attributes, Arena *arena);
+                                   Cf_attribute **attributes, Arena *arena);
 
 static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
                                              Class_file *class_file,
-                                             cf_attribute_t **attributes,
+                                             Cf_attribute **attributes,
                                              Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
@@ -1400,7 +1394,7 @@ static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
 
   const u8 *const current_start = *current;
 
-  cf_attribute_source_file_t source_file = {0};
+  Cf_attribute_source_file source_file = {0};
   source_file.source_file = buf_read_be_u16(buf, current);
   pg_assert(source_file.source_file > 0);
   pg_assert(source_file.source_file <= class_file->constant_pool.len);
@@ -1409,7 +1403,7 @@ static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == 2);
 
-  cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
+  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                               .v = {.source_file = source_file}};
   pg_array_append(*attributes, attribute, arena);
 }
@@ -1447,7 +1441,7 @@ static void cf_buf_read_code_attribute_exceptions(Str buf, u8 **current,
 static void cf_buf_read_code_attribute(Str buf, u8 **current,
                                        Class_file *class_file,
                                        u32 attribute_len, u16 name_i,
-                                       cf_attribute_t **attributes,
+                                       Cf_attribute **attributes,
                                        Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1459,7 +1453,7 @@ static void cf_buf_read_code_attribute(Str buf, u8 **current,
 
   const u8 *const current_start = *current;
 
-  cf_attribute_code_t code = {0};
+  Cf_attribute_code code = {0};
   code.max_physical_stack = buf_read_be_u16(buf, current);
   code.max_physical_locals = buf_read_be_u16(buf, current);
   const u32 code_len = buf_read_be_u32(buf, current);
@@ -1476,7 +1470,7 @@ static void cf_buf_read_code_attribute(Str buf, u8 **current,
 
   cf_buf_read_attributes(buf, current, class_file, &code.attributes, arena);
 
-  cf_attribute_t attribute = {
+  Cf_attribute attribute = {
       .kind = ATTRIBUTE_KIND_CODE, .name = name_i, .v = {.code = code}};
   pg_array_append(*attributes, attribute, arena);
 
@@ -1506,7 +1500,7 @@ cf_buf_read_stack_map_table_attribute_verification_infos(Str buf, u8 **current,
 
 static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
                                                   u32 attribute_len, u16 name_i,
-                                                  cf_attribute_t **attributes,
+                                                  Cf_attribute **attributes,
                                                   Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1568,7 +1562,7 @@ static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
     pg_array_append(stack_map_frames, stack_map_frame, arena);
   }
 
-  cf_attribute_t attribute = {
+  Cf_attribute attribute = {
       .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
       .name = name_i,
       .v = {.stack_map_table = stack_map_frames},
@@ -1583,7 +1577,7 @@ static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
 static void cf_buf_read_line_number_table_attribute(Str buf, u8 **current,
                                                     Class_file *class_file,
                                                     u32 attribute_len,
-                                                    cf_attribute_t **attributes,
+                                                    Cf_attribute **attributes,
                                                     Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
@@ -1594,12 +1588,12 @@ static void cf_buf_read_line_number_table_attribute(Str buf, u8 **current,
   pg_assert(sizeof(table_len) + table_len * (sizeof(u16) + sizeof(u16)) ==
             attribute_len);
 
-  cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
+  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
   pg_array_init_reserve(attribute.v.line_number_table_entries, table_len,
                         arena);
 
   for (u16 i = 0; i < table_len; i++) {
-    cf_line_number_table_entry_t entry = {
+    Cf_line_number_table_entry entry = {
         .start_pc = buf_read_be_u16(buf, current),
         .line_number = buf_read_be_u16(buf, current),
     };
@@ -1698,7 +1692,7 @@ static void cf_buf_read_signature_attribute(Str buf, u8 **current,
 static void cf_buf_read_exceptions_attribute(Str buf, u8 **current,
                                              Class_file *class_file,
                                              u32 attribute_len,
-                                             cf_attribute_t **attributes,
+                                             Cf_attribute **attributes,
                                              Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1712,7 +1706,7 @@ static void cf_buf_read_exceptions_attribute(Str buf, u8 **current,
   const u16 entry_size = sizeof(u16);
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
 
-  cf_attribute_t attribute = {.kind = ATTRIBUTE_KIND_EXCEPTIONS};
+  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_EXCEPTIONS};
   pg_array_init_reserve(attribute.v.exception_index_table, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
@@ -1764,11 +1758,11 @@ static void cf_buf_read_inner_classes_attribute(Str buf, u8 **current,
 
 static void cf_buf_read_annotation(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   cf_annotation_t *annotation, Arena *arena);
+                                   Cf_annotation *annotation, Arena *arena);
 
 static void cf_buf_read_element_value(Str buf, u8 **current,
                                       Class_file *class_file,
-                                      cf_element_value_t *element_value,
+                                      Cf_element_value *element_value,
                                       Arena *arena) {
   element_value->tag = buf_read_u8(buf, current);
   switch (element_value->tag) {
@@ -1796,7 +1790,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
 
   case '@': {
     element_value->v.annotation_value = arena_alloc(
-        arena, sizeof(cf_annotation_t), _Alignof(cf_annotation_t), 1);
+        arena, sizeof(Cf_annotation), _Alignof(Cf_annotation), 1);
 
     cf_buf_read_annotation(buf, current, class_file,
                            element_value->v.annotation_value, arena);
@@ -1809,7 +1803,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
     pg_array_init_reserve(element_value->v.array_value, table_len, arena);
 
     for (u64 i = 0; i < table_len; i++) {
-      cf_element_value_t element_value_child = {0};
+      Cf_element_value element_value_child = {0};
       cf_buf_read_element_value(buf, current, class_file, &element_value_child,
                                 arena);
 
@@ -1825,7 +1819,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
 
 static void cf_buf_read_annotation(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   cf_annotation_t *annotation,
+                                   Cf_annotation *annotation,
                                    Arena *arena) {
 
   annotation->type_index = buf_read_be_u16(buf, current);
@@ -1835,7 +1829,7 @@ static void cf_buf_read_annotation(Str buf, u8 **current,
                         num_element_value_pairs, arena);
 
   for (u64 i = 0; i < num_element_value_pairs; i++) {
-    cf_element_value_pair_t element_value_pair = {
+    Cf_element_value_pair element_value_pair = {
         .element_name_index = buf_read_be_u16(buf, current),
     };
     cf_buf_read_element_value(buf, current, class_file,
@@ -1847,20 +1841,20 @@ static void cf_buf_read_annotation(Str buf, u8 **current,
 
 static void cf_buf_read_runtime_invisible_annotations_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    cf_attribute_t **attributes, Arena *arena) {
+    Cf_attribute **attributes, Arena *arena) {
 
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
 
-  cf_attribute_t attribute = {
+  Cf_attribute attribute = {
       .kind = ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
   };
   pg_array_init_reserve(attribute.v.runtime_invisible_annotations, table_len,
                         arena);
 
   for (u64 i = 0; i < table_len; i++) {
-    cf_annotation_t annotation = {0};
+    Cf_annotation annotation = {0};
     cf_buf_read_annotation(buf, current, class_file, &annotation, arena);
     pg_array_append(attribute.v.runtime_invisible_annotations, annotation,
                     arena);
@@ -1874,7 +1868,7 @@ static void cf_buf_read_runtime_invisible_annotations_attribute(
 
 static void cf_buf_read_attribute(Str buf, u8 **current,
                                   Class_file *class_file,
-                                  cf_attribute_t **attributes, Arena *arena) {
+                                  Cf_attribute **attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1962,7 +1956,7 @@ static void cf_buf_read_attribute(Str buf, u8 **current,
 
 static void cf_buf_read_attributes(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   cf_attribute_t **attributes,
+                                   Cf_attribute **attributes,
                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2013,7 +2007,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     u8 *const s = *current;
     buf_read_n_u8(buf, len, current);
 
-    cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
+    Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
                               .v = {.s = str_new(s, len)}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
 
@@ -2023,7 +2017,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     const u32 value = buf_read_be_u32(buf, current);
     pg_unused(value);
 
-    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2031,7 +2025,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     const u32 value = buf_read_be_u32(buf, current);
     pg_unused(value);
 
-    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2042,9 +2036,9 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     const u32 low = buf_read_be_u32(buf, current);
     pg_unused(low);
 
-    const cf_constant_t constant = {.kind = kind, .v = {.number = 0}}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind, .v = {.number = 0}}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
-    const cf_constant_t dummy = {0};
+    const Jvm_constant_pool_entry dummy = {0};
     cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
     return 1;
   }
@@ -2053,7 +2047,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(java_class_name_i > 0);
     pg_assert(java_class_name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {
+    const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {.java_class_name = java_class_name_i}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -2064,7 +2058,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(utf8_i > 0);
     pg_assert(utf8_i <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_STRING,
+    const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_STRING,
                                     .v = {.string_utf8_i = utf8_i}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
@@ -2078,7 +2072,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_count);
 
-    const cf_constant_t constant = {
+    const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_FIELD_REF,
         .v = {.field_ref = {.name = name_i, .descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -2093,7 +2087,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_count);
 
-    const cf_constant_t constant = {
+    const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
         .v = {.method_ref = {.name_and_type = name_and_type_i,
                              .class = class_i}}};
@@ -2109,7 +2103,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_and_type_i > 0);
     pg_assert(name_and_type_i <= constant_pool_count);
 
-    const cf_constant_t constant = {
+    const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
     }; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -2124,7 +2118,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(descriptor_i > 0);
     pg_assert(descriptor_i <= constant_pool_count);
 
-    const cf_constant_t constant = {
+    const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -2136,7 +2130,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     const u16 reference_i = buf_read_be_u16(buf, current);
     pg_unused(reference_i);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2145,7 +2139,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(descriptor > 0);
     pg_assert(descriptor <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2157,7 +2151,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2169,7 +2163,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2178,7 +2172,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2187,7 +2181,7 @@ static u8 cf_buf_read_constant(Str buf, u8 **current,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const cf_constant_t constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2211,7 +2205,7 @@ static void cf_buf_read_constants(Str buf, u8 **current,
 
 static void cf_buf_read_method(Str buf, u8 **current,
                                Class_file *class_file, Arena *arena) {
-  cf_method_t method = {0};
+  Cf_method method = {0};
   method.access_flags = buf_read_be_u16(buf, current);
   method.name = buf_read_be_u16(buf, current);
   pg_assert(
@@ -2275,7 +2269,7 @@ static void cf_buf_read_field(Str buf, u8 **current,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  cf_field_t field = {0};
+  Cf_field field = {0};
   field.access_flags = buf_read_be_u16(buf, current);
   field.name = buf_read_be_u16(buf, current);
   pg_assert(field.name > 0);
@@ -2335,7 +2329,7 @@ static void cf_buf_read_class_file(Str buf, u8 **current,
   class_file->this_class = buf_read_be_u16(buf, current);
   pg_assert(class_file->this_class > 0);
   pg_assert(class_file->this_class <= constant_pool_count);
-  const cf_constant_t *const this_class =
+  const Jvm_constant_pool_entry *const this_class =
       cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
   pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
   class_file->class_name = cf_constant_array_get_as_string(
@@ -2361,7 +2355,7 @@ static void cf_buf_read_class_file(Str buf, u8 **current,
 // - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
 // - `0` otherwise
 static u8 cf_write_constant(const Class_file *class_file, FILE *file,
-                            const cf_constant_t *constant) {
+                            const Jvm_constant_pool_entry *constant) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
   pg_assert(constant != NULL);
@@ -2390,7 +2384,7 @@ static u8 cf_write_constant(const Class_file *class_file, FILE *file,
     break;
   case CONSTANT_POOL_KIND_FIELD_REF: {
 
-    const cf_constant_field_ref_t *const field_ref = &constant->v.field_ref;
+    const Jvm_constant_field_ref *const field_ref = &constant->v.field_ref;
 
     file_write_be_u16(file, field_ref->name);
     file_write_be_u16(file, field_ref->descriptor);
@@ -2398,7 +2392,7 @@ static u8 cf_write_constant(const Class_file *class_file, FILE *file,
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
 
-    const cf_constant_method_ref_t *const method_ref = &constant->v.method_ref;
+    const Jvm_constant_method_ref *const method_ref = &constant->v.method_ref;
 
     file_write_be_u16(file, method_ref->class);
     file_write_be_u16(file, method_ref->name_and_type);
@@ -2409,7 +2403,7 @@ static u8 cf_write_constant(const Class_file *class_file, FILE *file,
     break;
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
 
-    const cf_constant_name_and_type_t *const name_and_type =
+    const Jvm_constant_name_and_type *const name_and_type =
         &constant->v.name_and_type;
 
     file_write_be_u16(file, name_and_type->name);
@@ -2435,7 +2429,7 @@ static void cf_write_constant_pool(const Class_file *class_file,
     pg_assert(class_file->constant_pool.values != NULL);
     pg_assert(((u64)class_file->constant_pool.values) % 8 == 0);
 
-    const cf_constant_t *const constant = &class_file->constant_pool.values[i];
+    const Jvm_constant_pool_entry *const constant = &class_file->constant_pool.values[i];
     i += cf_write_constant(class_file, file, constant);
   }
 }
@@ -2458,7 +2452,7 @@ static void cf_write_fields(const Class_file *class_file, FILE *file) {
 }
 
 static u32
-cf_compute_verification_info_size(cf_verification_info_t verification_info) {
+cf_compute_verification_info_size(Cf_verification_info verification_info) {
   pg_assert(verification_info.kind <= 8);
 
   return verification_info.kind < 7 ? sizeof(u8) : sizeof(u8) + sizeof(u16);
@@ -2473,7 +2467,7 @@ static u32 cf_compute_verification_infos_size(
     return 0;
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
-    const cf_verification_info_t verification_info =
+    const Cf_verification_info verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2484,7 +2478,7 @@ static u32 cf_compute_verification_infos_size(
   } else if (247 <= stack_map_frame->kind &&
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
-    const cf_verification_info_t verification_info =
+    const Cf_verification_info verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2502,7 +2496,7 @@ static u32 cf_compute_verification_infos_size(
 
     for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2514,7 +2508,7 @@ static u32 cf_compute_verification_infos_size(
   } else { // full_frame
     u32 size = 0;
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2523,7 +2517,7 @@ static u32 cf_compute_verification_infos_size(
     }
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->stack[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2536,14 +2530,14 @@ static u32 cf_compute_verification_infos_size(
   pg_assert(0 && "unreachable");
 }
 
-static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
+static u32 cf_compute_attribute_size(const Cf_attribute *attribute) {
   pg_assert(attribute != NULL);
 
   switch (attribute->kind) {
   case ATTRIBUTE_KIND_SOURCE_FILE:
     return 2;
   case ATTRIBUTE_KIND_CODE: {
-    const cf_attribute_code_t *const code = &attribute->v.code;
+    const Cf_attribute_code *const code = &attribute->v.code;
 
     u32 size = sizeof(code->max_physical_stack) +
                sizeof(code->max_physical_locals) + sizeof(u32) +
@@ -2553,7 +2547,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
         ;
 
     for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
-      const cf_attribute_t *const child_attribute = &code->attributes[i];
+      const Cf_attribute *const child_attribute = &code->attributes[i];
       size += sizeof(u16) + sizeof(u32) +
               cf_compute_attribute_size(child_attribute);
     }
@@ -2562,7 +2556,7 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   case ATTRIBUTE_KIND_LINE_NUMBER_TABLE: {
     return sizeof(u16) /* count */ +
            pg_array_len(attribute->v.line_number_table_entries) *
-               sizeof(cf_line_number_table_entry_t);
+               sizeof(Cf_line_number_table_entry);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
     const Stack_map_frame *const stack_map_frames =
@@ -2631,11 +2625,11 @@ static u32 cf_compute_attribute_size(const cf_attribute_t *attribute) {
   pg_assert(0 && "unreachable");
 }
 
-static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes);
+static void cf_write_attributes(FILE *file, const Cf_attribute *attributes);
 
 static void
 cf_write_verification_info(FILE *file,
-                           cf_verification_info_t verification_info) {
+                           Cf_verification_info verification_info) {
   pg_assert(file != NULL);
   pg_assert(verification_info.kind <= 8);
 
@@ -2682,7 +2676,7 @@ static void cf_write_stack_map_table_attribute(
     const u64 count = stack_map_frame->kind - 251;
     for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2697,7 +2691,7 @@ static void cf_write_stack_map_table_attribute(
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->locals));
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2707,7 +2701,7 @@ static void cf_write_stack_map_table_attribute(
 
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->stack));
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-      const cf_verification_info_t verification_info =
+      const Cf_verification_info verification_info =
           stack_map_frame->frame->stack[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2717,7 +2711,7 @@ static void cf_write_stack_map_table_attribute(
   }
 }
 
-static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
+static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
   pg_assert(file != NULL);
   pg_assert(attribute != NULL);
 
@@ -2728,7 +2722,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    const cf_attribute_source_file_t *const source_file =
+    const Cf_attribute_source_file *const source_file =
         &attribute->v.source_file;
     file_write_be_u16(file, source_file->source_file);
 
@@ -2738,7 +2732,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    const cf_attribute_code_t *const code = &attribute->v.code;
+    const Cf_attribute_code *const code = &attribute->v.code;
 
     file_write_be_u16(file, code->max_physical_stack);
 
@@ -2760,7 +2754,7 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
 
     for (u16 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
          i++) {
-      cf_line_number_table_entry_t line_number_table =
+      Cf_line_number_table_entry line_number_table =
           attribute->v.line_number_table_entries[i];
       file_write_be_u16(file, line_number_table.start_pc);
       file_write_be_u16(file, line_number_table.line_number);
@@ -2788,16 +2782,16 @@ static void cf_write_attribute(FILE *file, const cf_attribute_t *attribute) {
   }
 }
 
-static void cf_write_attributes(FILE *file, const cf_attribute_t *attributes) {
+static void cf_write_attributes(FILE *file, const Cf_attribute *attributes) {
   file_write_be_u16(file, pg_array_len(attributes));
 
   for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const cf_attribute_t *const attribute = &attributes[i];
+    const Cf_attribute *const attribute = &attributes[i];
     cf_write_attribute(file, attribute);
   }
 }
 
-static void cf_write_method(FILE *file, const cf_method_t *method) {
+static void cf_write_method(FILE *file, const Cf_method *method) {
   file_write_be_u16(file, method->access_flags);
   file_write_be_u16(file, method->name);
   file_write_be_u16(file, method->descriptor);
@@ -2812,7 +2806,7 @@ static void cf_write_methods(const Class_file *class_file, FILE *file) {
   file_write_be_u16(file, pg_array_len(class_file->methods));
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const cf_method_t *const method = &class_file->methods[i];
+    const Cf_method *const method = &class_file->methods[i];
     cf_write_method(file, method);
   }
 }
@@ -2847,7 +2841,7 @@ static void cf_init(Class_file *class_file, Arena *arena) {
   pg_array_init_reserve(class_file->attributes, 64, arena);
 }
 
-static void cf_attribute_code_init(cf_attribute_code_t *code, Arena *arena) {
+static void cf_attribute_code_init(Cf_attribute_code *code, Arena *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
@@ -2861,7 +2855,7 @@ static u16 cf_add_constant_string(Jvm_constant_pool *constant_pool, Str s,
   pg_assert(constant_pool != NULL);
   pg_assert(!str_is_empty(s));
 
-  const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
+  const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
                                   .v = {.s = s}};
   return cf_constant_array_push(constant_pool, &constant, arena);
 }
@@ -2871,7 +2865,7 @@ static u16 cf_add_constant_cstring(Jvm_constant_pool *constant_pool, char *s,
   pg_assert(constant_pool != NULL);
   pg_assert(s != NULL);
 
-  const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_UTF8,
+  const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
                                   .v = {.s = str_from_c(s)}};
   return cf_constant_array_push(constant_pool, &constant, arena);
 }
@@ -2881,7 +2875,7 @@ static u16 cf_add_constant_jstring(Jvm_constant_pool *constant_pool,
   pg_assert(constant_pool != NULL);
   pg_assert(constant_utf8_i > 0);
 
-  const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_STRING,
+  const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_STRING,
                                   .v = {.string_utf8_i = constant_utf8_i}};
 
   return cf_constant_array_push(constant_pool, &constant, arena);
@@ -2922,7 +2916,7 @@ __attribute__((unused)) static Str
 cf_get_this_class_name(const Class_file *class_file) {
   pg_assert(class_file != NULL);
 
-  const cf_constant_t *const this_class =
+  const Jvm_constant_pool_entry *const this_class =
       cf_constant_array_get(&class_file->constant_pool, class_file->this_class);
   pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
   const u16 this_class_i = this_class->v.java_class_name;
@@ -2930,10 +2924,10 @@ cf_get_this_class_name(const Class_file *class_file) {
                                          this_class_i);
 }
 
-static const cf_attribute_t *
-cf_method_find_code_attribute(const cf_method_t *method) {
+static const Cf_attribute *
+cf_method_find_code_attribute(const Cf_method *method) {
   for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const cf_attribute_t *const attribute = &method->attributes[i];
+    const Cf_attribute *const attribute = &method->attributes[i];
 
     if (attribute->kind == ATTRIBUTE_KIND_CODE)
       return attribute;
@@ -2941,11 +2935,11 @@ cf_method_find_code_attribute(const cf_method_t *method) {
   return NULL;
 }
 
-static const cf_attribute_t *
-cf_attribute_by_kind(const cf_attribute_t *attributes,
-                     cf_attribute_kind_t kind) {
+static const Cf_attribute *
+cf_attribute_by_kind(const Cf_attribute *attributes,
+                     Cf_attribute_kind kind) {
   for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const cf_attribute_t *const attribute = &attributes[i];
+    const Cf_attribute *const attribute = &attributes[i];
 
     if (attribute->kind == kind)
       return attribute;
@@ -2955,13 +2949,13 @@ cf_attribute_by_kind(const cf_attribute_t *attributes,
 
 static void
 cf_get_source_location_of_function(const Class_file *class_file,
-                                   const cf_method_t *method, Str *filename,
+                                   const Cf_method *method, Str *filename,
                                    u16 *line, Arena *arena) {
-  const cf_attribute_t *const code = cf_method_find_code_attribute(method);
+  const Cf_attribute *const code = cf_method_find_code_attribute(method);
   if (code == NULL)
     return;
 
-  const cf_attribute_t *const source_file =
+  const Cf_attribute *const source_file =
       cf_attribute_by_kind(code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
   if (source_file != NULL) {
     *filename = str_clone(
@@ -2970,10 +2964,10 @@ cf_get_source_location_of_function(const Class_file *class_file,
         arena);
   }
 
-  const cf_attribute_t *const line_number_table = cf_attribute_by_kind(
+  const Cf_attribute *const line_number_table = cf_attribute_by_kind(
       code->v.code.attributes, ATTRIBUTE_KIND_LINE_NUMBER_TABLE);
   if (line_number_table != NULL) {
-    const cf_line_number_table_entry_t *const entries =
+    const Cf_line_number_table_entry *const entries =
         line_number_table->v.line_number_table_entries;
 
     if (pg_array_len(entries) > 0)
@@ -3144,7 +3138,7 @@ static u32 lex_identifier_length(Str buf, u32 current_offset) {
   return len;
 }
 
-static void lex_identifier(lex_lexer_t *lexer, Str buf, u8 **current,
+static void lex_identifier(Lexer *lexer, Str buf, u8 **current,
                            Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
@@ -3157,55 +3151,55 @@ static void lex_identifier(lex_lexer_t *lexer, Str buf, u8 **current,
   Str identifier = str_new(*current, lex_identifier_length(buf, start_offset));
   *current += identifier.len;
   if (str_eq_c(identifier, "fun")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_FUN,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "true")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_TRUE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "false")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_FALSE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "var")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_VAR,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "if")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_IF,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "else")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_ELSE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "while")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_WHILE,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else if (str_eq_c(identifier, "return")) {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_KEYWORD_RETURN,
         .source_offset = start_offset,
     };
     pg_array_append(lexer->tokens, token, arena);
   } else {
-    const lex_token_t token = {
+    const Token token = {
         .kind = TOKEN_KIND_IDENTIFIER,
         .source_offset = start_offset,
     };
@@ -3213,7 +3207,7 @@ static void lex_identifier(lex_lexer_t *lexer, Str buf, u8 **current,
   }
 }
 
-static void lex_number(lex_lexer_t *lexer, Str buf, u8 **current,
+static void lex_number(Lexer *lexer, Str buf, u8 **current,
                        Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->tokens != NULL);
@@ -3236,15 +3230,15 @@ static void lex_number(lex_lexer_t *lexer, Str buf, u8 **current,
 
   lex_match(buf, current, 'L'); // Long suffix.
 
-  const lex_token_t token = {
+  const Token token = {
       .kind = TOKEN_KIND_NUMBER,
       .source_offset = start_offset,
   };
   pg_array_append(lexer->tokens, token, arena);
 }
 
-// FIXME: use str_t
-static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
+// FIXME: use Str
+static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   pg_assert(lexer != NULL);
   pg_assert(lexer->line_table != NULL);
   pg_assert(pg_array_len(lexer->line_table) == 0);
@@ -3256,7 +3250,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
   pg_array_append(lexer->line_table, 0, arena);
 
   // Push first dummy token.
-  const lex_token_t dummy_token = {0};
+  const Token dummy_token = {0};
   pg_array_append(lexer->tokens, dummy_token, arena);
 
   while (!lex_is_at_end(buf, current)) {
@@ -3264,7 +3258,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
 
     switch (c) {
     case '(': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_LEFT_PAREN,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3273,7 +3267,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case ')': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_RIGHT_PAREN,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3282,7 +3276,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case ',': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_COMMA,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3291,7 +3285,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case ':': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_COLON,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3303,13 +3297,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '=')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_NOT_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_NOT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3318,7 +3312,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '{': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_LEFT_BRACE,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3327,7 +3321,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '}': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_RIGHT_BRACE,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3336,7 +3330,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '+': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_PLUS,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3345,7 +3339,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '-': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_MINUS,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3354,7 +3348,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '*': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_STAR,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3369,7 +3363,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       } else if (lex_match(buf, current, '*')) { // Delimited comment.
         lex_skip_until_incl_2(buf, current, '*', '/');
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_SLASH,
             .source_offset = lex_get_current_offset(buf, current),
         };
@@ -3379,7 +3373,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '%': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_PERCENT,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3388,7 +3382,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       break;
     }
     case '.': {
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_DOT,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3400,13 +3394,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '&')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_AMPERSAND_AMPERSAND,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_AMPERSAND,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3418,13 +3412,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '|')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_PIPE_PIPE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_PIPE,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3436,13 +3430,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '=')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_EQUAL_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3454,13 +3448,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '=')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_LE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_LT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3472,13 +3466,13 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (lex_match(buf, current, '=')) {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_GE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
         pg_array_append(lexer->tokens, token, arena);
       } else {
-        const lex_token_t token = {
+        const Token token = {
             .kind = TOKEN_KIND_GT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
@@ -3489,7 +3483,7 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
     case '"': {
       lex_advance(buf, current);
 
-      const lex_token_t token = {
+      const Token token = {
           .kind = TOKEN_KIND_STRING_LITERAL,
           .source_offset = lex_get_current_offset(buf, current),
       };
@@ -3531,8 +3525,8 @@ static void lex_lex(lex_lexer_t *lexer, Str buf, u8 **current, Arena *arena) {
   pg_array_append(lexer->line_table, buf.len, arena);
 }
 
-static u32 lex_find_token_length(const lex_lexer_t *lexer, Str buf,
-                                 lex_token_t token) {
+static u32 lex_find_token_length(const Lexer *lexer, Str buf,
+                                 Token token) {
   pg_assert(lexer != NULL);
 
   switch (token.kind) {
@@ -3594,7 +3588,7 @@ static u32 lex_find_token_length(const lex_lexer_t *lexer, Str buf,
 
 // ------------------------------ Parser
 
-static u32 par_add_node(parser_t *parser, const par_ast_node_t *node,
+static u32 par_add_node(Parser *parser, const Ast *node,
                         Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(node != NULL);
@@ -3610,7 +3604,7 @@ static void ut_fwrite_indent(FILE *file, u16 indent) {
   }
 }
 
-static void par_find_token_position(const parser_t *parser, lex_token_t token,
+static void par_find_token_position(const Parser *parser, Token token,
                                     u32 *line, u32 *column, Str *token_string) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3762,7 +3756,7 @@ static Str Typeo_human_string(const Type *types, u32 type_i,
   pg_assert(0 && "unreachable");
 }
 
-static bool par_is_at_end(const parser_t *parser) {
+static bool par_is_at_end(const Parser *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3772,27 +3766,27 @@ static bool par_is_at_end(const parser_t *parser) {
   return parser->tokens_i == pg_array_len(parser->lexer->tokens);
 }
 
-static lex_token_t par_peek_token(const parser_t *parser) {
+static Token par_peek_token(const Parser *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   if (parser->tokens_i > pg_array_len(parser->lexer->tokens) - 1)
-    return (lex_token_t){0};
+    return (Token){0};
 
   return parser->lexer->tokens[parser->tokens_i];
 }
 
-static lex_token_t par_peek_next_token(const parser_t *parser) {
+static Token par_peek_next_token(const Parser *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
   if (parser->tokens_i > pg_array_len(parser->lexer->tokens) - 2)
-    return (lex_token_t){0};
+    return (Token){0};
 
   return parser->lexer->tokens[parser->tokens_i + 1];
 }
 
-static void par_advance_token(parser_t *parser) {
+static void par_advance_token(Parser *parser) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->nodes != NULL);
@@ -3802,7 +3796,7 @@ static void par_advance_token(parser_t *parser) {
   parser->tokens_i++;
 }
 
-static bool par_match_token(parser_t *parser, lex_token_kind_t kind) {
+static bool par_match_token(Parser *parser, Token_kind kind) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3816,7 +3810,7 @@ static bool par_match_token(parser_t *parser, lex_token_kind_t kind) {
   return false;
 }
 
-static void par_error(parser_t *parser, lex_token_t token, const char *error) {
+static void par_error(Parser *parser, Token token, const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3846,7 +3840,7 @@ static void par_error(parser_t *parser, lex_token_t token, const char *error) {
   }
 }
 
-static void par_expect_token(parser_t *parser, lex_token_kind_t kind,
+static void par_expect_token(Parser *parser, Token_kind kind,
                              const char *error) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -3864,7 +3858,7 @@ static const u8 NODE_NUMBER_FLAGS_FLOAT = 1 << 4;
 static const u8 NODE_NUMBER_FLAGS_DOUBLE = 1 << 5;
 static const u8 NODE_NUMBER_FLAGS_LONG = 1 << 6;
 
-static u64 par_number(const parser_t *parser, lex_token_t token, u8 *flag) {
+static u64 par_number(const Parser *parser, Token token, u8 *flag) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3920,11 +3914,11 @@ static u64 par_number(const parser_t *parser, lex_token_t token, u8 *flag) {
   return number;
 }
 
-static Str par_token_to_str_view(parser_t *parser, u32 token_i) {
+static Str par_token_to_str_view(Parser *parser, u32 token_i) {
   pg_assert(parser != NULL);
   pg_assert(token_i < pg_array_len(parser->lexer->tokens));
 
-  const lex_token_t token = parser->lexer->tokens[token_i];
+  const Token token = parser->lexer->tokens[token_i];
 
   return (Str){
       .data = &parser->buf.data[token.source_offset],
@@ -3932,7 +3926,7 @@ static Str par_token_to_str_view(parser_t *parser, u32 token_i) {
   };
 }
 
-static Str par_token_range_to_string(parser_t *parser, u32 start_token_incl_i,
+static Str par_token_range_to_string(Parser *parser, u32 start_token_incl_i,
                                      u32 end_token_excl_i) {
   pg_assert(parser != NULL);
   pg_assert(start_token_incl_i < pg_array_len(parser->lexer->tokens));
@@ -3951,13 +3945,13 @@ static Str par_token_range_to_string(parser_t *parser, u32 start_token_incl_i,
   };
 }
 
-static u32 par_parse_expression(parser_t *parser, Arena *arena);
-static u32 par_parse_block(parser_t *parser, Arena *arena);
-static u32 par_parse_postfix_unary_expression(parser_t *parser, Arena *arena);
-static u32 par_parse_statements(parser_t *parser, Arena *arena);
-static u32 par_parse_declaration(parser_t *parser, Arena *arena);
-static u32 par_parse_statement(parser_t *parser, Arena *arena);
-static u32 par_parse_type(parser_t *parser, Arena *arena);
+static u32 par_parse_expression(Parser *parser, Arena *arena);
+static u32 par_parse_block(Parser *parser, Arena *arena);
+static u32 par_parse_postfix_unary_expression(Parser *parser, Arena *arena);
+static u32 par_parse_statements(Parser *parser, Arena *arena);
+static u32 par_parse_declaration(Parser *parser, Arena *arena);
+static u32 par_parse_statement(Parser *parser, Arena *arena);
+static u32 par_parse_type(Parser *parser, Arena *arena);
 
 // block:
 //     '{'
@@ -3965,7 +3959,7 @@ static u32 par_parse_type(parser_t *parser, Arena *arena);
 //     statements
 //     {NL}
 //     '}'
-static u32 par_parse_block(parser_t *parser, Arena *arena) {
+static u32 par_parse_block(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -3983,7 +3977,7 @@ static u32 par_parse_block(parser_t *parser, Arena *arena) {
 // controlStructureBody:
 //     block
 //     | statement
-static u32 par_parse_control_structure_body(parser_t *parser, Arena *arena) {
+static u32 par_parse_control_structure_body(Parser *parser, Arena *arena) {
   pg_assert(parser);
   pg_assert(arena);
 
@@ -4003,7 +3997,7 @@ static u32 par_parse_control_structure_body(parser_t *parser, Arena *arena) {
 //  {NL}
 //  (controlStructureBody | ([controlStructureBody] {NL} [';'] {NL} 'else'
 //  {NL} (controlStructureBody | ';')) | ';')
-static u32 par_parse_if_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_if_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4030,7 +4024,7 @@ static u32 par_parse_if_expression(parser_t *parser, Arena *arena) {
   //
   // clang-format on
 
-  const par_ast_node_t binary_node = {
+  const Ast binary_node = {
       .kind = AST_KIND_THEN_ELSE,
       .main_token_i = parser->tokens_i - 1,
       .lhs = par_parse_control_structure_body(parser, arena), // Then
@@ -4040,7 +4034,7 @@ static u32 par_parse_if_expression(parser_t *parser, Arena *arena) {
   };
   const u32 binary_node_i = par_add_node(parser, &binary_node, arena);
 
-  const par_ast_node_t if_node = {
+  const Ast if_node = {
       .kind = AST_KIND_IF,
       .main_token_i = main_token_i,
       .lhs = condition_i,
@@ -4056,7 +4050,7 @@ static u32 par_parse_if_expression(parser_t *parser, Arena *arena) {
 //     | CONTINUE_AT
 //     | 'break'
 //     | BREAK_AT
-static u32 par_parse_jump_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_jump_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4068,7 +4062,7 @@ static u32 par_parse_jump_expression(parser_t *parser, Arena *arena) {
       return 0;
     }
 
-    const par_ast_node_t node = {.kind = AST_KIND_RETURN,
+    const Ast node = {.kind = AST_KIND_RETURN,
                                  .main_token_i = parser->tokens_i - 1,
                                  .lhs = par_parse_expression(parser, arena)};
     return par_add_node(parser, &node, arena);
@@ -4091,7 +4085,7 @@ static u32 par_parse_jump_expression(parser_t *parser, Arena *arena) {
 //     | whenExpression
 //     | tryExpression
 //     | jumpExpression
-static u32 par_parse_primary_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_primary_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4100,16 +4094,16 @@ static u32 par_parse_primary_expression(parser_t *parser, Arena *arena) {
 
   if (par_match_token(parser, TOKEN_KIND_NUMBER)) {
 
-    const par_ast_node_t node = {
+    const Ast node = {
         .kind = AST_KIND_NUMBER,
         .main_token_i = parser->tokens_i - 1,
     };
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_FALSE) ||
              par_match_token(parser, TOKEN_KIND_KEYWORD_TRUE)) {
-    const lex_token_t token = parser->lexer->tokens[parser->tokens_i - 1];
+    const Token token = parser->lexer->tokens[parser->tokens_i - 1];
     const bool is_true = parser->buf.data[token.source_offset] == 't';
-    const par_ast_node_t node = {
+    const Ast node = {
         .kind = AST_KIND_BOOL,
         .main_token_i = parser->tokens_i - 1,
         .lhs = is_true,
@@ -4122,13 +4116,13 @@ static u32 par_parse_primary_expression(parser_t *parser, Arena *arena) {
                      "Expected matching right parenthesis");
     return node_i;
   } else if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    par_ast_node_t node = {
+    Ast node = {
         .kind = AST_KIND_UNRESOLVED_NAME,
         .main_token_i = parser->tokens_i - 1,
     };
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_STRING_LITERAL)) {
-    const par_ast_node_t node = {.kind = AST_KIND_STRING,
+    const Ast node = {.kind = AST_KIND_STRING,
                                  .main_token_i = parser->tokens_i - 1};
     return par_add_node(parser, &node, arena);
   } else if (par_match_token(parser, TOKEN_KIND_KEYWORD_IF)) {
@@ -4149,7 +4143,7 @@ static u32 par_parse_primary_expression(parser_t *parser, Arena *arena) {
 //     [{NL} ',']
 //     {NL}
 //     ')'
-static u32 par_parse_var_declaration(parser_t *parser, Arena *arena) {
+static u32 par_parse_var_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4167,7 +4161,7 @@ static u32 par_parse_var_declaration(parser_t *parser, Arena *arena) {
 
   par_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_VAR_DEFINITION,
       .main_token_i = name_token_i,
       .lhs = node_type_i,
@@ -4176,10 +4170,10 @@ static u32 par_parse_var_declaration(parser_t *parser, Arena *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static bool par_is_lvalue(const parser_t *parser, u32 node_i) {
+static bool par_is_lvalue(const Parser *parser, u32 node_i) {
   pg_assert(parser != NULL);
 
-  const par_ast_node_t *const node = &parser->nodes[node_i];
+  const Ast *const node = &parser->nodes[node_i];
   switch (node->kind) {
   case AST_KIND_VAR_REFERENCE:
     return true;
@@ -4193,7 +4187,7 @@ static bool par_is_lvalue(const parser_t *parser, u32 node_i) {
 // assignment:
 //     ((directlyAssignableExpression '=') | (assignableExpression
 //     assignmentAndOperator)) {NL} expression
-static u32 par_parse_assignment(parser_t *parser, Arena *arena) {
+static u32 par_parse_assignment(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4210,7 +4204,7 @@ static u32 par_parse_assignment(parser_t *parser, Arena *arena) {
   if (par_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
     const u32 main_token_i = parser->tokens_i - 1;
 
-    const par_ast_node_t node = {
+    const Ast node = {
         .kind = AST_KIND_ASSIGNMENT,
         .lhs = lhs_i,
         .main_token_i = main_token_i,
@@ -4230,7 +4224,7 @@ static u32 par_parse_assignment(parser_t *parser, Arena *arena) {
 //     ')'
 //     {NL}
 //     (controlStructureBody | ';')
-static u32 par_parse_while_statement(parser_t *parser, Arena *arena) {
+static u32 par_parse_while_statement(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4243,7 +4237,7 @@ static u32 par_parse_while_statement(parser_t *parser, Arena *arena) {
   par_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                    "Expect right parenthesis after the while condition");
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_WHILE_LOOP,
       .main_token_i = main_token_i,
       .lhs = condition_i,
@@ -4255,7 +4249,7 @@ static u32 par_parse_while_statement(parser_t *parser, Arena *arena) {
   return node_i;
 }
 
-static u32 par_parse_loop_statement(parser_t *parser, Arena *arena) {
+static u32 par_parse_loop_statement(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4268,7 +4262,7 @@ static u32 par_parse_loop_statement(parser_t *parser, Arena *arena) {
 // statement:
 //     {label | annotation} (declaration | assignment | loopStatement |
 //     expression)
-static u32 par_parse_statement(parser_t *parser, Arena *arena) {
+static u32 par_parse_statement(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4296,7 +4290,7 @@ static u32 par_parse_statement(parser_t *parser, Arena *arena) {
 // navigationSuffix:
 //     memberAccessOperator {NL} (simpleIdentifier | parenthesizedExpression |
 //     'class')
-static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
+static u32 par_parse_navigation_suffix(Parser *parser, u32 *main_token_i,
                                        Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4312,7 +4306,7 @@ static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
   *main_token_i = parser->tokens_i - 1;
 
   if (par_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
-    const par_ast_node_t node = {
+    const Ast node = {
         .kind = AST_KIND_NAVIGATION,
         .main_token_i = parser->tokens_i - 1,
     };
@@ -4332,13 +4326,13 @@ static u32 par_parse_navigation_suffix(parser_t *parser, u32 *main_token_i,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static void par_parse_value_arguments(parser_t *parser, u32 **nodes,
+static void par_parse_value_arguments(Parser *parser, u32 **nodes,
                                       Arena *arena) {
 
   while (!par_is_at_end(parser)) {
     u32 argument_i = par_parse_expression(parser, arena);
     if (argument_i == 0) {
-      const lex_token_t main_token = parser->lexer->tokens[parser->tokens_i];
+      const Token main_token = parser->lexer->tokens[parser->tokens_i];
       par_error(parser, main_token,
                 "Expected expression or closing right parenthesis for function "
                 "arguments");
@@ -4361,13 +4355,13 @@ static void par_parse_value_arguments(parser_t *parser, u32 **nodes,
 
 // callSuffix:
 //     [typeArguments] (([valueArguments] annotatedLambda) | valueArguments)
-static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
+static u32 par_parse_call_suffix(Parser *parser, u32 *main_token_i,
                                  Arena *arena) {
   if (!par_match_token(parser, TOKEN_KIND_LEFT_PAREN))
     return 0;
 
   *main_token_i = parser->tokens_i - 1;
-  par_ast_node_t node = {
+  Ast node = {
       .kind = AST_KIND_CALL,
       .main_token_i = parser->tokens_i - 1,
   };
@@ -4390,7 +4384,7 @@ static u32 par_parse_call_suffix(parser_t *parser, u32 *main_token_i,
 //     | callSuffix
 //     | indexingSuffix
 //     | navigationSuffix
-static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
+static u32 par_parse_postfix_unary_suffix(Parser *parser, u32 *main_token_i,
                                           Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4408,7 +4402,7 @@ static u32 par_parse_postfix_unary_suffix(parser_t *parser, u32 *main_token_i,
 
 // postfixUnaryExpression:
 //     primaryExpression {postfixUnarySuffix}
-static u32 par_parse_postfix_unary_expression(parser_t *parser,
+static u32 par_parse_postfix_unary_expression(Parser *parser,
                                               Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4432,7 +4426,7 @@ static u32 par_parse_postfix_unary_expression(parser_t *parser,
 
 // prefixUnaryExpression:
 //     {unaryPrefix} postfixUnaryExpression
-static u32 par_parse_prefix_unary_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_prefix_unary_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4441,7 +4435,7 @@ static u32 par_parse_prefix_unary_expression(parser_t *parser, Arena *arena) {
 
   if (par_match_token(parser, TOKEN_KIND_NOT) ||
       par_match_token(parser, TOKEN_KIND_MINUS)) {
-    const par_ast_node_t node = {
+    const Ast node = {
         .kind = AST_KIND_UNARY,
         .lhs = par_parse_prefix_unary_expression(parser, arena),
         .main_token_i = parser->tokens_i - 1,
@@ -4454,7 +4448,7 @@ static u32 par_parse_prefix_unary_expression(parser_t *parser, Arena *arena) {
 
 // asExpression:
 //     prefixUnaryExpression {{NL} asOperator {NL} type}
-static u32 par_parse_as_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_as_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4466,7 +4460,7 @@ static u32 par_parse_as_expression(parser_t *parser, Arena *arena) {
 
 // multiplicativeExpression:
 //     asExpression {multiplicativeOperator {NL} asExpression}
-static u32 par_parse_multiplicative_expression(parser_t *parser,
+static u32 par_parse_multiplicative_expression(Parser *parser,
                                                Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4480,7 +4474,7 @@ static u32 par_parse_multiplicative_expression(parser_t *parser,
         par_match_token(parser, TOKEN_KIND_PERCENT)))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4492,7 +4486,7 @@ static u32 par_parse_multiplicative_expression(parser_t *parser,
 // additiveExpression:
 //     multiplicativeExpression {additiveOperator {NL}
 //     multiplicativeExpression}
-static u32 par_parse_additive_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_additive_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4504,7 +4498,7 @@ static u32 par_parse_additive_expression(parser_t *parser, Arena *arena) {
         par_match_token(parser, TOKEN_KIND_MINUS)))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4515,7 +4509,7 @@ static u32 par_parse_additive_expression(parser_t *parser, Arena *arena) {
 
 // rangeExpression:
 //     additiveExpression {'..' {NL} additiveExpression}
-static u32 par_parse_range_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_range_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4527,7 +4521,7 @@ static u32 par_parse_range_expression(parser_t *parser, Arena *arena) {
 
 // infixFunctionCall:
 //     rangeExpression {simpleIdentifier {NL} rangeExpression}
-static u32 par_parse_infix_function_call(parser_t *parser, Arena *arena) {
+static u32 par_parse_infix_function_call(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4539,7 +4533,7 @@ static u32 par_parse_infix_function_call(parser_t *parser, Arena *arena) {
 
 // elvisExpression:
 //     infixFunctionCall {{NL} elvis {NL} infixFunctionCall}
-static u32 par_parse_elvis_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_elvis_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4552,7 +4546,7 @@ static u32 par_parse_elvis_expression(parser_t *parser, Arena *arena) {
 // infixOperation:
 //     elvisExpression {(inOperator {NL} elvisExpression) | (isOperator {NL}
 //     type)}
-static u32 par_parse_infix_operation(parser_t *parser, Arena *arena) {
+static u32 par_parse_infix_operation(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4564,7 +4558,7 @@ static u32 par_parse_infix_operation(parser_t *parser, Arena *arena) {
 
 // genericCallLikeComparison:
 //     infixOperation {callSuffix}
-static u32 par_parse_generic_call_like_comparison(parser_t *parser,
+static u32 par_parse_generic_call_like_comparison(Parser *parser,
                                                   Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4578,7 +4572,7 @@ static u32 par_parse_generic_call_like_comparison(parser_t *parser,
 // comparison:
 //     genericCallLikeComparison {comparisonOperator {NL}
 //     genericCallLikeComparison}
-static u32 par_parse_comparison(parser_t *parser, Arena *arena) {
+static u32 par_parse_comparison(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4592,7 +4586,7 @@ static u32 par_parse_comparison(parser_t *parser, Arena *arena) {
         par_match_token(parser, TOKEN_KIND_GE)))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4603,7 +4597,7 @@ static u32 par_parse_comparison(parser_t *parser, Arena *arena) {
 
 // equality:
 //     comparison {equalityOperator {NL} comparison}
-static u32 par_parse_equality(parser_t *parser, Arena *arena) {
+static u32 par_parse_equality(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4615,7 +4609,7 @@ static u32 par_parse_equality(parser_t *parser, Arena *arena) {
         par_match_token(parser, TOKEN_KIND_NOT_EQUAL)))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4626,7 +4620,7 @@ static u32 par_parse_equality(parser_t *parser, Arena *arena) {
 
 // conjunction:
 //     equality {{NL} '&&' {NL} equality}
-static u32 par_parse_conjunction(parser_t *parser, Arena *arena) {
+static u32 par_parse_conjunction(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4637,7 +4631,7 @@ static u32 par_parse_conjunction(parser_t *parser, Arena *arena) {
   if (!par_match_token(parser, TOKEN_KIND_AMPERSAND_AMPERSAND))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4648,7 +4642,7 @@ static u32 par_parse_conjunction(parser_t *parser, Arena *arena) {
 
 // disjunction:
 //     conjunction {{NL} '||' {NL} conjunction}
-static u32 par_parse_disjunction(parser_t *parser, Arena *arena) {
+static u32 par_parse_disjunction(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4659,7 +4653,7 @@ static u32 par_parse_disjunction(parser_t *parser, Arena *arena) {
   if (!par_match_token(parser, TOKEN_KIND_PIPE_PIPE))
     return node_i;
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_BINARY,
       .lhs = node_i,
       .main_token_i = parser->tokens_i - 1,
@@ -4670,7 +4664,7 @@ static u32 par_parse_disjunction(parser_t *parser, Arena *arena) {
 
 // expression:
 //     disjunction
-static u32 par_parse_expression(parser_t *parser, Arena *arena) {
+static u32 par_parse_expression(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4682,7 +4676,7 @@ static u32 par_parse_expression(parser_t *parser, Arena *arena) {
 
 // statements:
 //     [statement {semis statement}] [semis]
-static u32 par_parse_statements(parser_t *parser, Arena *arena) {
+static u32 par_parse_statements(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4696,7 +4690,7 @@ static u32 par_parse_statements(parser_t *parser, Arena *arena) {
   if (node_i == 0)
     return node_i;
 
-  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  Ast node = {.kind = AST_KIND_LIST};
   pg_array_init_reserve(node.nodes, 128, arena);
   pg_array_append(node.nodes, node_i, arena);
 
@@ -4710,7 +4704,7 @@ static u32 par_parse_statements(parser_t *parser, Arena *arena) {
 // type:
 //     [typeModifiers] (functionType | parenthesizedType | nullableType |
 //     typeReference | definitelyNonNullableType)
-static u32 par_parse_type(parser_t *parser, Arena *arena) {
+static u32 par_parse_type(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4722,7 +4716,7 @@ static u32 par_parse_type(parser_t *parser, Arena *arena) {
       parser, TOKEN_KIND_IDENTIFIER,
       "expected an identifier for the type of the function parameter");
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_TYPE,
       .main_token_i = parser->tokens_i - 1,
   };
@@ -4744,7 +4738,7 @@ static u32 par_parse_type(parser_t *parser, Arena *arena) {
 //     ':'
 //     {NL}
 //     type
-static u32 par_parse_parameter(parser_t *parser, Arena *arena) {
+static u32 par_parse_parameter(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4762,7 +4756,7 @@ static u32 par_parse_parameter(parser_t *parser, Arena *arena) {
       parser, TOKEN_KIND_COLON,
       "expected a colon between the function parameter name and type");
 
-  const par_ast_node_t node = {
+  const Ast node = {
       .kind = AST_KIND_FUNCTION_PARAMETER,
       .main_token_i = name_i,
       .lhs = par_parse_type(parser, arena),
@@ -4774,7 +4768,7 @@ static u32 par_parse_parameter(parser_t *parser, Arena *arena) {
 
 // functionValueParameter:
 //     [parameterModifiers] parameter [{NL} '=' {NL} expression]
-static u32 par_parse_function_value_parameter(parser_t *parser,
+static u32 par_parse_function_value_parameter(Parser *parser,
                                               Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4792,7 +4786,7 @@ static u32 par_parse_function_value_parameter(parser_t *parser,
 //     [functionValueParameter {{NL} ',' {NL} functionValueParameter} [{NL}
 //     ',']] {NL}
 //     ')'
-static u32 par_parse_function_value_parameters(parser_t *parser,
+static u32 par_parse_function_value_parameters(Parser *parser,
                                                Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4804,7 +4798,7 @@ static u32 par_parse_function_value_parameters(parser_t *parser,
   if (par_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
     return 0;
 
-  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  Ast node = {.kind = AST_KIND_LIST};
   pg_array_init_reserve(node.nodes, 128, arena);
 
   const u32 root_i = par_add_node(parser, &node, arena);
@@ -4821,7 +4815,7 @@ static u32 par_parse_function_value_parameters(parser_t *parser,
 // functionBody:
 //     block
 //     | ('=' {NL} expression)
-static u32 par_parse_function_body(parser_t *parser, Arena *arena) {
+static u32 par_parse_function_body(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4840,7 +4834,7 @@ static u32 par_parse_function_body(parser_t *parser, Arena *arena) {
 //     [{NL} ':' {NL} type]
 //     [{NL} typeConstraints]
 //     [{NL} functionBody]
-static u32 par_parse_function_declaration(parser_t *parser, Arena *arena) {
+static u32 par_parse_function_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4854,7 +4848,7 @@ static u32 par_parse_function_declaration(parser_t *parser, Arena *arena) {
                    "expected function name (identifier)");
   const u32 start_token = parser->tokens_i - 1;
 
-  par_ast_node_t node = {
+  Ast node = {
       .kind = AST_KIND_FUNCTION_DEFINITION,
       .main_token_i = start_token,
   };
@@ -4881,7 +4875,7 @@ static u32 par_parse_function_declaration(parser_t *parser, Arena *arena) {
   return fn_i;
 }
 
-static void par_sync_if_panicked(parser_t *parser) {
+static void par_sync_if_panicked(Parser *parser) {
   pg_assert(parser != NULL);
 
   if (parser->state != PARSER_STATE_PANIC)
@@ -4913,7 +4907,7 @@ static void par_sync_if_panicked(parser_t *parser) {
 //     [(NL {NL}) ';']
 //     {NL}
 //     (([getter] [{NL} [semi] setter]) | ([setter] [{NL} [semi] getter]))
-static u32 par_parse_property_declaration(parser_t *parser, Arena *arena) {
+static u32 par_parse_property_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(arena != NULL);
 
@@ -4929,7 +4923,7 @@ static u32 par_parse_property_declaration(parser_t *parser, Arena *arena) {
 //     | functionDeclaration
 //     | propertyDeclaration
 //     | typeAlias
-static u32 par_parse_declaration(parser_t *parser, Arena *arena) {
+static u32 par_parse_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4949,7 +4943,7 @@ static u32 par_parse_declaration(parser_t *parser, Arena *arena) {
 }
 
 // topLevelObject: declaration [semis]
-static u32 par_parse_top_level_object(parser_t *parser, Arena *arena) {
+static u32 par_parse_top_level_object(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -4967,14 +4961,14 @@ static u32 par_parse_top_level_object(parser_t *parser, Arena *arena) {
 //     importList
 //     {topLevelObject}
 //     EOF
-static u32 par_parse_kotlin_file(parser_t *parser, Arena *arena) {
+static u32 par_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
   pg_assert(parser->tokens_i <= pg_array_len(parser->lexer->tokens));
   pg_assert(pg_array_len(parser->lexer->tokens) >= 1);
 
-  par_ast_node_t node = {.kind = AST_KIND_LIST};
+  Ast node = {.kind = AST_KIND_LIST};
   pg_array_init_reserve(node.nodes, 512, arena);
 
   // TODO: package, import, etc.
@@ -4992,7 +4986,7 @@ static u32 par_parse_kotlin_file(parser_t *parser, Arena *arena) {
   return par_add_node(parser, &node, arena);
 }
 
-static u32 par_parse(parser_t *parser, Arena *arena) {
+static u32 par_parse(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->lexer->tokens != NULL);
@@ -5004,7 +4998,7 @@ static u32 par_parse(parser_t *parser, Arena *arena) {
 
   parser->tokens_i = 1; // Skip the dummy token.
 
-  const par_ast_node_t dummy_node = {0};
+  const Ast dummy_node = {0};
   par_add_node(parser, &dummy_node, arena);
 
   const u32 root_i = par_parse_kotlin_file(parser, arena);
@@ -5015,7 +5009,7 @@ static u32 par_parse(parser_t *parser, Arena *arena) {
 // --------------------------------- Typing
 
 // TODO: Caching?
-static u32 resolver_add_type(resolver_t *resolver, Type *new_type,
+static u32 resolver_add_type(Resolver *resolver, Type *new_type,
                              Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
@@ -5046,21 +5040,21 @@ static u32 resolver_add_type(resolver_t *resolver, Type *new_type,
   return pg_array_last_index(resolver->types);
 }
 
-static Str resolver_function_to_human_string(const resolver_t *resolver,
+static Str resolver_function_to_human_string(const Resolver *resolver,
                                              u32 function_i, Arena *arena);
 
 static bool
 cf_method_has_inline_only_annotation(const Class_file *class_file,
-                                     const cf_method_t *method) {
+                                     const Cf_method *method) {
 
   for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const cf_attribute_t *const attribute = &method->attributes[i];
+    const Cf_attribute *const attribute = &method->attributes[i];
     if (attribute->kind != ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS)
       continue;
 
     for (u64 j = 0;
          j < pg_array_len(attribute->v.runtime_invisible_annotations); j++) {
-      const cf_annotation_t *const annotation =
+      const Cf_annotation *const annotation =
           &attribute->v.runtime_invisible_annotations[j];
 
       Str descriptor = cf_constant_array_get_as_string(
@@ -5074,7 +5068,7 @@ cf_method_has_inline_only_annotation(const Class_file *class_file,
 }
 
 static void resolver_load_methods_from_class_file(
-    resolver_t *resolver, u32 this_class_type_i,
+    Resolver *resolver, u32 this_class_type_i,
     const Class_file *class_file, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
@@ -5085,7 +5079,7 @@ static void resolver_load_methods_from_class_file(
   const Type *const this_class_type = &resolver->types[this_class_type_i];
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const cf_method_t *const method = &class_file->methods[i];
+    const Cf_method *const method = &class_file->methods[i];
     Str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                      method->descriptor);
     Str name = cf_constant_array_get_as_string(&class_file->constant_pool,
@@ -5122,7 +5116,7 @@ static void resolver_load_methods_from_class_file(
       // Clone code.
       // TODO: Clone exceptions, stack map frames, etc?
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-        const cf_attribute_t *const attribute = &method->attributes[i];
+        const Cf_attribute *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
           break;
@@ -5157,7 +5151,7 @@ static void resolver_load_methods_from_class_file(
   }
 }
 
-static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
+static bool cf_buf_read_jar_file(Resolver *resolver, Str content, Str path,
                                  Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
@@ -5334,7 +5328,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
-          const cf_constant_t *const constant_super = cf_constant_array_get(
+          const Jvm_constant_pool_entry *const constant_super = cf_constant_array_get(
               &class_file.constant_pool, class_file.super_class);
 
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
@@ -5385,7 +5379,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
-          const cf_constant_t *const constant_super = cf_constant_array_get(
+          const Cf_constant *const constant_super = cf_constant_array_get(
               &class_file.constant_pool, class_file.super_class);
 
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
@@ -5418,7 +5412,7 @@ static bool cf_buf_read_jar_file(resolver_t *resolver, Str content, Str path,
   }
   return false;
 }
-static bool cf_read_jmod_file(resolver_t *resolver, Str path,
+static bool cf_read_jmod_file(Resolver *resolver, Str path,
                               Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
@@ -5450,7 +5444,7 @@ static bool cf_read_jmod_file(resolver_t *resolver, Str path,
   return cf_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
 }
 
-static bool cf_read_jar_file(resolver_t *resolver, Str path,
+static bool cf_read_jar_file(Resolver *resolver, Str path,
                              Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(arena != NULL);
@@ -5468,7 +5462,7 @@ static bool cf_read_jar_file(resolver_t *resolver, Str path,
                               arena);
 }
 
-static bool resolver_is_package_imported(const resolver_t *resolver,
+static bool resolver_is_package_imported(const Resolver *resolver,
                                          Str package_name) {
   for (u64 i = 0; i < pg_array_len(resolver->imported_package_names); i++) {
     if (str_eq(resolver->imported_package_names[i], package_name))
@@ -5478,7 +5472,7 @@ static bool resolver_is_package_imported(const resolver_t *resolver,
   return false;
 }
 
-static void resolver_collect_callables_with_name(const resolver_t *resolver,
+static void resolver_collect_callables_with_name(const Resolver *resolver,
                                                  Str function_name,
                                                  u32 **candidate_functions_i,
                                                  Arena *arena) {
@@ -5511,7 +5505,7 @@ static void resolver_collect_callables_with_name(const resolver_t *resolver,
 }
 
 // TODO: Add to string: file:line
-static Str resolver_function_to_human_string(const resolver_t *resolver,
+static Str resolver_function_to_human_string(const Resolver *resolver,
                                              u32 type_i, Arena *arena) {
 
   const Type *const type = &resolver->types[type_i];
@@ -5578,7 +5572,7 @@ static Str resolver_function_to_human_string(const resolver_t *resolver,
 }
 
 static void resolver_remove_non_applicable_function_candidates(
-    resolver_t *resolver, u32 *candidate_functions_i,
+    Resolver *resolver, u32 *candidate_functions_i,
     const u32 *call_site_argument_types_i, Arena scratch_arena,
     Arena *arena) {
 
@@ -5600,10 +5594,10 @@ typedef enum __attribute__((packed)) {
   APPLICABILITY_LESS = 1,
   APPLICABILITY_SAME = 2,
   APPLICABILITY_MORE = 4,
-} type_applicability_t;
+} Type_applicability;
 
-static type_applicability_t resolver_check_applicability_of_candidate_pair(
-    resolver_t *resolver, const Type *a, const Type *b,
+static Type_applicability resolver_check_applicability_of_candidate_pair(
+    Resolver *resolver, const Type *a, const Type *b,
     Arena scratch_arena, Arena *arena) {
   pg_assert(a->kind == TYPE_METHOD || a->kind == TYPE_CONSTRUCTOR);
   pg_assert(a->v.method.argument_types_i != NULL);
@@ -5632,7 +5626,7 @@ static type_applicability_t resolver_check_applicability_of_candidate_pair(
 }
 
 static u32 resolver_select_most_specific_candidate_function(
-    resolver_t *resolver, u32 *candidates, Arena scratch_arena,
+    Resolver *resolver, u32 *candidates, Arena scratch_arena,
     Arena *arena) {
 
   const u64 candidates_count = pg_array_len(candidates);
@@ -5657,10 +5651,10 @@ static u32 resolver_select_most_specific_candidate_function(
         const Type *const a = &resolver->types[a_type_i];
         const Type *const b = &resolver->types[b_type_i];
 
-        const type_applicability_t a_b =
+        const Type_applicability a_b =
             resolver_check_applicability_of_candidate_pair(
                 resolver, a, b, scratch_arena, arena);
-        const type_applicability_t b_a =
+        const Type_applicability b_a =
             resolver_check_applicability_of_candidate_pair(
                 resolver, b, a, scratch_arena, arena);
 
@@ -5715,7 +5709,7 @@ static u32 resolver_select_most_specific_candidate_function(
 // TODO: Keep track of imported packages (including those imported by
 // default).
 static bool resolver_resolve_free_function(
-    resolver_t *resolver, Str method_name,
+    Resolver *resolver, Str method_name,
     const u32 *call_site_argument_types_i, u32 *picked_method_type_i,
     u32 **candidate_functions_i, Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
@@ -5749,7 +5743,7 @@ static bool resolver_resolve_free_function(
 }
 
 // TODO: Remove.
-static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
+static bool ty_merge_types(const Resolver *resolver, u32 lhs_i, u32 rhs_i,
                            u32 *result_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->types != NULL);
@@ -5801,7 +5795,7 @@ static bool ty_merge_types(const resolver_t *resolver, u32 lhs_i, u32 rhs_i,
   return false;
 }
 
-static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
+static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
                                      FILE *file, u16 indent, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
@@ -5815,12 +5809,12 @@ static void resolver_ast_fprint_node(const resolver_t *resolver, u32 node_i,
   if (!cli_log_verbose)
     return;
 
-  const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  const Ast *const node = &resolver->parser->nodes[node_i];
   if (node->kind == AST_KIND_NONE)
     return;
 
   const Str kind_string = ast_kind_to_string[node->kind];
-  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
+  const Token token = resolver->parser->lexer->tokens[node->main_token_i];
   u32 line = 0;
   u32 column = 0;
   Str token_string = {0};
@@ -5915,7 +5909,7 @@ static bool type_fqn_equal_to_package_and_name(Str a_fqn, Str b_package_name,
   return str_eq(a_fqn, sb_build(b_fqn));
 }
 
-static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
+static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
                                                   u32 *type_i,
                                                   Arena scratch_arena,
                                                   Arena *arena) {
@@ -6072,7 +6066,7 @@ static bool resolver_resolve_fully_qualified_name(resolver_t *resolver, Str fqn,
 
 // TODO: Check if there is a way not to do it lazily. Not goog to have I/O
 // randomly pop up in the middle of type checking.
-static bool resolver_resolve_super_lazily(resolver_t *resolver, Type *type,
+static bool resolver_resolve_super_lazily(Resolver *resolver, Type *type,
                                           Arena scratch_arena,
                                           Arena *arena) {
 
@@ -6096,7 +6090,7 @@ static bool resolver_resolve_super_lazily(resolver_t *resolver, Type *type,
                                                scratch_arena, arena);
 }
 
-static void resolver_load_standard_types(resolver_t *resolver, Str java_home,
+static void resolver_load_standard_types(Resolver *resolver, Str java_home,
                                          Arena scratch_arena,
                                          Arena *arena) {
   pg_assert(resolver != NULL);
@@ -6142,19 +6136,19 @@ static void resolver_load_standard_types(resolver_t *resolver, Str java_home,
   }
 }
 
-static void ty_begin_scope(resolver_t *resolver) {
+static void ty_begin_scope(Resolver *resolver) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth < UINT32_MAX);
 
   resolver->scope_depth += 1;
 }
 
-static void ty_end_scope(resolver_t *resolver) {
+static void ty_end_scope(Resolver *resolver) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
 
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
-    const ty_variable_t *const variable = &resolver->variables[i];
+    const Ty_variable *const variable = &resolver->variables[i];
     if (variable->scope_depth == resolver->scope_depth)
       pg_array_drop_last(resolver->variables);
     else if (variable->scope_depth < resolver->scope_depth)
@@ -6165,7 +6159,7 @@ static void ty_end_scope(resolver_t *resolver) {
   resolver->scope_depth -= 1;
 }
 
-static u32 ty_declare_variable(resolver_t *resolver, Str name, u32 node_i,
+static u32 ty_declare_variable(Resolver *resolver, Str name, u32 node_i,
                                Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
@@ -6175,7 +6169,7 @@ static u32 ty_declare_variable(resolver_t *resolver, Str name, u32 node_i,
 
   pg_assert(pg_array_len(resolver->variables) < UINT32_MAX);
 
-  const ty_variable_t variable = {
+  const Ty_variable variable = {
       .name = name,
       .scope_depth = -1, // Uninitialized.
       .var_definition_node_i = node_i,
@@ -6184,7 +6178,7 @@ static u32 ty_declare_variable(resolver_t *resolver, Str name, u32 node_i,
   return pg_array_last_index(resolver->variables);
 }
 
-static void ty_mark_variable_as_initialized(resolver_t *resolver,
+static void ty_mark_variable_as_initialized(Resolver *resolver,
                                             u32 variable_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
@@ -6197,7 +6191,7 @@ static void ty_mark_variable_as_initialized(resolver_t *resolver,
   resolver->variables[variable_i].scope_depth = resolver->scope_depth;
 }
 
-static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
+static u32 ty_find_variable(Resolver *resolver, u32 token_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
   pg_assert(resolver->variables != NULL);
@@ -6205,7 +6199,7 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   Str name = par_token_to_str_view(resolver->parser, token_i);
 
   for (i64 i = pg_array_len(resolver->variables) - 1; i >= 0; i--) {
-    const ty_variable_t *const variable = &resolver->variables[i];
+    const Ty_variable *const variable = &resolver->variables[i];
     if (!str_eq(name, variable->name))
       continue;
 
@@ -6220,17 +6214,17 @@ static u32 ty_find_variable(resolver_t *resolver, u32 token_i) {
   return -1;
 }
 
-static Str resolver_get_fqn_from_navigation_chain(const resolver_t *resolver,
+static Str resolver_get_fqn_from_navigation_chain(const Resolver *resolver,
                                                   u32 node_i) {
-  const par_ast_node_t *const node = &resolver->parser->nodes[node_i];
+  const Ast *const node = &resolver->parser->nodes[node_i];
   pg_assert(node->kind == AST_KIND_NAVIGATION);
 
-  const lex_token_t start = resolver->parser->lexer->tokens[node->main_token_i];
+  const Token start = resolver->parser->lexer->tokens[node->main_token_i];
   pg_assert(start.kind == TOKEN_KIND_IDENTIFIER);
 
   u32 end_token_excl_i = node->main_token_i + 1;
   while (end_token_excl_i < pg_array_len(resolver->parser->lexer->tokens)) {
-    const lex_token_t current =
+    const Token current =
         resolver->parser->lexer->tokens[end_token_excl_i];
     if (!(current.kind == TOKEN_KIND_IDENTIFIER ||
           current.kind == TOKEN_KIND_DOT))
@@ -6243,23 +6237,23 @@ static Str resolver_get_fqn_from_navigation_chain(const resolver_t *resolver,
                                    end_token_excl_i);
 }
 
-static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
+static bool ty_variable_shadows(Resolver *resolver, u32 name_token_i) {
 
   const u32 previous_var_i = ty_find_variable(resolver, name_token_i);
   if (previous_var_i == (u32)-1)
     return false;
 
   pg_assert(previous_var_i < pg_array_len(resolver->variables));
-  const ty_variable_t *const previous_var =
+  const Ty_variable *const previous_var =
       &resolver->variables[previous_var_i];
 
   pg_assert(previous_var->var_definition_node_i > 0);
   pg_assert(previous_var->var_definition_node_i <
             pg_array_len(resolver->parser->nodes));
-  const par_ast_node_t *const previous_var_node =
+  const Ast *const previous_var_node =
       &resolver->parser->nodes[previous_var->var_definition_node_i];
 
-  const lex_token_t previous_var_name_token =
+  const Token previous_var_name_token =
       resolver->parser->lexer->tokens[previous_var_node->main_token_i];
 
   u32 line = 0;
@@ -6275,14 +6269,14 @@ static bool ty_variable_shadows(resolver_t *resolver, u32 name_token_i) {
   return false;
 }
 
-static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
+static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
                                  Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(node_i < pg_array_len(resolver->parser->nodes));
 
-  par_ast_node_t *const node = &resolver->parser->nodes[node_i];
-  const lex_token_t token = resolver->parser->lexer->tokens[node->main_token_i];
+  Ast *const node = &resolver->parser->nodes[node_i];
+  const Token token = resolver->parser->lexer->tokens[node->main_token_i];
 
   switch (node->kind) {
   case AST_KIND_NONE:
@@ -6295,7 +6289,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
   case AST_KIND_CALL: {
     Arena tmp_arena = scratch_arena;
 
-    const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+    const Ast *const lhs = &resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_UNRESOLVED_NAME);
     Str name = par_token_to_str_view(resolver->parser, lhs->main_token_i);
 
@@ -6607,7 +6601,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
                                                 scratch_arena, arena)) {
         pg_assert(0 && "todo");
       } else {
-        const lex_token_t main_token =
+        const Token main_token =
             resolver->parser->lexer->tokens[node->main_token_i];
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error,
@@ -6619,7 +6613,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
         return 0;
       }
     } else {
-      const par_ast_node_t *const variable =
+      const Ast *const variable =
           &resolver->parser->nodes[variable_i];
       node->type_i = variable->type_i;
 
@@ -6751,7 +6745,7 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
     pg_assert(resolver->current_function_i);
     node->type_i =
         resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
-    const par_ast_node_t *const current_function =
+    const Ast *const current_function =
         &resolver->parser->nodes[resolver->current_function_i];
     const Type *const function_type =
         &resolver->types[current_function->type_i];
@@ -6796,9 +6790,9 @@ static u32 resolver_resolve_node(resolver_t *resolver, u32 node_i,
 }
 
 static void resolver_collect_user_defined_function_signatures(
-    resolver_t *resolver, Arena scratch_arena, Arena *arena) {
+    Resolver *resolver, Arena scratch_arena, Arena *arena) {
   for (u64 i = 0; i < pg_array_len(resolver->parser->nodes); i++) {
-    par_ast_node_t *const node = &resolver->parser->nodes[i];
+    Ast *const node = &resolver->parser->nodes[i];
     if (node->kind != AST_KIND_FUNCTION_DEFINITION)
       continue;
 
@@ -6814,7 +6808,7 @@ static void resolver_collect_user_defined_function_signatures(
                                             scratch_arena, arena);
     }
 
-    const lex_token_t name_token =
+    const Token name_token =
         resolver->parser->lexer->tokens[node->main_token_i];
     Type type = {
         .kind = TYPE_METHOD,
@@ -6835,7 +6829,7 @@ static void resolver_collect_user_defined_function_signatures(
     type.v.method.source_line = (u16)line;
 
     if (node->lhs > 0) {
-      const par_ast_node_t *const lhs = &resolver->parser->nodes[node->lhs];
+      const Ast *const lhs = &resolver->parser->nodes[node->lhs];
       pg_assert(lhs->kind == AST_KIND_LIST);
 
       pg_array_init_reserve(type.v.method.argument_types_i,
@@ -6861,23 +6855,23 @@ static void resolver_collect_user_defined_function_signatures(
 // --------------------------------- Code generation
 
 typedef struct {
-  cf_variable_t variable;
+  Cf_variable variable;
   u32 scope_id;
-} cg_scope_variable_t;
+} Cg_scope_variable;
 
 typedef struct {
-  resolver_t *resolver;
-  cf_attribute_code_t *code;
-  cg_frame_t *frame;
-  cg_scope_variable_t *locals;
+  Resolver *resolver;
+  Cf_attribute_code *code;
+  Cg_frame *frame;
+  Cg_scope_variable *locals;
   Stack_map_frame *stack_map_frames;
   u32 scope_id;
   pg_pad(4);
-} cg_generator_t;
+} Cg_generator;
 
 // FIXME: Probably should not behave like a FIFO and rather like an array.
-static void cg_frame_locals_push(cg_generator_t *gen,
-                                 const cf_variable_t *variable,
+static void cg_frame_locals_push(Cg_generator *gen,
+                                 const Cf_variable *variable,
                                  u16 *logical_local_index,
                                  u16 *physical_local_index, Arena *arena) {
   pg_assert(gen != NULL);
@@ -6900,7 +6894,7 @@ static void cg_frame_locals_push(cg_generator_t *gen,
   gen->frame->max_physical_locals = pg_max(gen->frame->max_physical_locals,
                                            gen->frame->locals_physical_count);
 
-  cg_scope_variable_t scope_variable = {.variable = *variable,
+  Cg_scope_variable scope_variable = {.variable = *variable,
                                         .scope_id = gen->scope_id};
   pg_array_append(gen->locals, scope_variable, arena);
 }
@@ -6908,13 +6902,13 @@ static void cg_frame_locals_push(cg_generator_t *gen,
 static u16 cg_import_constant(Jvm_constant_pool *dst,
                               const Jvm_constant_pool *src, u16 constant_i,
                               Arena *arena) {
-  const cf_constant_t *const constant = cf_constant_array_get(src, constant_i);
+  const Jvm_constant_pool_entry *const constant = cf_constant_array_get(src, constant_i);
 
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_FIELD_REF: {
-    const cf_constant_field_ref_t field_ref = constant->v.field_ref;
+    const Jvm_constant_field_ref field_ref = constant->v.field_ref;
 
-    cf_constant_t constant_gen = {
+    Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
         .v =
             {
@@ -6930,9 +6924,9 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
     return cf_constant_array_push(dst, &constant_gen, arena);
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
-    const cf_constant_method_ref_t method_ref = constant->v.method_ref;
+    const Jvm_constant_method_ref method_ref = constant->v.method_ref;
 
-    cf_constant_t constant_gen = {
+    Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
         .v =
             {
@@ -6949,8 +6943,8 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
   }
 
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
-    const cf_constant_name_and_type_t name_and_type = constant->v.name_and_type;
-    cf_constant_t constant_gen = {
+    const Jvm_constant_name_and_type name_and_type = constant->v.name_and_type;
+    Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
         .v =
             {
@@ -6972,7 +6966,7 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
   }
 
   case CONSTANT_POOL_KIND_CLASS_INFO: {
-    cf_constant_t constant_gen = {
+    Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
         .v =
             {
@@ -6988,7 +6982,7 @@ static u16 cg_import_constant(Jvm_constant_pool *dst,
   }
 }
 
-static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
+static u16 cg_emit_jump_conditionally(Cg_generator *gen, u8 jump_opcode,
                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7024,7 +7018,7 @@ static u16 cg_emit_jump_conditionally(cg_generator_t *gen, u8 jump_opcode,
   return jump_from_i;
 }
 
-static u16 cg_emit_jump(cg_generator_t *gen, Arena *arena) {
+static u16 cg_emit_jump(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7041,7 +7035,7 @@ static u16 cg_emit_jump(cg_generator_t *gen, Arena *arena) {
   return from_location;
 }
 
-static void cg_emit_pop(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_pop(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7055,7 +7049,7 @@ static void cg_emit_pop(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
+static void cg_emit_store_variable_int(Cg_generator *gen, u8 var_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7075,7 +7069,7 @@ static void cg_emit_store_variable_int(cg_generator_t *gen, u8 var_i,
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_object(cg_generator_t *gen, u8 var_i,
+static void cg_emit_store_variable_object(Cg_generator *gen, u8 var_i,
                                           Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7095,7 +7089,7 @@ static void cg_emit_store_variable_object(cg_generator_t *gen, u8 var_i,
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable_long(cg_generator_t *gen, u8 var_i,
+static void cg_emit_store_variable_long(Cg_generator *gen, u8 var_i,
                                         Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7115,7 +7109,7 @@ static void cg_emit_store_variable_long(cg_generator_t *gen, u8 var_i,
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_store_variable(cg_generator_t *gen, u8 var_i,
+static void cg_emit_store_variable(Cg_generator *gen, u8 var_i,
                                    Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) > 0);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7139,7 +7133,7 @@ static void cg_emit_store_variable(cg_generator_t *gen, u8 var_i,
   }
 }
 
-static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
+static void cg_emit_load_variable_int(Cg_generator *gen, u8 var_i,
                                       Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7155,11 +7149,11 @@ static void cg_emit_load_variable_int(cg_generator_t *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_load_variable_object(cg_generator_t *gen, u8 var_i,
+static void cg_emit_load_variable_object(Cg_generator *gen, u8 var_i,
                                          Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7175,26 +7169,26 @@ static void cg_emit_load_variable_object(cg_generator_t *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){
+                      (Cf_verification_info){
                           .kind = VERIFICATION_INFO_OBJECT,
                           .extra_data = 0, // FIXME
                       },
                       arena);
 }
 
-static void cg_emit_ldc(cg_generator_t *gen,
+static void cg_emit_ldc(Cg_generator *gen,
                         const Jvm_constant_pool *constant_pool,
                         u16 constant_i, Arena *arena) {
 
   cf_code_array_push_u8(&gen->code->code, BYTECODE_LDC_W, arena);
 
-  const cf_constant_t *const constant =
+  const Jvm_constant_pool_entry *const constant =
       cf_constant_array_get(constant_pool, constant_i);
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_INT:
     cf_code_array_push_u16(&gen->code->code, constant_i, arena);
     cg_frame_stack_push(gen->frame,
-                        (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                        (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
                         arena);
     break;
   default:
@@ -7202,7 +7196,7 @@ static void cg_emit_ldc(cg_generator_t *gen,
   }
 }
 
-static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
+static void cg_emit_load_variable_long(Cg_generator *gen, u8 var_i,
                                        Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7218,11 +7212,11 @@ static void cg_emit_load_variable_long(cg_generator_t *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){.kind = VERIFICATION_INFO_LONG},
+                      (Cf_verification_info){.kind = VERIFICATION_INFO_LONG},
                       arena);
 }
 
-static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
+static void cg_emit_get_static(Cg_generator *gen, u16 field_i, u16 class_i,
                                Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7238,14 +7232,14 @@ static void cg_emit_get_static(cg_generator_t *gen, u16 field_i, u16 class_i,
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
 
-  const cf_verification_info_t verification_info = {
+  const Cf_verification_info verification_info = {
       .kind = VERIFICATION_INFO_OBJECT,
       .extra_data = class_i,
   };
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
+static void cg_emit_invoke_virtual(Cg_generator *gen, u16 method_ref_i,
                                    const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
@@ -7268,13 +7262,13 @@ static void cg_emit_invoke_virtual(cg_generator_t *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+  const Cf_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
+static void cg_emit_invoke_static(Cg_generator *gen, u16 method_ref_i,
                                   const Method *method_type,
                                   Arena *arena) {
   pg_assert(gen != NULL);
@@ -7297,13 +7291,13 @@ static void cg_emit_invoke_static(cg_generator_t *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+  const Cf_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
+static void cg_emit_invoke_special(Cg_generator *gen, u16 method_ref_i,
                                    const Method *method_type,
                                    Arena *arena) {
   pg_assert(gen != NULL);
@@ -7325,20 +7319,20 @@ static void cg_emit_invoke_special(cg_generator_t *gen, u16 method_ref_i,
 
   pg_assert(return_type->kind != TYPE_UNIT);
 
-  const cf_verification_info_t verification_info = cg_type_to_verification_info(
+  const Cf_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
+static u32 cg_make_type_from_method_descriptor(Cg_generator *gen,
                                                Class_file *class_file,
                                                u16 constant_i, Arena *arena) {
-  const cf_constant_t *const constant =
+  const Jvm_constant_pool_entry *const constant =
       cf_constant_array_get(&class_file->constant_pool, constant_i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_METHOD_REF);
 
-  const cf_constant_t *const name_and_type = cf_constant_array_get(
+  const Jvm_constant_pool_entry *const name_and_type = cf_constant_array_get(
       &class_file->constant_pool, constant->v.method_ref.name_and_type);
   pg_assert(name_and_type->kind == CONSTANT_POOL_KIND_NAME_AND_TYPE);
 
@@ -7351,7 +7345,7 @@ static u32 cg_make_type_from_method_descriptor(cg_generator_t *gen,
   return resolver_add_type(gen->resolver, &new_type, arena);
 }
 
-static void cg_emit_inlined_method_call(cg_generator_t *gen,
+static void cg_emit_inlined_method_call(Cg_generator *gen,
                                         Class_file *class_file,
                                         const Type *method_type,
                                         u16 locals_offset, Arena *arena) {
@@ -7380,7 +7374,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
           cg_import_constant(&class_file->constant_pool, method->constant_pool,
                              field_ref_i, arena);
 
-      const cf_constant_t *const field_ref_gen =
+      const Jvm_constant_pool_entry *const field_ref_gen =
           cf_constant_array_get(&class_file->constant_pool, field_ref_gen_i);
       pg_assert(field_ref_gen->kind == CONSTANT_POOL_KIND_FIELD_REF);
 
@@ -7412,7 +7406,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
       u16 physical_local_index = locals_offset + 1;
       if (physical_local_index >=
           gen->frame->locals_physical_count) { // Need to add the variable.
-        const cf_variable_t variable = {
+        const Cf_variable variable = {
             .scope_depth = gen->frame->scope_depth,
             .verification_info = {.kind = VERIFICATION_INFO_INT},
         };
@@ -7430,7 +7424,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
       u16 physical_local_index = locals_offset + 2;
       if (physical_local_index >=
           gen->frame->locals_physical_count) { // Need to add the variable.
-        const cf_variable_t variable = {
+        const Cf_variable variable = {
             .scope_depth = gen->frame->scope_depth,
             .verification_info = {.kind = VERIFICATION_INFO_INT},
         };
@@ -7501,7 +7495,7 @@ static void cg_emit_inlined_method_call(cg_generator_t *gen,
             stack_size_after_inline_snippet);
 }
 
-static void cg_emit_add(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_add(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7532,7 +7526,7 @@ static void cg_emit_add(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_neg(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_neg(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7555,7 +7549,7 @@ static void cg_emit_neg(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_lcmp(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_lcmp(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7568,11 +7562,11 @@ static void cg_emit_lcmp(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 
   cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_bipush(cg_generator_t *gen, u8 value, Arena *arena) {
+static void cg_emit_bipush(Cg_generator *gen, u8 value, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7583,11 +7577,11 @@ static void cg_emit_bipush(cg_generator_t *gen, u8 value, Arena *arena) {
   cf_code_array_push_u8(&gen->code->code, value, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (cf_verification_info_t){.kind = VERIFICATION_INFO_INT},
+                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
-static void cg_emit_ixor(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_ixor(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7605,7 +7599,7 @@ static void cg_emit_ixor(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_mul(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_mul(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7636,7 +7630,7 @@ static void cg_emit_mul(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_div(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_div(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7667,7 +7661,7 @@ static void cg_emit_div(cg_generator_t *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 }
 
-static void cg_emit_rem(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_rem(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7699,8 +7693,8 @@ static void cg_emit_rem(cg_generator_t *gen, Arena *arena) {
 }
 
 static void
-cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
-                                  cf_verification_info_t verification_info,
+cg_emit_load_constant_single_word(Cg_generator *gen, u16 constant_i,
+                                  Cf_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7720,8 +7714,8 @@ cg_emit_load_constant_single_word(cg_generator_t *gen, u16 constant_i,
 }
 
 static void
-cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
-                                  cf_verification_info_t verification_info,
+cg_emit_load_constant_double_word(Cg_generator *gen, u16 constant_i,
+                                  Cf_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7740,7 +7734,7 @@ cg_emit_load_constant_double_word(cg_generator_t *gen, u16 constant_i,
   cg_frame_stack_push(gen->frame, verification_info, arena);
 }
 
-static void cg_emit_return_nothing(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_return_nothing(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7749,7 +7743,7 @@ static void cg_emit_return_nothing(cg_generator_t *gen, Arena *arena) {
   cf_code_array_push_u8(&gen->code->code, BYTECODE_RETURN, arena);
 }
 
-static void cg_emit_return_value(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_return_value(Cg_generator *gen, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7772,7 +7766,7 @@ static void cg_emit_return_value(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_begin_scope(cg_generator_t *gen) {
+static void cg_begin_scope(Cg_generator *gen) {
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth < UINT32_MAX);
 
@@ -7781,7 +7775,7 @@ static void cg_begin_scope(cg_generator_t *gen) {
 }
 
 static void
-stack_map_record_frame_at_pc(const cg_frame_t *frame,
+stack_map_record_frame_at_pc(const Cg_frame *frame,
                              Stack_map_frame **stack_map_frames, u16 pc,
                              Arena *arena) {
   pg_assert(frame != NULL);
@@ -7794,12 +7788,12 @@ stack_map_record_frame_at_pc(const cg_frame_t *frame,
   pg_array_append(*stack_map_frames, stack_map_frame, arena);
 }
 
-static void cg_frame_drop_current_scope_variables(cg_frame_t *frame) {
+static void cg_frame_drop_current_scope_variables(Cg_frame *frame) {
   pg_assert(frame != NULL);
 
   u64 to_drop = 0;
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const cf_variable_t *const variable = &frame->locals[i];
+    const Cf_variable *const variable = &frame->locals[i];
     if (variable->scope_depth < frame->scope_depth)
       break;
 
@@ -7811,7 +7805,7 @@ static void cg_frame_drop_current_scope_variables(cg_frame_t *frame) {
   pg_array_drop_last_n(frame->locals, to_drop);
 }
 
-static void cg_end_scope(cg_generator_t *gen) {
+static void cg_end_scope(Cg_generator *gen) {
   pg_assert(gen);
   pg_assert(gen->frame);
   pg_assert(gen->frame->scope_depth > 0);
@@ -7823,7 +7817,7 @@ static void cg_end_scope(cg_generator_t *gen) {
 
 // TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable
 // slot number? Or use a lookup table?
-static bool cf_find_variable(const cg_frame_t *frame, u32 node_i,
+static bool cf_find_variable(const Cg_frame *frame, u32 node_i,
                              u16 *logical_local_index,
                              u16 *physical_local_index) {
   pg_assert(frame != NULL);
@@ -7834,7 +7828,7 @@ static bool cf_find_variable(const cg_frame_t *frame, u32 node_i,
 
   *physical_local_index = frame->locals_physical_count;
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const cf_variable_t *const variable = &frame->locals[i];
+    const Cf_variable *const variable = &frame->locals[i];
     *physical_local_index -=
         cf_verification_info_kind_word_count(variable->verification_info.kind);
     if (variable->node_i != node_i)
@@ -7848,10 +7842,10 @@ static bool cf_find_variable(const cg_frame_t *frame, u32 node_i,
   return false;
 }
 
-static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
+static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
                          u32 node_i, Arena *arena);
 
-static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
+static void cg_patch_jump_at(Cg_generator *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->code != NULL);
@@ -7864,7 +7858,7 @@ static void cg_patch_jump_at(cg_generator_t *gen, u16 at, u16 target) {
 }
 
 // TODO: Make a primitive emerge to use here and in cg_emit_if_then_else.
-static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
+static void cg_emit_synthetic_if_then_else(Cg_generator *gen,
                                            u8 conditional_jump_opcode,
                                            Arena *arena) {
   // Assume the condition is already on the stack
@@ -7891,7 +7885,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
     pg_assert(0 && "unreachable/unimplemented");
   }
 
-  const cg_frame_t *const frame_before_then_else =
+  const Cg_frame *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_bipush(gen, true, arena); // Then.
@@ -7899,7 +7893,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
   cf_code_array_push_u8(&gen->code->code, 0, arena);
   cf_code_array_push_u8(&gen->code->code, 3 + 2, arena);
 
-  const cg_frame_t *const frame_after_then = cg_frame_clone(gen->frame, arena);
+  const Cg_frame *const frame_after_then = cg_frame_clone(gen->frame, arena);
 
   gen->frame = cg_frame_clone(frame_before_then_else, arena);
 
@@ -7914,7 +7908,7 @@ static void cg_emit_synthetic_if_then_else(cg_generator_t *gen,
                                unconditional_jump_target_absolute, arena);
 }
 
-static void cg_emit_gt(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_gt(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7941,7 +7935,7 @@ static void cg_emit_gt(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_ne(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_ne(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7967,7 +7961,7 @@ static void cg_emit_ne(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_eq(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_eq(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -7993,7 +7987,7 @@ static void cg_emit_eq(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_ge(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_ge(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8020,7 +8014,7 @@ static void cg_emit_ge(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_le(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_le(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8047,7 +8041,7 @@ static void cg_emit_le(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_lt(cg_generator_t *gen, Arena *arena) {
+static void cg_emit_lt(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
@@ -8074,7 +8068,7 @@ static void cg_emit_lt(cg_generator_t *gen, Arena *arena) {
   }
 }
 
-static void cg_emit_if_then_else(cg_generator_t *gen,
+static void cg_emit_if_then_else(Cg_generator *gen,
                                  Class_file *class_file, u32 node_i,
                                  Arena *arena) {
   // clang-format off
@@ -8108,7 +8102,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
   pg_assert(gen->frame->stack != NULL);
   pg_assert(gen->stack_map_frames != NULL);
 
-  const par_ast_node_t *const node = &gen->resolver->parser->nodes[node_i];
+  const Ast *const node = &gen->resolver->parser->nodes[node_i];
   pg_assert(node->type_i > 0);
   pg_assert(node->lhs > 0);
   pg_assert(node->lhs < pg_array_len(gen->resolver->parser->nodes));
@@ -8122,13 +8116,13 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
       cg_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
 
   pg_assert(node->rhs > 0);
-  const par_ast_node_t *const rhs = &gen->resolver->parser->nodes[node->rhs];
+  const Ast *const rhs = &gen->resolver->parser->nodes[node->rhs];
   pg_assert(rhs->kind == AST_KIND_THEN_ELSE);
 
   // Emit `then` branch.
   // Save a clone of the frame before the `then` branch since we need it
   // later.
-  const cg_frame_t *const frame_before_then_else =
+  const Cg_frame *const frame_before_then_else =
       cg_frame_clone(gen->frame, arena);
 
   cg_emit_node(gen, class_file, rhs->lhs, arena);
@@ -8137,7 +8131,7 @@ static void cg_emit_if_then_else(cg_generator_t *gen,
 
   // Save a clone of the frame after the `then` branch executed so that we
   // can generate a stack map frame later.
-  const cg_frame_t *const frame_after_then = cg_frame_clone(gen->frame, arena);
+  const Cg_frame *const frame_after_then = cg_frame_clone(gen->frame, arena);
 
   // Emit `else` branch.
   // Restore the frame as if the `then` branch never executed.
@@ -8180,7 +8174,7 @@ static int stack_map_frame_sort(const void *a, const void *b) {
   return (int)smp_a->pc - (int)smp_b->pc;
 }
 
-static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
+static void stack_map_resolve_frames(const Cg_frame *first_method_frame,
                                      Stack_map_frame *stack_map_frames,
                                      Arena *arena) {
   pg_assert(first_method_frame != NULL);
@@ -8196,9 +8190,9 @@ static void stack_map_resolve_frames(const cg_frame_t *first_method_frame,
 
   for (u64 i = 0; i < pg_array_len(stack_map_frames); i++) {
     Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
-    cg_frame_t *const frame = stack_map_frame->frame;
+    Cg_frame *const frame = stack_map_frame->frame;
 
-    const cg_frame_t *const previous_frame =
+    const Cg_frame *const previous_frame =
         i > 0 ? stack_map_frames[i - 1].frame : first_method_frame;
 
     i16 locals_delta =
@@ -8256,7 +8250,7 @@ cg_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
                                    Arena *arena) {
   const u16 class_name_i =
       cf_add_constant_string(&class_file->constant_pool, class_name, arena);
-  const cf_constant_t out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+  const Jvm_constant_pool_entry out_class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                    .v = {.java_class_name = class_name_i}};
   const u16 class_i =
       cf_constant_array_push(&class_file->constant_pool, &out_class, arena);
@@ -8264,7 +8258,7 @@ cg_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
   return class_i;
 }
 
-static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
+static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
                          u32 node_i, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
@@ -8277,8 +8271,8 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
   pg_assert(class_file != NULL);
   pg_assert(node_i < pg_array_len(gen->resolver->parser->nodes));
 
-  const par_ast_node_t *const node = &gen->resolver->parser->nodes[node_i];
-  const lex_token_t token =
+  const Ast *const node = &gen->resolver->parser->nodes[node_i];
+  const Token token =
       gen->resolver->parser->lexer->tokens[node->main_token_i];
   const Type *const type = &gen->resolver->types[node->type_i];
 
@@ -8288,7 +8282,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
-    const cf_constant_t constant = {.kind = CONSTANT_POOL_KIND_INT,
+    const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_INT,
                                     .v = {.number = node->lhs}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant, arena);
@@ -8297,7 +8291,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     pg_assert(gen->code->code != NULL);
     pg_assert(gen->frame != NULL);
 
-    const cf_verification_info_t verification_info = {
+    const Cf_verification_info verification_info = {
         .kind = VERIFICATION_INFO_INT};
     cg_emit_load_constant_single_word(gen, number_i, verification_info, arena);
     break;
@@ -8306,7 +8300,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     pg_assert(node->main_token_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
 
-    cp_info_kind_t pool_kind = CONSTANT_POOL_KIND_INT;
+    Jvm_constant_pool_kind pool_kind = CONSTANT_POOL_KIND_INT;
     Jvm_verification_info verification_info_kind = VERIFICATION_INFO_INT;
     if (type->kind == TYPE_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
@@ -8315,21 +8309,21 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     // TODO: Float, Double, etc.
 
     const u64 number = node->extra_data_i;
-    const cf_constant_t constant = {.kind = pool_kind, .v = {.number = number}};
+    const Jvm_constant_pool_entry constant = {.kind = pool_kind, .v = {.number = number}};
     const u16 number_i =
         cf_constant_array_push(&class_file->constant_pool, &constant, arena);
     if (pool_kind == CONSTANT_POOL_KIND_LONG ||
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
-      const cf_constant_t dummy = {0};
+      const Jvm_constant_pool_entry dummy = {0};
       cf_constant_array_push(&class_file->constant_pool, &dummy, arena);
 
       cg_emit_load_constant_double_word(
           gen, number_i,
-          (cf_verification_info_t){.kind = verification_info_kind}, arena);
+          (Cf_verification_info){.kind = verification_info_kind}, arena);
     } else {
       cg_emit_load_constant_single_word(
           gen, number_i,
-          (cf_verification_info_t){.kind = verification_info_kind}, arena);
+          (Cf_verification_info){.kind = verification_info_kind}, arena);
     }
     break;
   }
@@ -8350,14 +8344,14 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
 
       for (u64 i = 0; i < pg_array_len(node->nodes); i++) {
         const u32 argument_i = node->nodes[i];
-        const par_ast_node_t *const argument =
+        const Ast *const argument =
             &gen->resolver->parser->nodes[argument_i];
 
         // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
         // b c` with the corresponding verification info.
-        const cf_verification_info_t verification_info =
+        const Cf_verification_info verification_info =
             gen->frame->stack[stack_index];
-        const cf_variable_t variable = {
+        const Cf_variable variable = {
             .node_i = argument_i,
             .type_i = argument->type_i,
             .scope_depth = gen->frame->scope_depth,
@@ -8381,18 +8375,18 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       // TODO: Support non static calls.
       pg_assert(type->v.method.access_flags & ACCESS_FLAGS_STATIC);
 
-      const cf_constant_t class_name = {
+      const Jvm_constant_pool_entry class_name = {
           .kind = CONSTANT_POOL_KIND_UTF8,
           .v = {.s = gen->resolver->this_class_name}};
       const u16 class_name_i = cf_constant_array_push(
           &class_file->constant_pool, &class_name, arena);
 
-      const cf_constant_t class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
+      const Jvm_constant_pool_entry class = {.kind = CONSTANT_POOL_KIND_CLASS_INFO,
                                    .v = {.java_class_name = class_name_i}};
       const u16 class_i =
           cf_constant_array_push(&class_file->constant_pool, &class, arena);
 
-      const cf_constant_t name = {
+      const Jvm_constant_pool_entry name = {
           .kind = CONSTANT_POOL_KIND_UTF8,
           .v = {
               .s = type->kind == TYPE_METHOD ? type->v.method.name
@@ -8404,18 +8398,18 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       Str_builder descriptor_s = sb_new(256, arena);
       descriptor_s = cf_fill_descriptor_string(
           gen->resolver->types, descriptor_s, node->type_i, arena);
-      const cf_constant_t descriptor = {.kind = CONSTANT_POOL_KIND_UTF8,
+      const Jvm_constant_pool_entry descriptor = {.kind = CONSTANT_POOL_KIND_UTF8,
                                         .v = {.s = sb_build(descriptor_s)}};
       const u16 descriptor_i = cf_constant_array_push(
           &class_file->constant_pool, &descriptor, arena);
 
-      const cf_constant_t name_and_type = {
+      const Jvm_constant_pool_entry name_and_type = {
           .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
           .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
       const u16 name_and_type_i = cf_constant_array_push(
           &class_file->constant_pool, &name_and_type, arena);
 
-      cf_constant_t method_ref = {
+      Jvm_constant_pool_entry method_ref = {
           .kind = CONSTANT_POOL_KIND_METHOD_REF,
           .v = {.method_ref = {.class = class_i,
                                .name_and_type = name_and_type_i}}};
@@ -8436,7 +8430,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i <
               pg_array_len(gen->resolver->parser->lexer->tokens));
-    const lex_token_t token_name =
+    const Token token_name =
         gen->resolver->parser->lexer->tokens[token_name_i];
     pg_assert(token_name.kind == TOKEN_KIND_IDENTIFIER);
 
@@ -8454,17 +8448,17 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     const u16 descriptor_i = cf_add_constant_string(
         &class_file->constant_pool, sb_build(descriptor), arena);
 
-    cf_method_t method = {
+    Cf_method method = {
         .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
     pg_array_init_reserve(method.attributes, 1, arena);
 
-    cf_attribute_code_t code = {0};
+    Cf_attribute_code code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
-    cg_frame_t frame = {0};
+    Cg_frame frame = {0};
     cg_frame_init(&frame, arena);
 
     gen->frame = &frame;
@@ -8475,7 +8469,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     // Emit parameters i.e. locals.
     cg_emit_node(gen, class_file, node->lhs, arena);
     // The firt frame implicitly encompasses arguments as locals.
-    cg_frame_t *const first_method_frame = cg_frame_clone(gen->frame, arena);
+    Cg_frame *const first_method_frame = cg_frame_clone(gen->frame, arena);
     // Emit the body.
     cg_emit_node(gen, class_file, node->rhs, arena);
 
@@ -8486,7 +8480,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       if (node->rhs == 0) { // Empty body
         cg_emit_return_nothing(gen, arena);
       } else {
-        const par_ast_node_t *const rhs =
+        const Ast *const rhs =
             &gen->resolver->parser->nodes[node->rhs];
         pg_assert(rhs->kind == AST_KIND_LIST);
 
@@ -8494,7 +8488,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
           cg_emit_return_nothing(gen, arena);
         } else {
           const u32 last_node_i = rhs->nodes[pg_array_len(rhs->nodes) - 1];
-          const par_ast_node_t *const last_node =
+          const Ast *const last_node =
               &gen->resolver->parser->nodes[last_node_i];
 
           if (last_node->kind != AST_KIND_RETURN) {
@@ -8511,7 +8505,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
 
     stack_map_resolve_frames(first_method_frame, gen->stack_map_frames, arena);
 
-    cf_attribute_t attribute_stack_map_frames = {
+    Cf_attribute attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = cf_add_constant_cstring(&class_file->constant_pool,
                                         "StackMapTable", arena),
@@ -8527,7 +8521,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
 
     pg_array_append(code.attributes, attribute_stack_map_frames, arena);
 
-    const cf_attribute_t attribute_code = {
+    const Cf_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
@@ -8643,11 +8637,11 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       cf_code_array_push_u16(&gen->code->code, 0, arena);
       cg_frame_stack_pop(gen->frame);
 
-      const cg_frame_t *const frame_before_rhs =
+      const Cg_frame *const frame_before_rhs =
           cg_frame_clone(gen->frame, arena);
       cg_emit_node(gen, class_file, node->rhs, arena);
 
-      const cg_frame_t *const frame_after_rhs =
+      const Cg_frame *const frame_after_rhs =
           cg_frame_clone(gen->frame, arena);
       const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
 
@@ -8714,11 +8708,11 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       cf_code_array_push_u16(&gen->code->code, 0, arena);
       cg_frame_stack_pop(gen->frame);
 
-      const cg_frame_t *const frame_before_rhs =
+      const Cg_frame *const frame_before_rhs =
           cg_frame_clone(gen->frame, arena);
       cg_emit_node(gen, class_file, node->rhs, arena);
 
-      const cg_frame_t *const frame_after_rhs =
+      const Cg_frame *const frame_after_rhs =
           cg_frame_clone(gen->frame, arena);
       const u16 unconditional_jump_location = cg_emit_jump(gen, arena);
 
@@ -8803,7 +8797,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames
       // don't have to be a full_frame but can be something smaller e.g.
       // append_frame.
-      const par_ast_node_t *const child =
+      const Ast *const child =
           &gen->resolver->parser->nodes[child_i];
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
@@ -8822,9 +8816,9 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     cg_emit_node(gen, class_file, node->lhs, arena);
     cg_emit_node(gen, class_file, node->rhs, arena);
 
-    const cf_verification_info_t verification_info =
+    const Cf_verification_info verification_info =
         cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
-    const cf_variable_t variable = {
+    const Cf_variable variable = {
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
@@ -8855,7 +8849,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     pg_assert(cf_find_variable(gen->frame, node->lhs, &logical_local_index,
                                &physical_local_index));
 
-    const cf_verification_info_t verification_info =
+    const Cf_verification_info verification_info =
         gen->frame->locals[logical_local_index].verification_info;
     if (verification_info.kind == VERIFICATION_INFO_INT)
       cg_emit_load_variable_int(gen, physical_local_index, arena);
@@ -8872,7 +8866,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
   }
   case AST_KIND_WHILE_LOOP: {
     const u16 pc_start = pg_array_len(gen->code->code);
-    const cg_frame_t *const frame_before_loop =
+    const Cg_frame *const frame_before_loop =
         cg_frame_clone(gen->frame, arena);
 
     cg_emit_node(gen, class_file, node->lhs, arena); // Condition.
@@ -8915,7 +8909,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
         cf_add_constant_jstring(&class_file->constant_pool, string_i, arena);
 
     // TODO: Deduplicate.
-    const cf_constant_t string_class_info = {
+    const Jvm_constant_pool_entry string_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {
             .java_class_name =
@@ -8923,7 +8917,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
                                        str_from_c("java/lang/String"), arena),
         }};
 
-    const cf_verification_info_t verification_info = {
+    const Cf_verification_info verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = cf_constant_array_push(&class_file->constant_pool,
                                              &string_class_info, arena),
@@ -8941,9 +8935,9 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_FUNCTION_PARAMETER: {
-    const cf_verification_info_t verification_info =
+    const Cf_verification_info verification_info =
         cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
-    const cf_variable_t argument = {
+    const Cf_variable argument = {
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
@@ -8966,7 +8960,7 @@ static void cg_emit_node(cg_generator_t *gen, Class_file *class_file,
 
   case AST_KIND_ASSIGNMENT:
     pg_assert(node->lhs > 0);
-    const par_ast_node_t *const lhs = &gen->resolver->parser->nodes[node->lhs];
+    const Ast *const lhs = &gen->resolver->parser->nodes[node->lhs];
     pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
 
     cg_emit_node(gen, class_file, node->rhs, arena);
@@ -9004,7 +8998,7 @@ static Str cg_make_class_name_from_path(Str path, Arena *arena) {
   return sb_build(res);
 }
 
-static void cg_emit_synthetic_class(cg_generator_t *gen,
+static void cg_emit_synthetic_class(Cg_generator *gen,
                                     Class_file *class_file,
                                     Arena *arena) {
   pg_assert(gen != NULL);
@@ -9024,7 +9018,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
     const u16 this_class_name_i = cf_add_constant_string(
         &class_file->constant_pool, gen->resolver->this_class_name, arena);
 
-    const cf_constant_t this_class_info = {
+    const Jvm_constant_pool_entry this_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {
             .java_class_name = this_class_name_i,
@@ -9037,7 +9031,7 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
     const u16 constant_java_lang_object_string_i = cf_add_constant_cstring(
         &class_file->constant_pool, "java/lang/Object", arena);
 
-    const cf_constant_t super_class_info = {
+    const Jvm_constant_pool_entry super_class_info = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
         .v = {
             .java_class_name = constant_java_lang_object_string_i,
@@ -9049,12 +9043,12 @@ static void cg_emit_synthetic_class(cg_generator_t *gen,
 }
 
 static u16 cg_add_method(Class_file *class_file, u16 access_flags,
-                         u16 name, u16 descriptor, cf_attribute_t *attributes,
+                         u16 name, u16 descriptor, Cf_attribute *attributes,
                          Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
-  cf_method_t method = {
+  Cf_method method = {
       .access_flags = access_flags,
       .attributes = attributes,
       .descriptor = descriptor,
@@ -9064,7 +9058,7 @@ static u16 cg_add_method(Class_file *class_file, u16 access_flags,
   return pg_array_last_index(class_file->methods);
 }
 
-static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
+static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
                                                Class_file *class_file,
                                                Arena *arena) {
   pg_assert(gen != NULL);
@@ -9076,7 +9070,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
   Str source_descriptor_str = str_from_c("([Ljava/lang/String;)V");
 
   for (u16 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const cf_method_t *const method = &class_file->methods[i];
+    const Cf_method *const method = &class_file->methods[i];
 
     if ((method->access_flags & (ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC)) ==
         0)
@@ -9112,9 +9106,9 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     return; // Nothing to do.
 
   pg_assert((u16)method_i < pg_array_len(class_file->methods));
-  const cf_method_t *const target_method = &class_file->methods[method_i];
+  const Cf_method *const target_method = &class_file->methods[method_i];
 
-  cf_attribute_t *attributes = NULL;
+  Cf_attribute *attributes = NULL;
   pg_array_init_reserve(attributes, 1, arena);
 
   // Generate code section for the new method.
@@ -9122,21 +9116,21 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     Str target_descriptor_string = cf_constant_array_get_as_string(
         &class_file->constant_pool, target_method->descriptor);
-    const cf_constant_t target_descriptor = {
+    const Jvm_constant_pool_entry target_descriptor = {
         .kind = CONSTANT_POOL_KIND_UTF8,
         .v = {.s = target_descriptor_string},
     };
     const u16 target_descriptor_i = cf_constant_array_push(
         &class_file->constant_pool, &target_descriptor, arena);
 
-    const cf_constant_t target_name_and_type = {
+    const Jvm_constant_pool_entry target_name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
         .v = {.name_and_type = {.name = target_method->name,
                                 .descriptor = target_descriptor_i}},
     };
     const u16 target_name_and_type_i = cf_constant_array_push(
         &class_file->constant_pool, &target_name_and_type, arena);
-    const cf_constant_t target_method_ref = {
+    const Jvm_constant_pool_entry target_method_ref = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
         .v = {.method_ref = {.class = class_file->this_class,
                              .name_and_type = target_name_and_type_i}}};
@@ -9145,12 +9139,12 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
     const Method target_method_type = {.return_type_i = TYPE_UNIT_I};
 
-    cf_attribute_code_t code = {0};
+    Cf_attribute_code code = {0};
     pg_array_init_reserve(code.code, 4, arena);
 
     gen->code = &code;
     gen->frame =
-        arena_alloc(arena, sizeof(cg_frame_t), _Alignof(cg_frame_t), 1);
+        arena_alloc(arena, sizeof(Cg_frame), _Alignof(Cg_frame), 1);
     cg_frame_init(gen->frame, arena);
 
     // Fill locals (method arguments).
@@ -9175,7 +9169,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       const u16 source_method_arg0_string = cf_add_constant_cstring(
           &class_file->constant_pool, "[Ljava/lang/String;", arena);
 
-      const cf_constant_t source_method_arg0_class = {
+      const Jvm_constant_pool_entry source_method_arg0_class = {
           .kind = CONSTANT_POOL_KIND_CLASS_INFO,
           .v = {
               .java_class_name = source_method_arg0_string,
@@ -9183,7 +9177,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
       const u16 source_method_arg0_class_i = cf_constant_array_push(
           &class_file->constant_pool, &source_method_arg0_class, arena);
 
-      const cf_variable_t arg0 = {
+      const Cf_variable arg0 = {
           .node_i = 0,
           .type_i = source_argument_types_i,
           .scope_depth = gen->frame->scope_depth,
@@ -9207,7 +9201,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
     gen->code = NULL;
     gen->frame = NULL;
 
-    cf_attribute_t attribute_code = {
+    Cf_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
@@ -9217,7 +9211,7 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
 
   // Add new method.
   {
-    const cf_constant_t source_descriptor = {
+    const Jvm_constant_pool_entry source_descriptor = {
         .kind = CONSTANT_POOL_KIND_UTF8,
         .v = {.s = source_descriptor_str},
     };
@@ -9228,14 +9222,14 @@ static void cg_supplement_entrypoint_if_exists(cg_generator_t *gen,
   }
 }
 
-static void cg_emit(resolver_t *resolver, Class_file *class_file,
+static void cg_emit(Resolver *resolver, Class_file *class_file,
                     u32 root_i, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(root_i > 0);
   pg_assert(arena != NULL);
 
-  cg_generator_t gen = {.resolver = resolver};
+  Cg_generator gen = {.resolver = resolver};
   pg_array_init_reserve(gen.stack_map_frames, 64, arena);
   pg_array_init_reserve(gen.locals, 1 << 12, arena);
 

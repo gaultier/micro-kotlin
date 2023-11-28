@@ -156,7 +156,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Lex.
-    lex_lexer_t lexer = {
+    Lexer lexer = {
         .file_path = source_file_name,
     };
 
@@ -168,7 +168,7 @@ int main(int argc, char *argv[]) {
     lex_lex(&lexer, source, &current, &arena);
 
     // Parse.
-    parser_t parser = {
+    Parser parser = {
         .buf = source,
         .lexer = &lexer,
     };
@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
     const Str class_file_path =
         cf_make_class_file_path_kt(source_file_name, &arena);
 
-    resolver_t resolver = {0};
+    Resolver resolver = {0};
     resolver_init(&resolver, &parser, class_path_entries, class_file_path,
                   &arena);
 
@@ -231,8 +231,8 @@ int main(int argc, char *argv[]) {
     fclose(file);
 
     LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu",
-        pg_array_len(parser.nodes), sizeof(par_ast_node_t),
-        pg_array_len(parser.nodes) * sizeof(par_ast_node_t));
+        pg_array_len(parser.nodes), sizeof(Ast),
+        pg_array_len(parser.nodes) * sizeof(Ast));
     LOG("types=%lu sizeof(Type)=%lu mem=%lu", pg_array_len(resolver.types),
         sizeof(Type), pg_array_len(resolver.types) * sizeof(Type));
 
