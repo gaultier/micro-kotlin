@@ -1175,6 +1175,7 @@ typedef struct {
 } Jvm_field;
 
 typedef struct Jvm_method Jvm_method;
+Array32_struct(Jvm_method);
 
 typedef struct Jvm_interfaces Jvm_interfaces;
 
@@ -1254,7 +1255,7 @@ struct Jvm_class_file {
   pg_pad(2);
   u16 *interfaces;
   Jvm_field *fields;
-  Jvm_method *methods;
+  Array32(Jvm_method) methods;
   Array32(Jvm_attribute) attributes;
   Jvm_constant_pool constant_pool;
 };
@@ -2219,14 +2220,14 @@ static void jvm_buf_read_method(Str buf, u8 **current, Class_file *class_file,
 
   jvm_buf_read_attributes(buf, current, class_file, &method.attributes, arena);
 
-  pg_array_append(class_file->methods, method, arena);
+  *array32_push(&class_file->methods, arena) = method;
 }
 
 static void jvm_buf_read_methods(Str buf, u8 **current, Class_file *class_file,
                                  Arena *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, current);
-  pg_array_init_reserve(class_file->methods, methods_count, arena);
+  class_file->methods = array32_make(Jvm_method, 0, methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
     jvm_buf_read_method(buf, current, class_file, arena);
@@ -2810,11 +2811,11 @@ static void jvm_write_methods(const Class_file *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
 
-  pg_assert(pg_array_len(class_file->methods) <= UINT16_MAX);
-  file_write_be_u16(file, (u16)pg_array_len(class_file->methods));
+  pg_assert(class_file->methods.len <= UINT16_MAX);
+  file_write_be_u16(file, (u16)class_file->methods.len);
 
-  for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Jvm_method *const method = &class_file->methods[i];
+  for (u64 i = 0; i < class_file->methods.len; i++) {
+    const Jvm_method *const method = &class_file->methods.data[i];
     jvm_write_method(file, method);
   }
 }
@@ -2843,7 +2844,7 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   class_file->constant_pool = jvm_constant_array_make(1024, arena);
   pg_array_init_reserve(class_file->interfaces, 64, arena);
 
-  pg_array_init_reserve(class_file->methods, 64, arena);
+  class_file->methods = array32_make(Jvm_method, 0, 64, arena);
   pg_array_init_reserve(class_file->fields, 64, arena);
 
   class_file->attributes = array32_make(Jvm_attribute, 0, 64, arena);
@@ -4989,8 +4990,8 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
   const u64 initial_types_count = resolver->types.len;
   const Type *const this_class_type = &resolver->types.data[this_class_type_i];
 
-  for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Jvm_method *const method = &class_file->methods[i];
+  for (u64 i = 0; i < class_file->methods.len; i++) {
+    const Jvm_method *const method = &class_file->methods.data[i];
     Str descriptor = jvm_constant_array_get_as_string(
         &class_file->constant_pool, method->descriptor);
     Str name = jvm_constant_array_get_as_string(&class_file->constant_pool,
@@ -8391,8 +8392,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     for (u64 i = 0; i < gen->stack_map_frames.len; i++) {
       if (!gen->stack_map_frames.data[i].tombstone)
         *array32_push(&attribute_stack_map_frames.v.stack_map_table, arena) =
-            gen->stack_map_frames.data[i]
-                                                                     ;
+            gen->stack_map_frames.data[i];
     }
 
     *array32_push(&code.attributes, arena) = attribute_stack_map_frames;
@@ -8404,7 +8404,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .v = {.code = code}};
     *array32_push(&method.attributes, arena) = attribute_code;
 
-    pg_array_append(class_file->methods, method, arena);
+    *array32_push(&class_file->methods, arena) = method;
 
     gen->code = NULL;
     gen->frame = NULL;
@@ -8920,7 +8920,6 @@ static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
                               u16 name, u16 descriptor,
                               Array32(Jvm_attribute) attributes, Arena *arena) {
   pg_assert(class_file != NULL);
-  pg_assert(class_file->methods != NULL);
 
   Jvm_method method = {
       .access_flags = access_flags,
@@ -8928,8 +8927,8 @@ static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
       .descriptor = descriptor,
       .name = name,
   };
-  pg_array_append(class_file->methods, method, arena);
-  return (u16)pg_array_last_index(class_file->methods);
+  *array32_push(&class_file->methods, arena) = method;
+  return (u16)array32_last_index(class_file->methods);
 }
 
 static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
@@ -8938,13 +8937,12 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
   pg_assert(class_file != NULL);
-  pg_assert(class_file->methods != NULL);
 
   i32 method_i = -1;
   Str source_descriptor_str = str_from_c("([Ljava/lang/String;)V");
 
-  for (u16 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Jvm_method *const method = &class_file->methods[i];
+  for (u16 i = 0; i < class_file->methods.len; i++) {
+    const Jvm_method *const method = &class_file->methods.data[i];
 
     if ((method->access_flags & (ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC)) ==
         0)
@@ -8979,8 +8977,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
   if (method_i == -1)
     return; // Nothing to do.
 
-  pg_assert((u16)method_i < pg_array_len(class_file->methods));
-  const Jvm_method *const target_method = &class_file->methods[method_i];
+  pg_assert((u16)method_i < class_file->methods.len);
+  const Jvm_method *const target_method = &class_file->methods.data[method_i];
 
   Array32(Jvm_attribute) attributes = array32_make(Jvm_attribute, 0, 1, arena);
 
