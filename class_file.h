@@ -1254,7 +1254,7 @@ struct Jvm_class_file {
   u16 interfaces_count;
   u16 fields_count;
   pg_pad(2);
-  u16 *interfaces;
+  Array32(u16) interfaces;
   Array32(Jvm_field) fields;
   Array32(Jvm_method) methods;
   Array32(Jvm_attribute) attributes;
@@ -2246,14 +2246,14 @@ static void jvm_buf_read_interfaces(Str buf, u8 **current,
   const u8 *const current_start = *current;
 
   const u16 interfaces_count = buf_read_be_u16(buf, current);
-  pg_array_init_reserve(class_file->interfaces, interfaces_count, arena);
+  class_file->interfaces = array32_make(u16, 0, interfaces_count, arena);
 
   for (u16 i = 0; i < interfaces_count; i++) {
     const u16 interface_i = buf_read_be_u16(buf, current);
     pg_assert(interface_i > 0);
     pg_assert(interface_i <= class_file->constant_pool.len);
 
-    pg_array_append(class_file->interfaces, interface_i, arena);
+    *array32_push(&class_file->interfaces, arena) = interface_i;
   }
 
   const u8 *const current_end = *current;
@@ -2840,12 +2840,6 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   pg_assert(arena != NULL);
 
   class_file->constant_pool = jvm_constant_array_make(1024, arena);
-  pg_array_init_reserve(class_file->interfaces, 64, arena);
-
-  class_file->methods = array32_make(Jvm_method, 0, 64, arena);
-  class_file->fields = array32_make(Jvm_field, 0, 64, arena);
-
-  class_file->attributes = array32_make(Jvm_attribute, 0, 64, arena);
 }
 
 static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
@@ -5029,7 +5023,7 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           type.v.method.code =
               array32_make_from_slice(u8, attribute->v.code.bytecode.data,
-                                  attribute->v.code.bytecode.len, arena);
+                                      attribute->v.code.bytecode.len, arena);
           break;
         }
       }
