@@ -158,14 +158,10 @@ int main(int argc, char *argv[]) {
       exit(E2BIG);
     }
 
-    Str source = source_file_read_res.content;
     // Lex.
-    Lexer lexer = {
-        .file_path = source_file_name,
-        .tokens = array32_make(Token, 0, source.len, &arena),
-    };
-    pg_array_init_reserve(lexer.line_table, source.len, &arena);
+    Lexer lexer = {.file_path = source_file_name};
 
+    Str source = source_file_read_res.content;
     u8 *current = source.data;
     lex_lex(&lexer, source, &current, &arena);
 

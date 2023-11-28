@@ -361,7 +361,7 @@ Array32_struct(Token);
 typedef struct {
   Str file_path;
   Array32(Token) tokens;
-  u32 *line_table; // line_table[i] is the start offset of the LOC `i+1`
+  Array32(u32) line_table; // line_table[i] is the start offset of the LOC `i+1`
 } Lexer;
 
 typedef struct {
@@ -3236,20 +3236,16 @@ static void lex_number(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   *array32_push(&lexer->tokens, arena) = token;
 }
 
-// FIXME: use Str
 static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   pg_assert(lexer != NULL);
-  pg_assert(lexer->line_table != NULL);
-  pg_assert(pg_array_len(lexer->line_table) == 0);
   pg_assert(current != NULL);
   pg_assert(*current != NULL);
 
-  // Push first line.
-  pg_array_append(lexer->line_table, 0, arena);
+  // tokens[0] is a dummy token.
+  lexer->tokens = array32_make(Token, 1, buf.len, arena);
 
-  // Push first dummy token.
-  const Token dummy_token = {0};
-  *array32_push(&lexer->tokens, arena) = dummy_token;
+  // First line is 0.
+  lexer->line_table = array32_make(u32, 1, buf.len, arena);
 
   while (!lex_is_at_end(buf, current)) {
     const u8 c = **current;
@@ -3497,8 +3493,8 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
       lex_advance(buf, current);
 
       if (!lex_is_at_end(buf, current))
-        pg_array_append(lexer->line_table, lex_get_current_offset(buf, current),
-                        arena);
+        *array32_push(&lexer->line_table, arena) =
+            lex_get_current_offset(buf, current);
 
       break;
     }
@@ -3520,7 +3516,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   // Ensure the line table has at least 2 items: line_table=[0]=0,
   // line_table[last]=buf.len, for easier logic later to find token
   // positions.
-  pg_array_append(lexer->line_table, buf.len, arena);
+  *array32_push(&lexer->line_table, arena) = buf.len;
 }
 
 static u32 lex_find_token_length(const Lexer *lexer, Str buf, Token token) {
@@ -3610,16 +3606,16 @@ static void parser_find_token_position(const Parser *parser, Token token,
   pg_assert(line != NULL);
   pg_assert(column != NULL);
   pg_assert(token_string != NULL);
-  pg_assert(pg_array_len(parser->lexer->line_table) > 1);
+  pg_assert(parser->lexer->line_table.len > 1);
 
   *token_string = (Str){
       .data = &parser->buf.data[token.source_offset],
       .len = lex_find_token_length(parser->lexer, parser->buf, token),
   };
 
-  for (u32 i = 0; i < pg_array_len(parser->lexer->line_table) - 1; i++) {
-    const u32 line_start_offset = parser->lexer->line_table[i];
-    const u32 line_end_offset_excl = parser->lexer->line_table[i + 1];
+  for (u32 i = 0; i < parser->lexer->line_table.len - 1; i++) {
+    const u32 line_start_offset = parser->lexer->line_table.data[i];
+    const u32 line_end_offset_excl = parser->lexer->line_table.data[i + 1];
     if (line_start_offset <= token.source_offset &&
         token.source_offset <= line_end_offset_excl) {
       *line = i + 1;
@@ -3628,9 +3624,7 @@ static void parser_find_token_position(const Parser *parser, Token token,
       return;
     }
   }
-  /* pg_assert(*line > 0); */
-  pg_assert(*line <= pg_array_len(parser->lexer->line_table));
-  /* pg_assert(*column > 0); */
+  pg_assert(*line <= parser->lexer->line_table.len);
 }
 
 static char *typechecker_type_kind_string(const Type *types, u32 type_i) {
