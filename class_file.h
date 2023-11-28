@@ -1201,7 +1201,7 @@ struct Jvm_attribute {
     Jvm_line_number_table_entry
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
-    Stack_map_frame *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
+    Array32(Stack_map_frame) stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
     Array32(Jvm_annotation)
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
@@ -1508,8 +1508,8 @@ static void jvm_buf_read_stack_map_table_attribute(
   const u8 *const current_start = *current;
 
   const u16 len = buf_read_be_u16(buf, current);
-  Stack_map_frame *stack_map_frames = NULL;
-  pg_array_init_reserve(stack_map_frames, len, arena);
+  Array32(Stack_map_frame) stack_map_frames =
+      array32_make(Stack_map_frame, 0, len, arena);
 
   for (u16 i = 0; i < len; i++) {
     Stack_map_frame stack_map_frame = {
@@ -1559,7 +1559,7 @@ static void jvm_buf_read_stack_map_table_attribute(
       jvm_buf_read_stack_map_table_attribute_verification_infos(
           buf, current, stack_items_count);
     }
-    pg_array_append(stack_map_frames, stack_map_frame, arena);
+    *array32_push(&stack_map_frames, arena) = stack_map_frame;
   }
 
   Jvm_attribute attribute = {
@@ -2562,13 +2562,12 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
                (u32)sizeof(Jvm_line_number_table_entry);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
-    const Stack_map_frame *const stack_map_frames =
+    const Array32(Stack_map_frame) stack_map_frames =
         attribute->v.stack_map_table;
-    pg_assert(stack_map_frames != NULL);
 
     u32 size = sizeof(u16) /* count */;
-    for (u16 i = 0; i < pg_array_len(stack_map_frames); i++) {
-      const Stack_map_frame *const stack_map_frame = &stack_map_frames[i];
+    for (u16 i = 0; i < stack_map_frames.len; i++) {
+      const Stack_map_frame *const stack_map_frame = &stack_map_frames.data[i];
 
       if (stack_map_frame->kind <= 63) // same_frame
       {
@@ -2774,13 +2773,11 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
     const u32 size = jvm_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    pg_assert(attribute->v.stack_map_table != NULL);
-    const u16 count = (u16)pg_array_len(attribute->v.stack_map_table);
-    file_write_be_u16(file, count);
+    file_write_be_u16(file, (u16)attribute->v.stack_map_table.len);
 
-    for (u16 i = 0; i < pg_array_len(attribute->v.stack_map_table); i++) {
+    for (u16 i = 0; i < attribute->v.stack_map_table.len; i++) {
       const Stack_map_frame *const stack_map_frame =
-          &attribute->v.stack_map_table[i];
+          &attribute->v.stack_map_table.data[i];
       jvm_write_stack_map_table_attribute(file, stack_map_frame);
     }
     break;
@@ -8387,14 +8384,15 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = jvm_add_constant_cstring(&class_file->constant_pool,
                                          "StackMapTable", arena),
-        .v = {.stack_map_table = NULL}};
-    pg_array_init_reserve(attribute_stack_map_frames.v.stack_map_table,
-                          gen->stack_map_frames.len, arena);
+        .v.stack_map_table =
+            array32_make(Stack_map_frame, 0, gen->stack_map_frames.len, arena),
+    };
 
     for (u64 i = 0; i < gen->stack_map_frames.len; i++) {
       if (!gen->stack_map_frames.data[i].tombstone)
-        pg_array_append(attribute_stack_map_frames.v.stack_map_table,
-                        gen->stack_map_frames.data[i], arena);
+        *array32_push(&attribute_stack_map_frames.v.stack_map_table, arena) =
+            gen->stack_map_frames.data[i]
+                                                                     ;
     }
 
     *array32_push(&code.attributes, arena) = attribute_stack_map_frames;
@@ -9082,7 +9080,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         .name =
             jvm_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
-    *array32_push(&attributes ,arena)= attribute_code;
+    *array32_push(&attributes, arena) = attribute_code;
   }
 
   // Add new method.
