@@ -88,8 +88,8 @@ arena_alloc(Arena *a, size_t size, size_t align, size_t count) {
   pg_assert(size > 0);
   pg_assert(align == 1 || align == 2 || align == 4 || align == 8);
 
-  size_t available = a->end - a->start;
-  size_t padding = -(size_t)a->start & (align - 1);
+  u64 available = (u64)a->end - (u64)a->start;
+  u64 padding = -(u64)a->start & (align - 1);
 
   // Ignore overflow for now.
   size_t offset = padding + size * count;

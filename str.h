@@ -69,8 +69,6 @@ __attribute__((warn_unused_result)) static u64 ut_next_power_of_two(u64 n) {
   n |= n >> 32;
   n++;
 
-  pg_assert(__builtin_popcount(n) == 1);
-
   return n;
 }
 
@@ -162,7 +160,7 @@ str_split(Str haystack, u8 needle) {
   if (at == NULL)
     return (Str_split_result){.left = haystack, .right = haystack};
 
-  u64 found_pos = at - haystack.data;
+  u64 found_pos = (u64)at - (u64)haystack.data;
 
   return (Str_split_result){
       .left = (Str){.data = haystack.data, .len = found_pos},
@@ -178,7 +176,7 @@ str_rsplit(Str haystack, u8 needle) {
   if (at == NULL)
     return (Str_split_result){.left = haystack, .right = haystack};
 
-  u64 found_pos = at - haystack.data;
+  u64 found_pos = (u64)at - (u64)haystack.data;
 
   return (Str_split_result){
       .left = (Str){.data = haystack.data, .len = found_pos},
@@ -332,7 +330,7 @@ ut_read_all_from_fd(int fd, Str_builder sb) {
     if (read_bytes == 0)
       return (Read_result){.error = EINVAL}; // TODO: retry?
 
-    sb = sb_assume_appended_n(sb, read_bytes);
+    sb = sb_assume_appended_n(sb, (u64)read_bytes);
     pg_assert(sb.len <= sb.cap);
   }
   return (Read_result){.content = sb_build(sb)};
@@ -370,7 +368,7 @@ ut_read_all_from_file_path(char *path, Arena *arena) {
     return (Read_result){0};
   }
 
-  Read_result res = ut_read_all_from_fd(fd, sb_new(st.st_size, arena));
+  Read_result res = ut_read_all_from_fd(fd, sb_new((u64)st.st_size, arena));
   close(fd);
   return res;
 }
@@ -390,8 +388,8 @@ struct Mem_profile {
 };
 
 // TODO: Maybe use varints to reduce the size.
-__attribute__((warn_unused_result)) static u8 ut_record_call_stack(u64 *dst,
-                                                                   u64 cap) {
+__attribute__((warn_unused_result)) static u64 ut_record_call_stack(u64 *dst,
+                                                                    u64 cap) {
   uintptr_t *rbp = __builtin_frame_address(0);
 
   u64 len = 0;
@@ -448,8 +446,8 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
       .in_use_space = bytes_count,
-      .call_stack =
-          array32_make_from_c(u64, call_stack, call_stack_len, &profile->arena),
+      .call_stack = array32_make_from_c(u64, call_stack, (u32)call_stack_len,
+                                        &profile->arena),
   };
 
   *array32_push(&profile->records, &profile->arena) = record;
@@ -491,7 +489,7 @@ static void mem_profile_write(Mem_profile *profile, FILE *out) {
   pg_assert(read_bytes != -1);
   close(fd);
 
-  fwrite(mem, 1, read_bytes, out);
+  fwrite(mem, 1, (u64)read_bytes, out);
 
   fflush(out);
 }

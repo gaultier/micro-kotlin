@@ -150,13 +150,13 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 
 #define array32_drop(array, n)                                                 \
   (pg_assert(n <= (array)->len), (array)->len -= (n),                          \
-   memset(&(array)[(array)->len], 0, (n) * sizeof((array)->data[0])))
+   memset(&(array)->data[(array)->len], 0, (n) * sizeof((array)->data[0])))
 
 #define array32_clone(T, dst, src, arena)                                      \
   do {                                                                         \
     *(dst) = array32_make(T, (src).len, (src).len, arena);                     \
     if ((src).len > 0)                                                         \
-      memcpy((dst)->data, (src).data, (src).len);                              \
+      memcpy((dst)->data, (src).data, sizeof((src).data[0]) * (src).len);      \
   } while (0)
 
 Array32_struct(u8);

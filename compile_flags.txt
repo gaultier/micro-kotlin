@@ -3,4 +3,5 @@
 -Wunused
 -Wpadded
 -Wno-gnu-alignof-expression
+-Wconversion
 -std=c99
