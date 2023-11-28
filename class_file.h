@@ -2543,13 +2543,12 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
   case ATTRIBUTE_KIND_CODE: {
     const Jvm_attribute_code *const code = &attribute->v.code;
 
-    u32 size =
-        (u32)sizeof(code->max_physical_stack) +
-        (u32)sizeof(code->max_physical_locals) + (u32)sizeof(u32) +
-        (u32)pg_array_len(code->bytecode) +
-        (u32)sizeof(u16) /* exception count */ +
-        +(u32)code->exceptions.len * (u32)sizeof(Jvm_exception) +
-        (u32)sizeof(u16) // attributes length
+    u32 size = (u32)sizeof(code->max_physical_stack) +
+               (u32)sizeof(code->max_physical_locals) + (u32)sizeof(u32) +
+               (u32)pg_array_len(code->bytecode) +
+               (u32)sizeof(u16) /* exception count */ +
+               +(u32)code->exceptions.len * (u32)sizeof(Jvm_exception) +
+               (u32)sizeof(u16) // attributes length
         ;
 
     for (u64 i = 0; i < code->attributes.len; i++) {
@@ -5544,10 +5543,8 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
 
   const u64 candidates_count = pg_array_len(candidates);
 
-  bool *tombstones = NULL;
-  pg_array_init_reserve(tombstones, candidates_count, &scratch_arena);
-  pg_array_header(tombstones)->len = candidates_count;
-  memset(tombstones, false, pg_array_len(tombstones));
+  Array32(bool) tombstones = array32_make(
+      bool, (u32)candidates_count, (u32)candidates_count, &scratch_arena);
   u64 tombstones_count = 0;
 
   while (tombstones_count < candidates_count - 1) {
@@ -5558,7 +5555,7 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
         const u32 a_type_i = candidates[a_index];
         const u32 b_type_i = candidates[b_index];
 
-        if (tombstones[a_index] || tombstones[b_index])
+        if (tombstones.data[a_index] || tombstones.data[b_index])
           continue;
 
         const Type *const a = &resolver->types.data[a_type_i];
@@ -5597,12 +5594,12 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
         if (a_more_applicable_than_b && !b_more_applicable_than_a) {
           // A clearly more applicable than B, mark B as deleted so that it will
           // be skipped for subsequent checks.
-          tombstones[b_index] = true;
+          tombstones.data[b_index] = true;
           tombstones_count += 1;
         } else if (b_more_applicable_than_a && !a_more_applicable_than_b) {
           // B clearly more applicable than A, mark A as deleted so that it will
           // be skipped for subsequent checks.
-          tombstones[a_index] = true;
+          tombstones.data[a_index] = true;
           tombstones_count += 1;
         } else {
           // TODO: Need to do more checks.
@@ -5611,8 +5608,8 @@ static u32 resolver_select_most_specific_candidate_function(Resolver *resolver,
     }
   }
 
-  for (u64 i = 0; i < pg_array_len(tombstones); i++) {
-    if (!tombstones[i])
+  for (u64 i = 0; i < tombstones.len; i++) {
+    if (!tombstones.data[i])
       return candidates[i];
   }
 

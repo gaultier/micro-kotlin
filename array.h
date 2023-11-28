@@ -159,6 +159,8 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
       memcpy((dst)->data, (src).data, sizeof((src).data[0]) * (src).len);      \
   } while (0)
 
+Array32_struct(_Bool);
+typedef Array32(_Bool) Array32(bool);
 Array32_struct(u8);
 Array32_struct(u16);
 Array32_struct(u32);
