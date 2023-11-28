@@ -1164,13 +1164,14 @@ typedef struct Jvm_annotation Jvm_annotation;
 Array32_struct(Jvm_annotation);
 
 typedef struct Jvm_attribute Jvm_attribute;
+Array32_struct(Jvm_attribute);
 
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Jvm_attribute *attributes;
+  Array32(Jvm_attribute) attributes;
 } Jvm_field;
 
 typedef struct Jvm_method Jvm_method;
@@ -1190,7 +1191,7 @@ struct Jvm_attribute {
       pg_pad(4);
       u8 *bytecode;
       Jvm_Exception *exceptions;
-      Jvm_attribute *attributes;
+      Array32(Jvm_attribute) attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
     struct Jvm_attribute_source_file {
@@ -1231,7 +1232,7 @@ struct Jvm_method {
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Jvm_attribute *attributes;
+  Array32(Jvm_attribute) attributes;
 };
 
 const u32 jvm_MAGIC_NUMBER = 0xbebafeca;
@@ -1254,7 +1255,7 @@ struct Jvm_class_file {
   u16 *interfaces;
   Jvm_field *fields;
   Jvm_method *methods;
-  Jvm_attribute *attributes;
+  Array32(Jvm_attribute) attributes;
   Jvm_constant_pool constant_pool;
 };
 typedef struct Jvm_class_file Class_file;
@@ -1377,18 +1378,18 @@ jvm_constant_array_get_as_string(const Jvm_constant_pool *constant_pool,
 
 static void jvm_buf_read_attributes(Str buf, u8 **current,
                                     Class_file *class_file,
-                                    Jvm_attribute **attributes, Arena *arena);
+                                    Array32(Jvm_attribute) * attributes,
+                                    Arena *arena);
 
-static void jvm_buf_read_sourcefile_attribute(Str buf, u8 **current,
-                                              Class_file *class_file,
-                                              Jvm_attribute **attributes,
-                                              Arena *arena) {
+static void
+jvm_buf_read_sourcefile_attribute(Str buf, u8 **current, Class_file *class_file,
+                                  Array32(Jvm_attribute) * attributes,
+                                  Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
   pg_assert(attributes != NULL);
-  pg_assert(*attributes != NULL);
 
   const u8 *const current_start = *current;
 
@@ -1403,7 +1404,7 @@ static void jvm_buf_read_sourcefile_attribute(Str buf, u8 **current,
 
   Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                              .v = {.source_file = source_file}};
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(&*attributes, arena) = attribute;
 }
 
 static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
@@ -1439,7 +1440,7 @@ static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
 static void jvm_buf_read_code_attribute(Str buf, u8 **current,
                                         Class_file *class_file,
                                         u32 attribute_len, u16 name_i,
-                                        Jvm_attribute **attributes,
+                                        Array32(Jvm_attribute) * attributes,
                                         Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1470,7 +1471,7 @@ static void jvm_buf_read_code_attribute(Str buf, u8 **current,
 
   Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_CODE, .name = name_i, .v = {.code = code}};
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1496,11 +1497,9 @@ jvm_buf_read_stack_map_table_attribute_verification_infos(Str buf, u8 **current,
   }
 }
 
-static void jvm_buf_read_stack_map_table_attribute(Str buf, u8 **current,
-                                                   u32 attribute_len,
-                                                   u16 name_i,
-                                                   Jvm_attribute **attributes,
-                                                   Arena *arena) {
+static void jvm_buf_read_stack_map_table_attribute(
+    Str buf, u8 **current, u32 attribute_len, u16 name_i,
+    Array32(Jvm_attribute) * attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(attributes != NULL);
@@ -1568,18 +1567,16 @@ static void jvm_buf_read_stack_map_table_attribute(Str buf, u8 **current,
       .name = name_i,
       .v = {.stack_map_table = stack_map_frames},
   };
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
   pg_assert(read_bytes == attribute_len);
 }
 
-static void jvm_buf_read_line_number_table_attribute(Str buf, u8 **current,
-                                                     Class_file *class_file,
-                                                     u32 attribute_len,
-                                                     Jvm_attribute **attributes,
-                                                     Arena *arena) {
+static void jvm_buf_read_line_number_table_attribute(
+    Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
+    Array32(Jvm_attribute) * attributes, Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
@@ -1601,7 +1598,7 @@ static void jvm_buf_read_line_number_table_attribute(Str buf, u8 **current,
     pg_array_append(attribute.v.line_number_table_entries, entry, arena);
   }
 
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1690,11 +1687,9 @@ static void jvm_buf_read_signature_attribute(Str buf, u8 **current,
 }
 
 // TODO: store this data.
-static void jvm_buf_read_exceptions_attribute(Str buf, u8 **current,
-                                              Class_file *class_file,
-                                              u32 attribute_len,
-                                              Jvm_attribute **attributes,
-                                              Arena *arena) {
+static void jvm_buf_read_exceptions_attribute(
+    Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
+    Array32(Jvm_attribute) * attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1718,7 +1713,7 @@ static void jvm_buf_read_exceptions_attribute(Str buf, u8 **current,
     pg_assert(exception_i <= class_file->constant_pool.len);
   }
 
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1843,7 +1838,7 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
 
 static void jvm_buf_read_runtime_invisible_annotations_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Jvm_attribute **attributes, Arena *arena) {
+    Array32(Jvm_attribute) * attributes, Arena *arena) {
 
   const u8 *const current_start = *current;
 
@@ -1861,7 +1856,7 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
     *array32_push(&attribute.v.runtime_invisible_annotations, arena) =
         annotation;
   }
-  pg_array_append(*attributes, attribute, arena);
+  *array32_push(attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1870,7 +1865,8 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
 
 static void jvm_buf_read_attribute(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Jvm_attribute **attributes, Arena *arena) {
+                                   Array32(Jvm_attribute) * attributes,
+                                   Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1958,7 +1954,8 @@ static void jvm_buf_read_attribute(Str buf, u8 **current,
 
 static void jvm_buf_read_attributes(Str buf, u8 **current,
                                     Class_file *class_file,
-                                    Jvm_attribute **attributes, Arena *arena) {
+                                    Array32(Jvm_attribute) * attributes,
+                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1966,7 +1963,7 @@ static void jvm_buf_read_attributes(Str buf, u8 **current,
   pg_assert(arena != NULL);
 
   const u16 attribute_count = buf_read_be_u16(buf, current);
-  pg_array_init_reserve(*attributes, attribute_count, arena);
+  *attributes = array32_make(Jvm_attribute, 0, attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
     jvm_buf_read_attribute(buf, current, class_file, attributes, arena);
@@ -2552,8 +2549,8 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
         (u32)sizeof(u16) // attributes length
         ;
 
-    for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
-      const Jvm_attribute *const child_attribute = &code->attributes[i];
+    for (u64 i = 0; i < code->attributes.len; i++) {
+      const Jvm_attribute *const child_attribute = &code->attributes.data[i];
       size += sizeof(u16) + sizeof(u32) +
               jvm_compute_attribute_size(child_attribute);
     }
@@ -2631,7 +2628,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
   pg_assert(0 && "unreachable");
 }
 
-static void jvm_write_attributes(FILE *file, const Jvm_attribute *attributes);
+static void jvm_write_attributes(FILE *file, Array32(Jvm_attribute) attributes);
 
 static void
 jvm_write_verification_info(FILE *file,
@@ -2793,12 +2790,13 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
   }
 }
 
-static void jvm_write_attributes(FILE *file, const Jvm_attribute *attributes) {
-  pg_assert(pg_array_len(attributes) <= UINT16_MAX);
-  file_write_be_u16(file, (u16)pg_array_len(attributes));
+static void jvm_write_attributes(FILE *file,
+                                 Array32(Jvm_attribute) attributes) {
+  pg_assert(attributes.len <= UINT16_MAX);
+  file_write_be_u16(file, (u16)attributes.len);
 
-  for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const Jvm_attribute *const attribute = &attributes[i];
+  for (u64 i = 0; i < attributes.len; i++) {
+    const Jvm_attribute *const attribute = &attributes.data[i];
     jvm_write_attribute(file, attribute);
   }
 }
@@ -2851,7 +2849,7 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   pg_array_init_reserve(class_file->methods, 64, arena);
   pg_array_init_reserve(class_file->fields, 64, arena);
 
-  pg_array_init_reserve(class_file->attributes, 64, arena);
+  class_file->attributes = array32_make(Jvm_attribute, 0, 64, arena);
 }
 
 static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
@@ -2859,7 +2857,7 @@ static void jvm_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
   pg_assert(arena != NULL);
 
   pg_array_init_reserve(code->bytecode, 512, arena);
-  pg_array_init_reserve(code->attributes, 4, arena);
+  code->attributes = array32_make(Jvm_attribute, 0, 4, arena);
   pg_array_init_reserve(code->exceptions, 0, arena);
 }
 
@@ -2940,8 +2938,8 @@ jvm_get_this_class_name(const Class_file *class_file) {
 
 static const Jvm_attribute *
 jvm_method_find_code_attribute(const Jvm_method *method) {
-  for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const Jvm_attribute *const attribute = &method->attributes[i];
+  for (u64 i = 0; i < method->attributes.len; i++) {
+    const Jvm_attribute *const attribute = &method->attributes.data[i];
 
     if (attribute->kind == ATTRIBUTE_KIND_CODE)
       return attribute;
@@ -2949,11 +2947,11 @@ jvm_method_find_code_attribute(const Jvm_method *method) {
   return NULL;
 }
 
-static const Jvm_attribute *
-jvm_attribute_by_kind(const Jvm_attribute *attributes,
-                      Jvm_attribute_kind kind) {
-  for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const Jvm_attribute *const attribute = &attributes[i];
+static const Jvm_attribute *jvm_attribute_by_kind(Array32(Jvm_attribute)
+                                                      attributes,
+                                                  Jvm_attribute_kind kind) {
+  for (u64 i = 0; i < attributes.len; i++) {
+    const Jvm_attribute *const attribute = &attributes.data[i];
 
     if (attribute->kind == kind)
       return attribute;
@@ -4963,8 +4961,8 @@ static Str resolver_function_to_human_string(const Resolver *resolver,
 static bool jvm_method_has_inline_only_annotation(const Class_file *class_file,
                                                   const Jvm_method *method) {
 
-  for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const Jvm_attribute *const attribute = &method->attributes[i];
+  for (u64 i = 0; i < method->attributes.len; i++) {
+    const Jvm_attribute *const attribute = &method->attributes.data[i];
     if (attribute->kind != ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS)
       continue;
 
@@ -5031,8 +5029,8 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
 
       // Clone code.
       // TODO: Clone exceptions, stack map frames, etc?
-      for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-        const Jvm_attribute *const attribute = &method->attributes[i];
+      for (u64 i = 0; i < method->attributes.len; i++) {
+        const Jvm_attribute *const attribute = &method->attributes.data[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           type.v.method.code = array32_make_from_c(
               u8, attribute->v.code.bytecode,
@@ -8333,7 +8331,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
-    pg_array_init_reserve(method.attributes, 1, arena);
+    method.attributes = array32_make(Jvm_attribute, 0, 1, arena);
 
     Jvm_attribute_code code = {0};
     jvm_attribute_code_init(&code, arena);
@@ -8399,14 +8397,14 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
                         gen->stack_map_frames.data[i], arena);
     }
 
-    pg_array_append(code.attributes, attribute_stack_map_frames, arena);
+    *array32_push(&code.attributes, arena) = attribute_stack_map_frames;
 
     const Jvm_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             jvm_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
-    pg_array_append(method.attributes, attribute_code, arena);
+    *array32_push(&method.attributes, arena) = attribute_code;
 
     pg_array_append(class_file->methods, method, arena);
 
@@ -8922,7 +8920,7 @@ static void codegen_emit_synthetic_class(codegen_generator *gen,
 
 static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
                               u16 name, u16 descriptor,
-                              Jvm_attribute *attributes, Arena *arena) {
+                              Array32(Jvm_attribute) attributes, Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
@@ -8986,8 +8984,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
   pg_assert((u16)method_i < pg_array_len(class_file->methods));
   const Jvm_method *const target_method = &class_file->methods[method_i];
 
-  Jvm_attribute *attributes = NULL;
-  pg_array_init_reserve(attributes, 1, arena);
+  Array32(Jvm_attribute) attributes = array32_make(Jvm_attribute, 0, 1, arena);
 
   // Generate code section for the new method.
   {
@@ -9085,7 +9082,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         .name =
             jvm_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
-    pg_array_append(attributes, attribute_code, arena);
+    *array32_push(&attributes ,arena)= attribute_code;
   }
 
   // Add new method.
