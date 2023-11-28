@@ -66,8 +66,7 @@ __attribute__((warn_unused_result)) static Str str_new(u8 *s, u64 n) {
   return (Str){.data = s, .len = n};
 }
 
-__attribute__((warn_unused_result)) static Str str_clone(Str s,
-                                                         Arena *arena) {
+__attribute__((warn_unused_result)) static Str str_clone(Str s, Arena *arena) {
   // Optimization: no alloc.
   if (s.len == 0)
     return s;
@@ -273,8 +272,8 @@ sb_capitalize_at(Str_builder sb, u64 pos) {
   return sb;
 }
 
-__attribute__((warn_unused_result)) static Str_builder
-sb_clone(Str src, Arena *arena) {
+__attribute__((warn_unused_result)) static Str_builder sb_clone(Str src,
+                                                                Arena *arena) {
   Str_builder res = sb_new(src.len, arena);
   pg_assert(res.data);
   pg_assert(src.len <= res.cap);
@@ -327,8 +326,7 @@ ut_read_all_from_fd(int fd, Str_builder sb) {
   return (Read_result){.content = sb_build(sb)};
 }
 
-__attribute__((warn_unused_result)) static char *str_to_c(Str s,
-                                                          Arena *arena) {
+__attribute__((warn_unused_result)) static char *str_to_c(Str s, Arena *arena) {
   char *c_str = arena_alloc(arena, sizeof(u8), _Alignof(u8), s.len + 1);
   if (s.data)
     memmove(c_str, s.data, s.len);
@@ -369,11 +367,12 @@ ut_read_all_from_file_path(char *path, Arena *arena) {
 
 typedef struct {
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
-  u64 *call_stack;
+  Array32(u64) call_stack;
 } Mem_record;
+Array32_struct(Mem_record);
 
 struct Mem_profile {
-  Mem_record *records;
+  Array32(Mem_record) records;
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
   Arena arena;
 };
@@ -416,11 +415,12 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
   profile->in_use_space += bytes_count;
 
   // Upsert the record.
-  for (u64 i = 0; i < pg_array_len(profile->records); i++) {
-    Mem_record *r = &profile->records[i];
+  for (u64 i = 0; i < profile->records.len; i++) {
+    Mem_record *r = &profile->records.data[i];
 
-    if (pg_array_len(r->call_stack) == call_stack_len &&
-        memcmp(r->call_stack, call_stack, call_stack_len * sizeof(u64)) == 0) {
+    if (r->call_stack.len == call_stack_len &&
+        memcmp(r->call_stack.data, call_stack, call_stack_len * sizeof(u64)) ==
+            0) {
       // Found an existing record, update it.
       r->alloc_objects += objects_count;
       r->alloc_space += bytes_count;
@@ -436,12 +436,11 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
       .in_use_space = bytes_count,
+      .call_stack =
+          array32_make_from_c(u64, call_stack, call_stack_len, &profile->arena),
   };
-  pg_array_init_reserve(record.call_stack, call_stack_len, &profile->arena);
-  memcpy(record.call_stack, call_stack, call_stack_len * sizeof(u64));
-  pg_array_header(record.call_stack)->len = call_stack_len;
 
-  pg_array_append(profile->records, record, &profile->arena);
+  *array32_push(&profile->records, &profile->arena) = record;
 }
 
 static void mem_profile_write(Mem_profile *profile, FILE *out) {
@@ -459,14 +458,14 @@ static void mem_profile_write(Mem_profile *profile, FILE *out) {
           profile->in_use_objects, profile->in_use_space,
           profile->alloc_objects, profile->alloc_space);
 
-  for (u64 i = 0; i < pg_array_len(profile->records); i++) {
-    Mem_record r = profile->records[i];
+  for (u64 i = 0; i < profile->records.len; i++) {
+    Mem_record r = profile->records.data[i];
 
     fprintf(out, "%lu: %lu [%lu: %lu] @ ", r.in_use_objects, r.in_use_space,
             r.alloc_objects, r.alloc_space);
 
-    for (u64 j = 0; j < pg_array_len(r.call_stack); j++) {
-      fprintf(out, "%#lx ", r.call_stack[j]);
+    for (u64 j = 0; j < r.call_stack.len; j++) {
+      fprintf(out, "%#lx ", r.call_stack.data[j]);
     }
     fputc('\n', out);
   }

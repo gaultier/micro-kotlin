@@ -130,41 +130,6 @@ int main(int argc, char *argv[]) {
 
   // This size should be at least the size of the biggest file we read.
   Arena scratch_arena = arena_new(256 * MiB, NULL);
-  Array32(int) ints = array32_make(int, 10, 20, &arena);
-  *array32_push(&ints, &arena) = 3;
-  *array32_push(&ints, &arena) = 4;
-  *array32_push(&ints, &arena) = 5;
-  *array32_push(&ints, &arena) = 6;
-  *array32_push(&ints, &arena) = 7;
-  *array32_push(&ints, &arena) = 8;
-  *array32_push(&ints, &arena) = 9;
-  *array32_push(&ints, &arena) = 10;
-  *array32_push(&ints, &arena) = 11;
-  *array32_push(&ints, &arena) = 12;
-  *array32_push(&ints, &arena) = 13;
-  *array32_push(&ints, &arena) = 14;
-  *array32_push(&ints, &arena) = 15;
-  *array32_push(&ints, &arena) = 16;
-  *array32_push(&ints, &arena) = 17;
-  *array32_push(&ints, &arena) = 18;
-  *array32_push(&ints, &arena) = 19;
-  *array32_push(&ints, &arena) = 20;
-  *array32_push(&ints, &arena) = 21;
-  *array32_push(&ints, &arena) = 22;
-  *array32_push(&ints, &arena) = 23;
-  *array32_push(&ints, &arena) = 24;
-  *array32_push(&ints, &arena) = 25;
-  *array32_push(&ints, &arena) = 26;
-  *array32_push(&ints, &arena) = 27;
-  *array32_push(&ints, &arena) = 28;
-  *array32_push(&ints, &arena) = 29;
-  *array32_push(&ints, &arena) = 30;
-  *array32_push(&ints, &arena) = 31;
-  *array32_push(&ints, &arena) = 32;
-  *array32_push(&ints, &arena) = 33;
-  *array32_push(&ints, &arena) = 34;
-  for (u32 i = 0; i < ints.len; i++)
-    printf("[D001] %d\n", ints.data[i]);
 
   Str *class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);

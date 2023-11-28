@@ -109,7 +109,11 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                          u32 item_align, Arena *arena) {
   *cap = *cap == 0 ? 16 : *cap * 2;
   void *new_data = arena_alloc(arena, item_size, item_align, *cap);
-  *data = memcpy(new_data, *data, len * item_size);
+  pg_assert(new_data);
+
+  if (*data && len > 0)
+    *data = memcpy(new_data, *data, len * item_size);
+  else *data=new_data;
 }
 
 #define array32_push(array, arena)                                             \
@@ -118,4 +122,19 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                   sizeof(*(array)->data), _Alignof(*(array)->data), arena),    \
    (array)->data + (array)->len++ : (array)->data + (array)->len++)
 
-// #define array32_foreach(array) for(u32 i=0
+#define array32_make_from_c(T, src, _len, arena)                               \
+  ((Array32(T)){                                                               \
+      .len = _len,                                                             \
+      .cap = _len,                                                             \
+      .data = (_len > 0)                                                       \
+                  ? memcpy(arena_alloc(arena, sizeof(T), _Alignof(T), _len),   \
+                           (void *)src, _len * sizeof(T))                      \
+                  : NULL,                                                      \
+  })
+
+Array32_struct(u8);
+Array32_struct(u16);
+Array32_struct(u32);
+Array32_struct(u64);
+Array32_struct(usize);
+Array32_struct(isize);
