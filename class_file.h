@@ -160,7 +160,7 @@ typedef struct {
   cg_frame_t *frame;
 } Stack_map_frame;
 
-enum __attribute__((packed)) ty_type_kind_t {
+enum __attribute__((packed)) Type_kind {
   TYPE_ANY = 0,
   TYPE_UNIT = 1 << 0,
   TYPE_BOOLEAN = 1 << 1,
@@ -178,7 +178,7 @@ enum __attribute__((packed)) ty_type_kind_t {
   TYPE_INTEGER_LITERAL = 1 << 13,
   TYPE_CONSTRUCTOR = 1 << 14,
 };
-typedef enum ty_type_kind_t ty_type_kind_t;
+typedef enum Type_kind Type_kind;
 
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
@@ -225,7 +225,7 @@ struct Type {
     u32 array_type_i;          // TYPE_ARRAY_REFERENCE
     u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
-  ty_type_kind_t kind;
+  Type_kind kind;
   u16 flags;
   u32 super_type_i;
 };
