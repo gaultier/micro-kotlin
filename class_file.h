@@ -114,7 +114,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_INVOKE_STATIC = 0xb8,
   BYTECODE_IMPDEP1 = 0xfe,
   BYTECODE_IMPDEP2 = 0xff,
-} Jvm_instruction;
+} Jvm_bytecode;
 
 typedef struct {
   u32 scope_depth;
