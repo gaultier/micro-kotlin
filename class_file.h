@@ -1129,25 +1129,28 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
   __builtin_unreachable();
 }
 
-struct Jvm_annotation;
-
 typedef struct {
   u16 type_name_index;
   u16 const_name_index;
 } Jvm_enum_const_value;
+
+typedef struct Jvm_element_value Jvm_element_value;
+Array32_struct(Jvm_element_value);
+
+typedef struct Jvm_annotation Jvm_annotation;
+Array32_struct(Jvm_annotation);
 
 struct Jvm_element_value {
   union {
     u16 const_value_index;
     Jvm_enum_const_value enum_const_value;
     u16 class_info_index;
-    struct Jvm_annotation *annotation_value;
-    struct Jvm_element_value *array_value;
+    Jvm_annotation *annotation_value;
+    Array32(Jvm_element_value) array_value;
   } v;
   u8 tag;
   pg_pad(7);
 };
-typedef struct Jvm_element_value Jvm_element_value;
 
 typedef struct {
   u16 element_name_index;
@@ -1160,8 +1163,6 @@ struct Jvm_annotation {
   pg_pad(6);
   Jvm_element_value_pair *element_value_pairs;
 };
-typedef struct Jvm_annotation Jvm_annotation;
-Array32_struct(Jvm_annotation);
 
 typedef struct Jvm_attribute Jvm_attribute;
 Array32_struct(Jvm_attribute);
@@ -1800,14 +1801,15 @@ static void jvm_buf_read_element_value(Str buf, u8 **current,
 
   case '[': {
     const u16 table_len = buf_read_be_u16(buf, current);
-    pg_array_init_reserve(element_value->v.array_value, table_len, arena);
+    element_value->v.array_value =
+        array32_make(Jvm_element_value, 0, table_len, arena);
 
     for (u64 i = 0; i < table_len; i++) {
       Jvm_element_value element_value_child = {0};
       jvm_buf_read_element_value(buf, current, class_file, &element_value_child,
                                  arena);
 
-      pg_array_append(element_value->v.array_value, element_value_child, arena);
+      *array32_push(&element_value->v.array_value, arena) = element_value_child;
     }
     break;
   }
