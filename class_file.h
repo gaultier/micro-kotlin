@@ -123,6 +123,7 @@ typedef struct {
   u32 var_definition_node_i;
   Str name;
 } Type_variable;
+Array32_struct(Type_variable);
 
 typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
@@ -388,7 +389,7 @@ typedef struct {
   Array32(Str) class_path_entries;
   Array32(Str) imported_package_names;
   u64 class_file_loaded_count;
-  Type_variable *variables;
+  Array32(Type_variable) variables;
   Array32(Type) types;
   u32 current_type_i;
   u32 scope_depth;
@@ -407,7 +408,7 @@ static void resolver_init(Resolver *resolver, Parser *parser,
   resolver->this_class_name =
       codegen_make_class_name_from_path(class_file_path, arena);
 
-  pg_array_init_reserve(resolver->variables, 512, arena);
+  resolver->variables = array32_make(Type_variable, 0, 512, arena);
   resolver->types = array32_make(Type, 0, 1 << 16, arena);
   resolver->imported_package_names = array32_make(Str, 0, 256, arena);
   *array32_push(&resolver->imported_package_names, arena) =
@@ -2846,7 +2847,7 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   pg_array_init_reserve(class_file->interfaces, 64, arena);
 
   class_file->methods = array32_make(Jvm_method, 0, 64, arena);
-  class_file->fields=array32_make(Jvm_field,0, 64, arena);
+  class_file->fields = array32_make(Jvm_field, 0, 64, arena);
 
   class_file->attributes = array32_make(Jvm_attribute, 0, 64, arena);
 }
@@ -6058,10 +6059,10 @@ static void typechecker_end_scope(Resolver *resolver) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
 
-  for (i64 i = (i64)pg_array_len(resolver->variables) - 1; i >= 0; i--) {
-    const Type_variable *const variable = &resolver->variables[i];
+  for (i64 i = (i64)resolver->variables.len - 1; i >= 0; i--) {
+    const Type_variable *const variable = &resolver->variables.data[i];
     if (variable->scope_depth == resolver->scope_depth)
-      pg_array_drop_last(resolver->variables);
+      array32_drop(&resolver->variables, 1);
     else if (variable->scope_depth < resolver->scope_depth)
       break;
     else
@@ -6074,43 +6075,41 @@ static u32 typechecker_declare_variable(Resolver *resolver, Str name,
                                         u32 node_i, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
-  pg_assert(resolver->variables != NULL);
   pg_assert(arena != NULL);
   pg_assert(node_i > 0);
 
-  pg_assert(pg_array_len(resolver->variables) < UINT32_MAX);
+  pg_assert(resolver->variables.len < UINT32_MAX);
 
   const Type_variable variable = {
       .name = name,
       .scope_depth = UINT32_MAX,
       .var_definition_node_i = node_i,
   };
-  pg_array_append(resolver->variables, variable, arena);
-  return (u32)pg_array_last_index(resolver->variables);
+  *array32_push(&resolver->variables, arena) = variable;
+  return (u32)array32_last_index(resolver->variables);
 }
 
 static void typechecker_mark_variable_as_initialized(Resolver *resolver,
                                                      u32 variable_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
-  pg_assert(variable_i < pg_array_len(resolver->variables));
+  pg_assert(variable_i < resolver->variables.len);
 
   // Should this function be idempotent? In that case, this assert should be
   // removed.
-  pg_assert(resolver->variables[variable_i].scope_depth == (u32)-1);
+  pg_assert(resolver->variables.data[variable_i].scope_depth == (u32)-1);
 
-  resolver->variables[variable_i].scope_depth = resolver->scope_depth;
+  resolver->variables.data[variable_i].scope_depth = resolver->scope_depth;
 }
 
 static u32 typechecker_find_variable(Resolver *resolver, u32 token_i) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
-  pg_assert(resolver->variables != NULL);
 
   Str name = parser_token_to_str_view(resolver->parser, token_i);
 
-  for (i64 i = (i64)pg_array_len(resolver->variables) - 1; i >= 0; i--) {
-    const Type_variable *const variable = &resolver->variables[i];
+  for (i64 i = (i64)resolver->variables.len - 1; i >= 0; i--) {
+    const Type_variable *const variable = &resolver->variables.data[i];
     if (!str_eq(name, variable->name))
       continue;
 
@@ -6155,9 +6154,9 @@ static bool typechecker_variable_shadows(Resolver *resolver, u32 name_token_i) {
   if (previous_var_i == (u32)-1)
     return false;
 
-  pg_assert(previous_var_i < pg_array_len(resolver->variables));
+  pg_assert(previous_var_i < resolver->variables.len);
   const Type_variable *const previous_var =
-      &resolver->variables[previous_var_i];
+      &resolver->variables.data[previous_var_i];
 
   pg_assert(previous_var->var_definition_node_i > 0);
   pg_assert(previous_var->var_definition_node_i < resolver->parser->nodes.len);
@@ -6607,7 +6606,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     }
 
     node->kind = AST_KIND_VAR_REFERENCE;
-    node->lhs = resolver->variables[variable_i].var_definition_node_i;
+    node->lhs = resolver->variables.data[variable_i].var_definition_node_i;
 
     return resolver_resolve_node(resolver, node_i, scratch_arena, arena);
 
