@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
       return 1; // TODO: Should type checking still proceed?
 
     const Str class_file_path =
-        cf_make_class_file_path_kt(source_file_name, &arena);
+        jvm_make_class_file_path_kt(source_file_name, &arena);
 
     Resolver resolver = {0};
     resolver_init(&resolver, &parser, class_path_entries, class_file_path,
@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
             17, // TODO: Add a CLI option to choose the jdk/jre version
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
-    cf_init(&class_file, &arena);
+    jvm_init(&class_file, &arena);
     cg_emit(&resolver, &class_file, root_i, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
               strerror(errno));
       return errno;
     }
-    cf_write(&class_file, file);
+    jvm_write(&class_file, file);
     fclose(file);
 
     LOG("nodes=%lu sizeof(par_ast_node_t)=%lu mem=%lu",
@@ -253,7 +253,7 @@ int main(int argc, char *argv[]) {
       Class_file class_file_verify = {.class_file_path =
                                                class_file.class_file_path};
       u8 *current = read_res.content.data;
-      cf_buf_read_class_file(read_res.content, &current, &class_file_verify,
+      jvm_buf_read_class_file(read_res.content, &current, &class_file_verify,
                              &scratch_arena);
     }
   }
