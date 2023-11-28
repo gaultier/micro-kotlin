@@ -127,7 +127,7 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
   ((Array32(T)){                                                               \
       .len = _len,                                                             \
       .cap = _len,                                                             \
-      .data = (_len > 0)                                                       \
+      .data = ((_len) > 0)                                                     \
                   ? memcpy(arena_alloc(arena, sizeof(T), _Alignof(T), _len),   \
                            (void *)src, _len * sizeof(T))                      \
                   : NULL,                                                      \
@@ -136,13 +136,27 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 #define array32_is_empty(array) (array.len == 0)
 
 #define array32_last(array)                                                    \
-  (pg_assert(!array32_is_empty(array) && array.data != NULL),                  \
-   &(array).data[array.len - 1])
+  (pg_assert(!array32_is_empty(array) && (array).data != NULL),                \
+   &(array).data[(array).len - 1])
+
+#define array32_penultimate(array)                                             \
+  (pg_assert((array).len >= 2 && (array).data != NULL),                        \
+   &(array).data[(array).len - 2])
 
 #define array32_last_index(array)                                              \
   (pg_assert(!array32_is_empty(array)), (array).len - 1)
 
 #define array32_clear(array) (array)->len = 0
+
+#define array32_drop(array, n)                                                 \
+  (array)->len = ((array)->len > n ? 0 : (array)->len - n)
+
+#define array32_clone(T, dst, src, arena)                                      \
+  do {                                                                         \
+    *(dst) = array32_make(T, (src).len, (src).len, arena);                     \
+    if ((src).len > 0)                                                         \
+      memcpy((dst)->data, (src).data, (src).len);                              \
+  } while (0)
 
 Array32_struct(u8);
 Array32_struct(u16);

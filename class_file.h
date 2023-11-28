@@ -140,6 +140,7 @@ typedef struct {
   pg_pad(1);
   u16 extra_data;
 } Jvm_verification_info;
+Array32_struct(Jvm_verification_info);
 
 typedef struct {
   u32 node_i;
@@ -147,6 +148,7 @@ typedef struct {
   u32 scope_depth;
   Jvm_verification_info verification_info;
 } Jvm_variable;
+Array32_struct(Jvm_variable);
 
 struct codegen_frame;
 typedef struct codegen_frame codegen_frame;
@@ -186,8 +188,8 @@ typedef enum Type_kind Type_kind;
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct codegen_frame {
-  Jvm_variable *locals;
-  Jvm_verification_info *stack;
+  Array32(Jvm_variable) locals;
+  Array32(Jvm_verification_info) stack;
   u16 max_physical_stack;
   u16 max_physical_locals;
   u32 scope_depth;
@@ -703,7 +705,7 @@ static void codegen_frame_stack_push(codegen_frame *frame,
       jvm_verification_info_kind_word_count(verification_info.kind);
 
   pg_assert(frame->stack_physical_count + word_count < UINT16_MAX);
-  pg_array_append(frame->stack, verification_info, arena);
+  *array32_push(&frame->stack, arena) = verification_info;
 
   frame->stack_physical_count += word_count;
   frame->max_physical_stack =
@@ -712,11 +714,11 @@ static void codegen_frame_stack_push(codegen_frame *frame,
 
 static void codegen_frame_stack_pop(codegen_frame *frame) {
   pg_assert(frame != NULL);
-  pg_assert(pg_array_len(frame->stack) >= 1);
+  pg_assert(frame->stack.len >= 1);
   pg_assert(frame->stack_physical_count >= 1);
   pg_assert(frame->max_physical_stack >= 1);
 
-  pg_array_drop_last(frame->stack);
+  array32_drop(&frame->stack, 1);
 
   frame->stack_physical_count -= 1;
 }
@@ -856,16 +858,14 @@ static void codegen_frame_init(codegen_frame *frame, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  pg_array_init_reserve(frame->locals, 32, arena);
-  pg_array_init_reserve(frame->stack, 256, arena);
+  frame->locals = array32_make(Jvm_variable, 0, 512, arena);
+  frame->stack = array32_make(Jvm_verification_info, 0, 256, arena);
 }
 
 static codegen_frame *codegen_frame_clone(const codegen_frame *src,
                                           Arena *arena) {
   pg_assert(src != NULL);
-  pg_assert(src->stack != NULL);
-  pg_assert(pg_array_len(src->stack) <= UINT16_MAX);
-  pg_assert(src->locals != NULL);
+  pg_assert(src->stack.len <= UINT16_MAX);
   pg_assert(arena != NULL);
 
   codegen_frame *dst =
@@ -878,14 +878,8 @@ static codegen_frame *codegen_frame_clone(const codegen_frame *src,
   dst->stack_physical_count = src->stack_physical_count;
   dst->locals_physical_count = src->locals_physical_count;
 
-  for (u64 i = 0; i < pg_array_len(src->locals); i++)
-    pg_array_append(dst->locals, src->locals[i], arena);
-
-  for (u64 i = 0; i < pg_array_len(src->stack); i++)
-    pg_array_append(dst->stack, src->stack[i], arena);
-
-  pg_assert(pg_array_len(dst->locals) == pg_array_len(src->locals));
-  pg_assert(pg_array_len(dst->stack) == pg_array_len(src->stack));
+  array32_clone(Jvm_variable, &dst->locals, src->locals, arena);
+  array32_clone(Jvm_verification_info, &dst->stack, src->stack, arena);
 
   return dst;
 }
@@ -2473,7 +2467,7 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     const Jvm_verification_info verification_info =
-        *pg_array_last(stack_map_frame->frame->stack);
+        *array32_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return jvm_compute_verification_info_size(verification_info);
@@ -2484,7 +2478,7 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
     const Jvm_verification_info verification_info =
-        *pg_array_last(stack_map_frame->frame->stack);
+        *array32_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return jvm_compute_verification_info_size(verification_info);
@@ -2499,10 +2493,10 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
     const u64 count = stack_map_frame->kind - 251;
     u32 size = 0;
 
-    for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
-         i < pg_array_len(stack_map_frame->frame->locals); i++) {
+    for (u64 i = stack_map_frame->frame->locals.len - count;
+         i < stack_map_frame->frame->locals.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->locals[i].verification_info;
+          stack_map_frame->frame->locals.data[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2512,18 +2506,18 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
     return size;
   } else { // full_frame
     u32 size = 0;
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
+    for (u64 i = 0; i < stack_map_frame->frame->locals.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->locals[i].verification_info;
+          stack_map_frame->frame->locals.data[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
       size += jvm_compute_verification_info_size(verification_info);
     }
 
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
+    for (u64 i = 0; i < stack_map_frame->frame->stack.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->stack[i];
+          stack_map_frame->frame->stack.data[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2660,7 +2654,7 @@ jvm_write_stack_map_table_attribute(FILE *file,
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     file_write_u8(file, stack_map_frame->kind);
     jvm_write_verification_info(file,
-                                *pg_array_last(stack_map_frame->frame->stack));
+                                *array32_last(stack_map_frame->frame->stack));
   } else if (128 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
@@ -2681,10 +2675,10 @@ jvm_write_stack_map_table_attribute(FILE *file,
     file_write_be_u16(file, stack_map_frame->offset_delta);
 
     const u64 count = stack_map_frame->kind - 251;
-    for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
-         i < pg_array_len(stack_map_frame->frame->locals); i++) {
+    for (u64 i = stack_map_frame->frame->locals.len - count;
+         i < stack_map_frame->frame->locals.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->locals[i].verification_info;
+          stack_map_frame->frame->locals.data[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2695,21 +2689,21 @@ jvm_write_stack_map_table_attribute(FILE *file,
 
     file_write_u8(file, stack_map_frame->kind);
     file_write_be_u16(file, stack_map_frame->offset_delta);
-    file_write_be_u16(file, pg_array_len(stack_map_frame->frame->locals));
+    file_write_be_u16(file, stack_map_frame->frame->locals.len);
 
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
+    for (u64 i = 0; i < stack_map_frame->frame->locals.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->locals[i].verification_info;
+          stack_map_frame->frame->locals.data[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
       jvm_write_verification_info(file, verification_info);
     }
 
-    file_write_be_u16(file, pg_array_len(stack_map_frame->frame->stack));
-    for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
+    file_write_be_u16(file, stack_map_frame->frame->stack.len);
+    for (u64 i = 0; i < stack_map_frame->frame->stack.len; i++) {
       const Jvm_verification_info verification_info =
-          stack_map_frame->frame->stack[i];
+          stack_map_frame->frame->stack.data[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -6794,12 +6788,12 @@ static void codegen_frame_locals_push(codegen_generator *gen,
 
   pg_assert(gen->frame->locals_physical_count + 1 < UINT16_MAX);
 
-  pg_array_append(gen->frame->locals, *variable, arena);
+  *array32_push(&gen->frame->locals, arena) = *variable;
 
   const u64 word_count =
       jvm_verification_info_kind_word_count(variable->verification_info.kind);
 
-  *logical_local_index = pg_array_last_index(gen->frame->locals);
+  *logical_local_index = array32_last_index(gen->frame->locals);
   *physical_local_index = gen->frame->locals_physical_count;
   gen->frame->locals_physical_count += word_count;
   gen->frame->max_physical_locals = pg_max(gen->frame->max_physical_locals,
@@ -6900,9 +6894,7 @@ static u16 codegen_emit_jump_conditionally(codegen_generator *gen,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, jump_opcode, arena);
   const u16 jump_from_i = pg_array_len(gen->code->bytecode);
@@ -6935,9 +6927,7 @@ static u16 codegen_emit_jump(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_GOTO, arena);
   const u16 from_location = pg_array_len(gen->code->bytecode);
@@ -6952,9 +6942,7 @@ static void codegen_emit_pop(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_POP, arena);
 
@@ -6967,13 +6955,11 @@ static void codegen_emit_store_variable_int(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) > 0);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len > 0);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
+  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ISTORE, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -6987,13 +6973,11 @@ static void codegen_emit_store_variable_object(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) > 0);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len > 0);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_last(gen->frame->stack)->kind == VERIFICATION_INFO_OBJECT);
+  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_OBJECT);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ASTORE, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7007,13 +6991,11 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) > 0);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len > 0);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_last(gen->frame->stack)->kind == VERIFICATION_INFO_LONG);
+  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_LONG);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LSTORE, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7023,12 +7005,11 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
 
 static void codegen_emit_store_variable(codegen_generator *gen, u8 var_i,
                                         Arena *arena) {
-  pg_assert(pg_array_len(gen->frame->stack) > 0);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len > 0);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  const Jvm_verification_info_kind kind =
-      pg_array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7051,11 +7032,9 @@ static void codegen_emit_load_variable_int(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_len(gen->frame->locals) > 0);
+  pg_assert(gen->frame->locals.len > 0);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ILOAD, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7071,11 +7050,9 @@ static void codegen_emit_load_variable_object(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_len(gen->frame->locals) > 0);
+  pg_assert(gen->frame->locals.len > 0);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_ALOAD, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7114,11 +7091,9 @@ static void codegen_emit_load_variable_long(codegen_generator *gen, u8 var_i,
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->locals != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(pg_array_len(gen->frame->locals) > 0);
+  pg_assert(gen->frame->locals.len > 0);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LLOAD, arena);
   jvm_code_array_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7135,14 +7110,13 @@ static void codegen_emit_get_static(codegen_generator *gen, u16 field_i,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(field_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
   pg_assert(arena != NULL);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_GET_STATIC, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, field_i, arena);
 
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
 
   const Jvm_verification_info verification_info = {
       .kind = VERIFICATION_INFO_OBJECT,
@@ -7160,8 +7134,7 @@ static void codegen_emit_invoke_virtual(codegen_generator *gen,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_VIRTUAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
@@ -7190,8 +7163,7 @@ static void codegen_emit_invoke_static(codegen_generator *gen, u16 method_ref_i,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_STATIC, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
@@ -7221,8 +7193,7 @@ static void codegen_emit_invoke_special(codegen_generator *gen,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(method_ref_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_INVOKE_SPECIAL, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, method_ref_i, arena);
@@ -7278,7 +7249,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
   Array32(u8) code = method->code;
   u8 *current = code.data;
 
-  u64 stack_size_before_inline_snippet = pg_array_len(gen->frame->stack);
+  u64 stack_size_before_inline_snippet = gen->frame->stack.len;
 
   while (current < array32_last(code)) {
     const u8 opcode = buf_read_u8(str_new(code.data, code_size), &current);
@@ -7404,7 +7375,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
       pg_assert(0 && "unimplemented");
     }
   }
-  u64 stack_size_after_inline_snippet = pg_array_len(gen->frame->stack);
+  u64 stack_size_after_inline_snippet = gen->frame->stack.len;
 
   // Not conceptually required but we do not support inlining snippets that
   // enlarge/shrink the stack right now.
@@ -7417,15 +7388,13 @@ static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
+
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
+      array32_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7448,11 +7417,8 @@ static void codegen_emit_neg(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 1);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const Jvm_verification_info_kind kind =
-      pg_array_last(gen->frame->stack)->kind;
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
+  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7504,12 +7470,10 @@ static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind ==
-            VERIFICATION_INFO_INT);
-  pg_assert(gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind ==
+  pg_assert(gen->frame->stack.len >= 2);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
+  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
+  pg_assert(array32_penultimate(gen->frame->stack)->kind ==
             VERIFICATION_INFO_INT);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_IXOR, arena);
@@ -7522,15 +7486,12 @@ static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7553,15 +7514,13 @@ static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7584,15 +7543,13 @@ static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7619,14 +7576,13 @@ codegen_emit_load_constant_single_word(codegen_generator *gen, u16 constant_i,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(constant_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(jvm_verification_info_kind_word_count(verification_info.kind) == 1);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, constant_i, arena);
 
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
 
   codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
@@ -7640,14 +7596,13 @@ codegen_emit_load_constant_double_word(codegen_generator *gen, u16 constant_i,
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(constant_i > 0);
   pg_assert(gen->frame != NULL);
-  pg_assert(gen->frame->stack != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
   pg_assert(jvm_verification_info_kind_word_count(verification_info.kind) == 2);
 
   jvm_code_array_push_u8(&gen->code->bytecode, BYTECODE_LDC2_W, arena);
   jvm_code_array_push_u16(&gen->code->bytecode, constant_i, arena);
 
-  pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
+  pg_assert(gen->frame->stack.len < UINT16_MAX);
 
   codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
@@ -7667,10 +7622,9 @@ static void codegen_emit_return_value(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code->bytecode != NULL);
   pg_assert(arena != NULL);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 1);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const Jvm_verification_info_kind kind =
-      pg_array_last(gen->frame->stack)->kind;
+  pg_assert(gen->frame->stack.len >= 1);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
+  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7710,8 +7664,8 @@ static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
   pg_assert(frame != NULL);
 
   u64 to_drop = 0;
-  for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const Jvm_variable *const variable = &frame->locals[i];
+  for (i64 i = frame->locals.len - 1; i >= 0; i--) {
+    const Jvm_variable *const variable = &frame->locals.data[i];
     if (variable->scope_depth < frame->scope_depth)
       break;
 
@@ -7720,7 +7674,7 @@ static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
     to_drop += 1;
   }
 
-  pg_array_drop_last_n(frame->locals, to_drop);
+  array32_drop(&frame->locals, to_drop);
 }
 
 static void codegen_end_scope(codegen_generator *gen) {
@@ -7739,14 +7693,13 @@ static bool jvm_find_variable(const codegen_frame *frame, u32 node_i,
                               u16 *logical_local_index,
                               u16 *physical_local_index) {
   pg_assert(frame != NULL);
-  pg_assert(frame->locals != NULL);
   pg_assert(node_i > 0);
   pg_assert(logical_local_index != NULL);
   pg_assert(physical_local_index != NULL);
 
   *physical_local_index = frame->locals_physical_count;
-  for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const Jvm_variable *const variable = &frame->locals[i];
+  for (i64 i = frame->locals.len - 1; i >= 0; i--) {
+    const Jvm_variable *const variable = &frame->locals.data[i];
     *physical_local_index -=
         jvm_verification_info_kind_word_count(variable->verification_info.kind);
     if (variable->node_i != node_i)
@@ -7831,14 +7784,13 @@ static void codegen_emit_synthetic_if_then_else(codegen_generator *gen,
 
 static void codegen_emit_gt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7858,14 +7810,13 @@ static void codegen_emit_gt(codegen_generator *gen, Arena *arena) {
 
 static void codegen_emit_ne(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7884,14 +7835,13 @@ static void codegen_emit_ne(codegen_generator *gen, Arena *arena) {
 
 static void codegen_emit_eq(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7910,14 +7860,13 @@ static void codegen_emit_eq(codegen_generator *gen, Arena *arena) {
 
 static void codegen_emit_ge(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
+  pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  pg_assert(pg_array_len(gen->frame->stack) >= 2);
   const Jvm_verification_info_kind kind_a =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
+      array32_last(gen->frame->stack)->kind;
+
   const Jvm_verification_info_kind kind_b =
-      gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
+      array32_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
