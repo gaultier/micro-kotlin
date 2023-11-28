@@ -113,7 +113,8 @@ static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
 
   if (*data && len > 0)
     *data = memcpy(new_data, *data, len * item_size);
-  else *data=new_data;
+  else
+    *data = new_data;
 }
 
 #define array32_push(array, arena)                                             \

@@ -25,7 +25,18 @@ typedef struct {
   u8 *data;
   u64 len;
 } Str;
+Array32_struct(Str);
 
+__attribute__((warn_unused_result)) static u32 str_count(Str s, u8 c) {
+  u32 res = 0;
+
+  for (u64 i = 0; i < s.len; i++) {
+    if (s.data[i] == c) {
+      res += 1;
+    }
+  }
+  return res;
+}
 __attribute__((warn_unused_result)) static Str str_from_c(char *s) {
   return (Str){.data = (u8 *)s, .len = s == NULL ? 0 : strlen(s)};
 }
