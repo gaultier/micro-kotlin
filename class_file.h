@@ -1173,6 +1173,7 @@ typedef struct {
   pg_pad(2);
   Array32(Jvm_attribute) attributes;
 } Jvm_field;
+Array32_struct(Jvm_field);
 
 typedef struct Jvm_method Jvm_method;
 Array32_struct(Jvm_method);
@@ -1254,7 +1255,7 @@ struct Jvm_class_file {
   u16 fields_count;
   pg_pad(2);
   u16 *interfaces;
-  Jvm_field *fields;
+  Array32(Jvm_field) fields;
   Array32(Jvm_method) methods;
   Array32(Jvm_attribute) attributes;
   Jvm_constant_pool constant_pool;
@@ -2281,14 +2282,14 @@ static void jvm_buf_read_field(Str buf, u8 **current, Class_file *class_file,
 
   jvm_buf_read_attributes(buf, current, class_file, &field.attributes, arena);
 
-  pg_array_append(class_file->fields, field, arena);
+  *array32_push(&class_file->fields, arena) = field;
 }
 
 static void jvm_buf_read_fields(Str buf, u8 **current, Class_file *class_file,
                                 Arena *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, current);
-  pg_array_init_reserve(class_file->fields, fields_count, arena);
+  class_file->fields = array32_make(Jvm_field, 0, fields_count, arena);
 
   for (u16 i = 0; i < fields_count; i++) {
     jvm_buf_read_field(buf, current, class_file, arena);
@@ -2845,7 +2846,7 @@ static void jvm_init(Class_file *class_file, Arena *arena) {
   pg_array_init_reserve(class_file->interfaces, 64, arena);
 
   class_file->methods = array32_make(Jvm_method, 0, 64, arena);
-  pg_array_init_reserve(class_file->fields, 64, arena);
+  class_file->fields=array32_make(Jvm_field,0, 64, arena);
 
   class_file->attributes = array32_make(Jvm_attribute, 0, 64, arena);
 }
