@@ -228,9 +228,8 @@ int main(int argc, char *argv[]) {
     jvm_write(&class_file, file);
     fclose(file);
 
-    LOG("nodes=%lu sizeof(parser_ast_node_t)=%lu mem=%lu",
-        pg_array_len(parser.nodes), sizeof(Ast),
-        pg_array_len(parser.nodes) * sizeof(Ast));
+    LOG("nodes=%u sizeof(parser_ast_node_t)=%lu mem=%lu", parser.nodes.len,
+        sizeof(Ast), parser.nodes.len * sizeof(Ast));
     LOG("types=%lu sizeof(Type)=%lu mem=%lu", pg_array_len(resolver.types),
         sizeof(Type), pg_array_len(resolver.types) * sizeof(Type));
 
