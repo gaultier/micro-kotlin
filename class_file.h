@@ -114,7 +114,7 @@ typedef enum __attribute__((packed)) {
   BYTECODE_INVOKE_STATIC = 0xb8,
   BYTECODE_IMPDEP1 = 0xfe,
   BYTECODE_IMPDEP2 = 0xff,
-} Cf_op_kind;
+} Jvm_instruction;
 
 typedef struct {
   u32 scope_depth;
@@ -131,20 +131,20 @@ typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_NULL = 6,
   VERIFICATION_INFO_OBJECT = 7,
   VERIFICATION_INFO_UNINITIALIZED = 8,
-} Jvm_verification_info;
+} Jvm_verification_info_kind;
 
 typedef struct {
-  Jvm_verification_info kind;
+  Jvm_verification_info_kind kind;
   pg_pad(1);
   u16 extra_data;
-} Cf_verification_info;
+} Jvm_verification_info;
 
 typedef struct {
   u32 node_i;
   u32 type_i;
   u32 scope_depth;
-  Cf_verification_info verification_info;
-} Cf_variable;
+  Jvm_verification_info verification_info;
+} Jvm_variable;
 
 struct Cg_frame;
 typedef struct Cg_frame Cg_frame;
@@ -183,8 +183,8 @@ typedef enum Type_kind Type_kind;
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct Cg_frame {
-  Cf_variable *locals;
-  Cf_verification_info *stack;
+  Jvm_variable *locals;
+  Jvm_verification_info *stack;
   u16 max_physical_stack;
   u16 max_physical_locals;
   u32 scope_depth;
@@ -651,7 +651,7 @@ static u32 resolver_add_type(Resolver *resolver, Type *new_type,
                              Arena *arena);
 
 static u16
-cf_verification_info_kind_word_count(Jvm_verification_info kind) {
+cf_verification_info_kind_word_count(Jvm_verification_info_kind kind) {
   switch (kind) {
   case VERIFICATION_INFO_TOP:
   case VERIFICATION_INFO_INT:
@@ -667,7 +667,7 @@ cf_verification_info_kind_word_count(Jvm_verification_info kind) {
   pg_assert(0 && "unreachable");
 }
 
-static Cf_verification_info
+static Jvm_verification_info
 cg_type_to_verification_info(const Type *type) {
 
   switch (type->kind) {
@@ -676,16 +676,16 @@ cg_type_to_verification_info(const Type *type) {
   case TYPE_CHAR:
   case TYPE_SHORT:
   case TYPE_INT:
-    return (Cf_verification_info){.kind = VERIFICATION_INFO_INT};
+    return (Jvm_verification_info){.kind = VERIFICATION_INFO_INT};
   case TYPE_LONG:
-    return (Cf_verification_info){.kind = VERIFICATION_INFO_LONG};
+    return (Jvm_verification_info){.kind = VERIFICATION_INFO_LONG};
   case TYPE_FLOAT:
-    return (Cf_verification_info){.kind = VERIFICATION_INFO_FLOAT};
+    return (Jvm_verification_info){.kind = VERIFICATION_INFO_FLOAT};
   case TYPE_DOUBLE:
-    return (Cf_verification_info){.kind = VERIFICATION_INFO_DOUBLE};
+    return (Jvm_verification_info){.kind = VERIFICATION_INFO_DOUBLE};
   case TYPE_INSTANCE:
   case TYPE_STRING:
-    return (Cf_verification_info){
+    return (Jvm_verification_info){
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = 0, // Patched later.
     };
@@ -696,7 +696,7 @@ cg_type_to_verification_info(const Type *type) {
 }
 
 static void cg_frame_stack_push(Cg_frame *frame,
-                                Cf_verification_info verification_info,
+                                Jvm_verification_info verification_info,
                                 Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
@@ -1134,84 +1134,84 @@ static Str cf_parse_descriptor(Resolver *resolver, Str descriptor,
   __builtin_unreachable();
 }
 
-struct Cf_annotation;
+struct Jvm_annotation;
 
 typedef struct {
   u16 type_name_index;
   u16 const_name_index;
-} Cf_enum_const_value;
+} Jvm_enum_const_value;
 
-struct Cf_element_value {
+struct Jvm_element_value {
   union {
     u16 const_value_index;
-    Cf_enum_const_value enum_const_value;
+    Jvm_enum_const_value enum_const_value;
     u16 class_info_index;
-    struct Cf_annotation *annotation_value;
-    struct Cf_element_value *array_value;
+    struct Jvm_annotation *annotation_value;
+    struct Jvm_element_value *array_value;
   } v;
   u8 tag;
   pg_pad(7);
 };
-typedef struct Cf_element_value Cf_element_value;
+typedef struct Jvm_element_value Jvm_element_value;
 
 typedef struct {
   u16 element_name_index;
   pg_pad(6);
-  Cf_element_value element_value;
-} Cf_element_value_pair;
+  Jvm_element_value element_value;
+} Jvm_element_value_pair;
 
-struct Cf_annotation {
+struct Jvm_annotation {
   u16 type_index;
   pg_pad(6);
-  Cf_element_value_pair *element_value_pairs;
+  Jvm_element_value_pair *element_value_pairs;
 };
-typedef struct Cf_annotation Cf_annotation;
+typedef struct Jvm_annotation Jvm_annotation;
 
-typedef struct Cf_attribute Cf_attribute;
+typedef struct Jvm_attribute Jvm_attribute;
 
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Cf_attribute *attributes;
-} Cf_field;
+  Jvm_attribute *attributes;
+} Jvm_field;
 
-typedef struct Cf_method Cf_method;
+typedef struct Jvm_method Jvm_method;
 
-typedef struct Cf_interfaces Cf_interfaces;
+typedef struct Jvm_interfaces Jvm_interfaces;
 
 typedef struct {
   u16 start_pc;
   u16 line_number;
-} Cf_line_number_table_entry;
+} Jvm_line_number_table_entry;
 
-struct Cf_attribute {
+struct Jvm_attribute {
   union {
-    struct Cf_attribute_code {
+    struct Jvm_attribute_code {
       u16 max_physical_stack;
       u16 max_physical_locals;
       pg_pad(4);
       u8 *code;
       Jvm_Exception *exceptions;
-      Cf_attribute *attributes;
+      Jvm_attribute *attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
-    struct Cf_attribute_source_file {
+    struct Jvm_attribute_source_file {
       u16 source_file;
     } source_file; // ATTRIBUTE_KIND_SOURCE_FILE
 
-    Cf_line_number_table_entry
+    Jvm_line_number_table_entry
         *line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
     Stack_map_frame *stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
-    Cf_annotation *
+    Jvm_annotation *
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
     u16 *exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
   } v;
   u16 name;
-  enum __attribute__((packed)) Cf_attribute_kind {
+  enum __attribute__((packed)) Jvm_attribute_kind {
     ATTRIBUTE_KIND_SOURCE_FILE,
     ATTRIBUTE_KIND_CODE,
     ATTRIBUTE_KIND_LINE_NUMBER_TABLE,
@@ -1222,21 +1222,21 @@ struct Cf_attribute {
   pg_pad(5);
 };
 
-typedef enum Cf_attribute_kind Cf_attribute_kind;
+typedef enum Jvm_attribute_kind Jvm_attribute_kind;
 
-typedef struct Cf_attribute_line_number_table
-    Cf_attribute_line_number_table;
+typedef struct Jvm_attribute_line_number_table
+    Jvm_attribute_line_number_table;
 
-typedef struct Cf_attribute_code Cf_attribute_code;
+typedef struct Jvm_attribute_code Jvm_attribute_code;
 
-typedef struct Cf_attribute_source_file Cf_attribute_source_file;
+typedef struct Jvm_attribute_source_file Jvm_attribute_source_file;
 
-struct Cf_method {
+struct Jvm_method {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Cf_attribute *attributes;
+  Jvm_attribute *attributes;
 };
 
 const u32 cf_MAGIC_NUMBER = 0xbebafeca;
@@ -1244,7 +1244,7 @@ const u16 cf_MAJOR_VERSION_6 = 50;
 const u16 cf_MAJOR_VERSION_7 = 51;
 const u16 cf_MINOR_VERSION = 0;
 
-struct Cf_class_file {
+struct Jvm_class_file {
   Str archive_file_path;
   Str class_file_path;
   Str class_name;
@@ -1257,12 +1257,12 @@ struct Cf_class_file {
   u16 fields_count;
   pg_pad(2);
   u16 *interfaces;
-  Cf_field *fields;
-  Cf_method *methods;
-  Cf_attribute *attributes;
+  Jvm_field *fields;
+  Jvm_method *methods;
+  Jvm_attribute *attributes;
   Jvm_constant_pool constant_pool;
 };
-typedef struct Cf_class_file Class_file;
+typedef struct Jvm_class_file Class_file;
 
 static void file_write_u8(FILE *file, u8 x) {
   pg_assert(file != NULL);
@@ -1379,11 +1379,11 @@ cf_constant_array_get_as_string(const Jvm_constant_pool *constant_pool,
 
 static void cf_buf_read_attributes(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Cf_attribute **attributes, Arena *arena);
+                                   Jvm_attribute **attributes, Arena *arena);
 
 static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
                                              Class_file *class_file,
-                                             Cf_attribute **attributes,
+                                             Jvm_attribute **attributes,
                                              Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
@@ -1394,7 +1394,7 @@ static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
 
   const u8 *const current_start = *current;
 
-  Cf_attribute_source_file source_file = {0};
+  Jvm_attribute_source_file source_file = {0};
   source_file.source_file = buf_read_be_u16(buf, current);
   pg_assert(source_file.source_file > 0);
   pg_assert(source_file.source_file <= class_file->constant_pool.len);
@@ -1403,7 +1403,7 @@ static void cf_buf_read_sourcefile_attribute(Str buf, u8 **current,
   const u64 read_bytes = current_end - current_start;
   pg_assert(read_bytes == 2);
 
-  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
+  Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                               .v = {.source_file = source_file}};
   pg_array_append(*attributes, attribute, arena);
 }
@@ -1441,7 +1441,7 @@ static void cf_buf_read_code_attribute_exceptions(Str buf, u8 **current,
 static void cf_buf_read_code_attribute(Str buf, u8 **current,
                                        Class_file *class_file,
                                        u32 attribute_len, u16 name_i,
-                                       Cf_attribute **attributes,
+                                       Jvm_attribute **attributes,
                                        Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1453,7 +1453,7 @@ static void cf_buf_read_code_attribute(Str buf, u8 **current,
 
   const u8 *const current_start = *current;
 
-  Cf_attribute_code code = {0};
+  Jvm_attribute_code code = {0};
   code.max_physical_stack = buf_read_be_u16(buf, current);
   code.max_physical_locals = buf_read_be_u16(buf, current);
   const u32 code_len = buf_read_be_u32(buf, current);
@@ -1470,7 +1470,7 @@ static void cf_buf_read_code_attribute(Str buf, u8 **current,
 
   cf_buf_read_attributes(buf, current, class_file, &code.attributes, arena);
 
-  Cf_attribute attribute = {
+  Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_CODE, .name = name_i, .v = {.code = code}};
   pg_array_append(*attributes, attribute, arena);
 
@@ -1500,7 +1500,7 @@ cf_buf_read_stack_map_table_attribute_verification_infos(Str buf, u8 **current,
 
 static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
                                                   u32 attribute_len, u16 name_i,
-                                                  Cf_attribute **attributes,
+                                                  Jvm_attribute **attributes,
                                                   Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1562,7 +1562,7 @@ static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
     pg_array_append(stack_map_frames, stack_map_frame, arena);
   }
 
-  Cf_attribute attribute = {
+  Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
       .name = name_i,
       .v = {.stack_map_table = stack_map_frames},
@@ -1577,7 +1577,7 @@ static void cf_buf_read_stack_map_table_attribute(Str buf, u8 **current,
 static void cf_buf_read_line_number_table_attribute(Str buf, u8 **current,
                                                     Class_file *class_file,
                                                     u32 attribute_len,
-                                                    Cf_attribute **attributes,
+                                                    Jvm_attribute **attributes,
                                                     Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
@@ -1588,12 +1588,12 @@ static void cf_buf_read_line_number_table_attribute(Str buf, u8 **current,
   pg_assert(sizeof(table_len) + table_len * (sizeof(u16) + sizeof(u16)) ==
             attribute_len);
 
-  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
+  Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
   pg_array_init_reserve(attribute.v.line_number_table_entries, table_len,
                         arena);
 
   for (u16 i = 0; i < table_len; i++) {
-    Cf_line_number_table_entry entry = {
+    Jvm_line_number_table_entry entry = {
         .start_pc = buf_read_be_u16(buf, current),
         .line_number = buf_read_be_u16(buf, current),
     };
@@ -1692,7 +1692,7 @@ static void cf_buf_read_signature_attribute(Str buf, u8 **current,
 static void cf_buf_read_exceptions_attribute(Str buf, u8 **current,
                                              Class_file *class_file,
                                              u32 attribute_len,
-                                             Cf_attribute **attributes,
+                                             Jvm_attribute **attributes,
                                              Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1706,7 +1706,7 @@ static void cf_buf_read_exceptions_attribute(Str buf, u8 **current,
   const u16 entry_size = sizeof(u16);
   pg_assert(sizeof(table_len) + table_len * entry_size == attribute_len);
 
-  Cf_attribute attribute = {.kind = ATTRIBUTE_KIND_EXCEPTIONS};
+  Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_EXCEPTIONS};
   pg_array_init_reserve(attribute.v.exception_index_table, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
@@ -1758,11 +1758,11 @@ static void cf_buf_read_inner_classes_attribute(Str buf, u8 **current,
 
 static void cf_buf_read_annotation(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Cf_annotation *annotation, Arena *arena);
+                                   Jvm_annotation *annotation, Arena *arena);
 
 static void cf_buf_read_element_value(Str buf, u8 **current,
                                       Class_file *class_file,
-                                      Cf_element_value *element_value,
+                                      Jvm_element_value *element_value,
                                       Arena *arena) {
   element_value->tag = buf_read_u8(buf, current);
   switch (element_value->tag) {
@@ -1790,7 +1790,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
 
   case '@': {
     element_value->v.annotation_value = arena_alloc(
-        arena, sizeof(Cf_annotation), _Alignof(Cf_annotation), 1);
+        arena, sizeof(Jvm_annotation), _Alignof(Jvm_annotation), 1);
 
     cf_buf_read_annotation(buf, current, class_file,
                            element_value->v.annotation_value, arena);
@@ -1803,7 +1803,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
     pg_array_init_reserve(element_value->v.array_value, table_len, arena);
 
     for (u64 i = 0; i < table_len; i++) {
-      Cf_element_value element_value_child = {0};
+      Jvm_element_value element_value_child = {0};
       cf_buf_read_element_value(buf, current, class_file, &element_value_child,
                                 arena);
 
@@ -1819,7 +1819,7 @@ static void cf_buf_read_element_value(Str buf, u8 **current,
 
 static void cf_buf_read_annotation(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Cf_annotation *annotation,
+                                   Jvm_annotation *annotation,
                                    Arena *arena) {
 
   annotation->type_index = buf_read_be_u16(buf, current);
@@ -1829,7 +1829,7 @@ static void cf_buf_read_annotation(Str buf, u8 **current,
                         num_element_value_pairs, arena);
 
   for (u64 i = 0; i < num_element_value_pairs; i++) {
-    Cf_element_value_pair element_value_pair = {
+    Jvm_element_value_pair element_value_pair = {
         .element_name_index = buf_read_be_u16(buf, current),
     };
     cf_buf_read_element_value(buf, current, class_file,
@@ -1841,20 +1841,20 @@ static void cf_buf_read_annotation(Str buf, u8 **current,
 
 static void cf_buf_read_runtime_invisible_annotations_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Cf_attribute **attributes, Arena *arena) {
+    Jvm_attribute **attributes, Arena *arena) {
 
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
 
-  Cf_attribute attribute = {
+  Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
   };
   pg_array_init_reserve(attribute.v.runtime_invisible_annotations, table_len,
                         arena);
 
   for (u64 i = 0; i < table_len; i++) {
-    Cf_annotation annotation = {0};
+    Jvm_annotation annotation = {0};
     cf_buf_read_annotation(buf, current, class_file, &annotation, arena);
     pg_array_append(attribute.v.runtime_invisible_annotations, annotation,
                     arena);
@@ -1868,7 +1868,7 @@ static void cf_buf_read_runtime_invisible_annotations_attribute(
 
 static void cf_buf_read_attribute(Str buf, u8 **current,
                                   Class_file *class_file,
-                                  Cf_attribute **attributes, Arena *arena) {
+                                  Jvm_attribute **attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1956,7 +1956,7 @@ static void cf_buf_read_attribute(Str buf, u8 **current,
 
 static void cf_buf_read_attributes(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Cf_attribute **attributes,
+                                   Jvm_attribute **attributes,
                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2205,7 +2205,7 @@ static void cf_buf_read_constants(Str buf, u8 **current,
 
 static void cf_buf_read_method(Str buf, u8 **current,
                                Class_file *class_file, Arena *arena) {
-  Cf_method method = {0};
+  Jvm_method method = {0};
   method.access_flags = buf_read_be_u16(buf, current);
   method.name = buf_read_be_u16(buf, current);
   pg_assert(
@@ -2269,7 +2269,7 @@ static void cf_buf_read_field(Str buf, u8 **current,
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
-  Cf_field field = {0};
+  Jvm_field field = {0};
   field.access_flags = buf_read_be_u16(buf, current);
   field.name = buf_read_be_u16(buf, current);
   pg_assert(field.name > 0);
@@ -2452,7 +2452,7 @@ static void cf_write_fields(const Class_file *class_file, FILE *file) {
 }
 
 static u32
-cf_compute_verification_info_size(Cf_verification_info verification_info) {
+cf_compute_verification_info_size(Jvm_verification_info verification_info) {
   pg_assert(verification_info.kind <= 8);
 
   return verification_info.kind < 7 ? sizeof(u8) : sizeof(u8) + sizeof(u16);
@@ -2467,7 +2467,7 @@ static u32 cf_compute_verification_infos_size(
     return 0;
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
-    const Cf_verification_info verification_info =
+    const Jvm_verification_info verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2478,7 +2478,7 @@ static u32 cf_compute_verification_infos_size(
   } else if (247 <= stack_map_frame->kind &&
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
-    const Cf_verification_info verification_info =
+    const Jvm_verification_info verification_info =
         *pg_array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
@@ -2496,7 +2496,7 @@ static u32 cf_compute_verification_infos_size(
 
     for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2508,7 +2508,7 @@ static u32 cf_compute_verification_infos_size(
   } else { // full_frame
     u32 size = 0;
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2517,7 +2517,7 @@ static u32 cf_compute_verification_infos_size(
     }
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->stack[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2530,14 +2530,14 @@ static u32 cf_compute_verification_infos_size(
   pg_assert(0 && "unreachable");
 }
 
-static u32 cf_compute_attribute_size(const Cf_attribute *attribute) {
+static u32 cf_compute_attribute_size(const Jvm_attribute *attribute) {
   pg_assert(attribute != NULL);
 
   switch (attribute->kind) {
   case ATTRIBUTE_KIND_SOURCE_FILE:
     return 2;
   case ATTRIBUTE_KIND_CODE: {
-    const Cf_attribute_code *const code = &attribute->v.code;
+    const Jvm_attribute_code *const code = &attribute->v.code;
 
     u32 size = sizeof(code->max_physical_stack) +
                sizeof(code->max_physical_locals) + sizeof(u32) +
@@ -2547,7 +2547,7 @@ static u32 cf_compute_attribute_size(const Cf_attribute *attribute) {
         ;
 
     for (u64 i = 0; i < pg_array_len(code->attributes); i++) {
-      const Cf_attribute *const child_attribute = &code->attributes[i];
+      const Jvm_attribute *const child_attribute = &code->attributes[i];
       size += sizeof(u16) + sizeof(u32) +
               cf_compute_attribute_size(child_attribute);
     }
@@ -2556,7 +2556,7 @@ static u32 cf_compute_attribute_size(const Cf_attribute *attribute) {
   case ATTRIBUTE_KIND_LINE_NUMBER_TABLE: {
     return sizeof(u16) /* count */ +
            pg_array_len(attribute->v.line_number_table_entries) *
-               sizeof(Cf_line_number_table_entry);
+               sizeof(Jvm_line_number_table_entry);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
     const Stack_map_frame *const stack_map_frames =
@@ -2625,11 +2625,11 @@ static u32 cf_compute_attribute_size(const Cf_attribute *attribute) {
   pg_assert(0 && "unreachable");
 }
 
-static void cf_write_attributes(FILE *file, const Cf_attribute *attributes);
+static void cf_write_attributes(FILE *file, const Jvm_attribute *attributes);
 
 static void
 cf_write_verification_info(FILE *file,
-                           Cf_verification_info verification_info) {
+                           Jvm_verification_info verification_info) {
   pg_assert(file != NULL);
   pg_assert(verification_info.kind <= 8);
 
@@ -2676,7 +2676,7 @@ static void cf_write_stack_map_table_attribute(
     const u64 count = stack_map_frame->kind - 251;
     for (u64 i = pg_array_len(stack_map_frame->frame->locals) - count;
          i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2691,7 +2691,7 @@ static void cf_write_stack_map_table_attribute(
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->locals));
 
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->locals); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->locals[i].verification_info;
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2701,7 +2701,7 @@ static void cf_write_stack_map_table_attribute(
 
     file_write_be_u16(file, pg_array_len(stack_map_frame->frame->stack));
     for (u64 i = 0; i < pg_array_len(stack_map_frame->frame->stack); i++) {
-      const Cf_verification_info verification_info =
+      const Jvm_verification_info verification_info =
           stack_map_frame->frame->stack[i];
 
       pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
@@ -2711,7 +2711,7 @@ static void cf_write_stack_map_table_attribute(
   }
 }
 
-static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
+static void cf_write_attribute(FILE *file, const Jvm_attribute *attribute) {
   pg_assert(file != NULL);
   pg_assert(attribute != NULL);
 
@@ -2722,7 +2722,7 @@ static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    const Cf_attribute_source_file *const source_file =
+    const Jvm_attribute_source_file *const source_file =
         &attribute->v.source_file;
     file_write_be_u16(file, source_file->source_file);
 
@@ -2732,7 +2732,7 @@ static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
     const u32 size = cf_compute_attribute_size(attribute);
     file_write_be_u32(file, size);
 
-    const Cf_attribute_code *const code = &attribute->v.code;
+    const Jvm_attribute_code *const code = &attribute->v.code;
 
     file_write_be_u16(file, code->max_physical_stack);
 
@@ -2754,7 +2754,7 @@ static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
 
     for (u16 i = 0; i < pg_array_len(attribute->v.line_number_table_entries);
          i++) {
-      Cf_line_number_table_entry line_number_table =
+      Jvm_line_number_table_entry line_number_table =
           attribute->v.line_number_table_entries[i];
       file_write_be_u16(file, line_number_table.start_pc);
       file_write_be_u16(file, line_number_table.line_number);
@@ -2782,16 +2782,16 @@ static void cf_write_attribute(FILE *file, const Cf_attribute *attribute) {
   }
 }
 
-static void cf_write_attributes(FILE *file, const Cf_attribute *attributes) {
+static void cf_write_attributes(FILE *file, const Jvm_attribute *attributes) {
   file_write_be_u16(file, pg_array_len(attributes));
 
   for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const Cf_attribute *const attribute = &attributes[i];
+    const Jvm_attribute *const attribute = &attributes[i];
     cf_write_attribute(file, attribute);
   }
 }
 
-static void cf_write_method(FILE *file, const Cf_method *method) {
+static void cf_write_method(FILE *file, const Jvm_method *method) {
   file_write_be_u16(file, method->access_flags);
   file_write_be_u16(file, method->name);
   file_write_be_u16(file, method->descriptor);
@@ -2806,7 +2806,7 @@ static void cf_write_methods(const Class_file *class_file, FILE *file) {
   file_write_be_u16(file, pg_array_len(class_file->methods));
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Cf_method *const method = &class_file->methods[i];
+    const Jvm_method *const method = &class_file->methods[i];
     cf_write_method(file, method);
   }
 }
@@ -2841,7 +2841,7 @@ static void cf_init(Class_file *class_file, Arena *arena) {
   pg_array_init_reserve(class_file->attributes, 64, arena);
 }
 
-static void cf_attribute_code_init(Cf_attribute_code *code, Arena *arena) {
+static void cf_attribute_code_init(Jvm_attribute_code *code, Arena *arena) {
   pg_assert(code != NULL);
   pg_assert(arena != NULL);
 
@@ -2924,10 +2924,10 @@ cf_get_this_class_name(const Class_file *class_file) {
                                          this_class_i);
 }
 
-static const Cf_attribute *
-cf_method_find_code_attribute(const Cf_method *method) {
+static const Jvm_attribute *
+cf_method_find_code_attribute(const Jvm_method *method) {
   for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const Cf_attribute *const attribute = &method->attributes[i];
+    const Jvm_attribute *const attribute = &method->attributes[i];
 
     if (attribute->kind == ATTRIBUTE_KIND_CODE)
       return attribute;
@@ -2935,11 +2935,11 @@ cf_method_find_code_attribute(const Cf_method *method) {
   return NULL;
 }
 
-static const Cf_attribute *
-cf_attribute_by_kind(const Cf_attribute *attributes,
-                     Cf_attribute_kind kind) {
+static const Jvm_attribute *
+cf_attribute_by_kind(const Jvm_attribute *attributes,
+                     Jvm_attribute_kind kind) {
   for (u64 i = 0; i < pg_array_len(attributes); i++) {
-    const Cf_attribute *const attribute = &attributes[i];
+    const Jvm_attribute *const attribute = &attributes[i];
 
     if (attribute->kind == kind)
       return attribute;
@@ -2949,13 +2949,13 @@ cf_attribute_by_kind(const Cf_attribute *attributes,
 
 static void
 cf_get_source_location_of_function(const Class_file *class_file,
-                                   const Cf_method *method, Str *filename,
+                                   const Jvm_method *method, Str *filename,
                                    u16 *line, Arena *arena) {
-  const Cf_attribute *const code = cf_method_find_code_attribute(method);
+  const Jvm_attribute *const code = cf_method_find_code_attribute(method);
   if (code == NULL)
     return;
 
-  const Cf_attribute *const source_file =
+  const Jvm_attribute *const source_file =
       cf_attribute_by_kind(code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
   if (source_file != NULL) {
     *filename = str_clone(
@@ -2964,10 +2964,10 @@ cf_get_source_location_of_function(const Class_file *class_file,
         arena);
   }
 
-  const Cf_attribute *const line_number_table = cf_attribute_by_kind(
+  const Jvm_attribute *const line_number_table = cf_attribute_by_kind(
       code->v.code.attributes, ATTRIBUTE_KIND_LINE_NUMBER_TABLE);
   if (line_number_table != NULL) {
-    const Cf_line_number_table_entry *const entries =
+    const Jvm_line_number_table_entry *const entries =
         line_number_table->v.line_number_table_entries;
 
     if (pg_array_len(entries) > 0)
@@ -5045,16 +5045,16 @@ static Str resolver_function_to_human_string(const Resolver *resolver,
 
 static bool
 cf_method_has_inline_only_annotation(const Class_file *class_file,
-                                     const Cf_method *method) {
+                                     const Jvm_method *method) {
 
   for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-    const Cf_attribute *const attribute = &method->attributes[i];
+    const Jvm_attribute *const attribute = &method->attributes[i];
     if (attribute->kind != ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS)
       continue;
 
     for (u64 j = 0;
          j < pg_array_len(attribute->v.runtime_invisible_annotations); j++) {
-      const Cf_annotation *const annotation =
+      const Jvm_annotation *const annotation =
           &attribute->v.runtime_invisible_annotations[j];
 
       Str descriptor = cf_constant_array_get_as_string(
@@ -5079,7 +5079,7 @@ static void resolver_load_methods_from_class_file(
   const Type *const this_class_type = &resolver->types[this_class_type_i];
 
   for (u64 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Cf_method *const method = &class_file->methods[i];
+    const Jvm_method *const method = &class_file->methods[i];
     Str descriptor = cf_constant_array_get_as_string(&class_file->constant_pool,
                                                      method->descriptor);
     Str name = cf_constant_array_get_as_string(&class_file->constant_pool,
@@ -5116,7 +5116,7 @@ static void resolver_load_methods_from_class_file(
       // Clone code.
       // TODO: Clone exceptions, stack map frames, etc?
       for (u64 i = 0; i < pg_array_len(method->attributes); i++) {
-        const Cf_attribute *const attribute = &method->attributes[i];
+        const Jvm_attribute *const attribute = &method->attributes[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           pg_array_clone(type.v.method.code, attribute->v.code.code, arena);
           break;
@@ -5379,7 +5379,7 @@ static bool cf_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
-          const Cf_constant *const constant_super = cf_constant_array_get(
+          const Jvm_constant *const constant_super = cf_constant_array_get(
               &class_file.constant_pool, class_file.super_class);
 
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
@@ -6855,13 +6855,13 @@ static void resolver_collect_user_defined_function_signatures(
 // --------------------------------- Code generation
 
 typedef struct {
-  Cf_variable variable;
+  Jvm_variable variable;
   u32 scope_id;
 } Cg_scope_variable;
 
 typedef struct {
   Resolver *resolver;
-  Cf_attribute_code *code;
+  Jvm_attribute_code *code;
   Cg_frame *frame;
   Cg_scope_variable *locals;
   Stack_map_frame *stack_map_frames;
@@ -6871,7 +6871,7 @@ typedef struct {
 
 // FIXME: Probably should not behave like a FIFO and rather like an array.
 static void cg_frame_locals_push(Cg_generator *gen,
-                                 const Cf_variable *variable,
+                                 const Jvm_variable *variable,
                                  u16 *logical_local_index,
                                  u16 *physical_local_index, Arena *arena) {
   pg_assert(gen != NULL);
@@ -7115,7 +7115,7 @@ static void cg_emit_store_variable(Cg_generator *gen, u8 var_i,
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  const Jvm_verification_info kind =
+  const Jvm_verification_info_kind kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7149,7 +7149,7 @@ static void cg_emit_load_variable_int(Cg_generator *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
+                      (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
@@ -7169,7 +7169,7 @@ static void cg_emit_load_variable_object(Cg_generator *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (Cf_verification_info){
+                      (Jvm_verification_info){
                           .kind = VERIFICATION_INFO_OBJECT,
                           .extra_data = 0, // FIXME
                       },
@@ -7188,7 +7188,7 @@ static void cg_emit_ldc(Cg_generator *gen,
   case CONSTANT_POOL_KIND_INT:
     cf_code_array_push_u16(&gen->code->code, constant_i, arena);
     cg_frame_stack_push(gen->frame,
-                        (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
+                        (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                         arena);
     break;
   default:
@@ -7212,7 +7212,7 @@ static void cg_emit_load_variable_long(Cg_generator *gen, u8 var_i,
   cf_code_array_push_u8(&gen->code->code, var_i, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (Cf_verification_info){.kind = VERIFICATION_INFO_LONG},
+                      (Jvm_verification_info){.kind = VERIFICATION_INFO_LONG},
                       arena);
 }
 
@@ -7232,7 +7232,7 @@ static void cg_emit_get_static(Cg_generator *gen, u16 field_i, u16 class_i,
 
   pg_assert(pg_array_len(gen->frame->stack) < UINT16_MAX);
 
-  const Cf_verification_info verification_info = {
+  const Jvm_verification_info verification_info = {
       .kind = VERIFICATION_INFO_OBJECT,
       .extra_data = class_i,
   };
@@ -7262,7 +7262,7 @@ static void cg_emit_invoke_virtual(Cg_generator *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const Cf_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
@@ -7291,7 +7291,7 @@ static void cg_emit_invoke_static(Cg_generator *gen, u16 method_ref_i,
   if (return_type->kind == TYPE_UNIT)
     return;
 
-  const Cf_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
@@ -7319,7 +7319,7 @@ static void cg_emit_invoke_special(Cg_generator *gen, u16 method_ref_i,
 
   pg_assert(return_type->kind != TYPE_UNIT);
 
-  const Cf_verification_info verification_info = cg_type_to_verification_info(
+  const Jvm_verification_info verification_info = cg_type_to_verification_info(
       resolver_eval_type(gen->resolver, return_type));
 
   cg_frame_stack_push(gen->frame, verification_info, arena);
@@ -7406,7 +7406,7 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
       u16 physical_local_index = locals_offset + 1;
       if (physical_local_index >=
           gen->frame->locals_physical_count) { // Need to add the variable.
-        const Cf_variable variable = {
+        const Jvm_variable variable = {
             .scope_depth = gen->frame->scope_depth,
             .verification_info = {.kind = VERIFICATION_INFO_INT},
         };
@@ -7424,7 +7424,7 @@ static void cg_emit_inlined_method_call(Cg_generator *gen,
       u16 physical_local_index = locals_offset + 2;
       if (physical_local_index >=
           gen->frame->locals_physical_count) { // Need to add the variable.
-        const Cf_variable variable = {
+        const Jvm_variable variable = {
             .scope_depth = gen->frame->scope_depth,
             .verification_info = {.kind = VERIFICATION_INFO_INT},
         };
@@ -7503,11 +7503,11 @@ static void cg_emit_add(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
 
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7534,7 +7534,7 @@ static void cg_emit_neg(Cg_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack != NULL);
   pg_assert(pg_array_len(gen->frame->stack) >= 1);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const Jvm_verification_info kind =
+  const Jvm_verification_info_kind kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7562,7 +7562,7 @@ static void cg_emit_lcmp(Cg_generator *gen, Arena *arena) {
   cg_frame_stack_pop(gen->frame);
 
   cg_frame_stack_push(gen->frame,
-                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
+                      (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
@@ -7577,7 +7577,7 @@ static void cg_emit_bipush(Cg_generator *gen, u8 value, Arena *arena) {
   cf_code_array_push_u8(&gen->code->code, value, arena);
 
   cg_frame_stack_push(gen->frame,
-                      (Cf_verification_info){.kind = VERIFICATION_INFO_INT},
+                      (Jvm_verification_info){.kind = VERIFICATION_INFO_INT},
                       arena);
 }
 
@@ -7609,9 +7609,9 @@ static void cg_emit_mul(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7640,9 +7640,9 @@ static void cg_emit_div(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7671,9 +7671,9 @@ static void cg_emit_rem(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7694,7 +7694,7 @@ static void cg_emit_rem(Cg_generator *gen, Arena *arena) {
 
 static void
 cg_emit_load_constant_single_word(Cg_generator *gen, u16 constant_i,
-                                  Cf_verification_info verification_info,
+                                  Jvm_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7715,7 +7715,7 @@ cg_emit_load_constant_single_word(Cg_generator *gen, u16 constant_i,
 
 static void
 cg_emit_load_constant_double_word(Cg_generator *gen, u16 constant_i,
-                                  Cf_verification_info verification_info,
+                                  Jvm_verification_info verification_info,
                                   Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->code != NULL);
@@ -7751,7 +7751,7 @@ static void cg_emit_return_value(Cg_generator *gen, Arena *arena) {
 
   pg_assert(pg_array_len(gen->frame->stack) >= 1);
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
-  const Jvm_verification_info kind =
+  const Jvm_verification_info_kind kind =
       pg_array_last(gen->frame->stack)->kind;
 
   switch (kind) {
@@ -7793,7 +7793,7 @@ static void cg_frame_drop_current_scope_variables(Cg_frame *frame) {
 
   u64 to_drop = 0;
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const Cf_variable *const variable = &frame->locals[i];
+    const Jvm_variable *const variable = &frame->locals[i];
     if (variable->scope_depth < frame->scope_depth)
       break;
 
@@ -7828,7 +7828,7 @@ static bool cf_find_variable(const Cg_frame *frame, u32 node_i,
 
   *physical_local_index = frame->locals_physical_count;
   for (i64 i = pg_array_len(frame->locals) - 1; i >= 0; i--) {
-    const Cf_variable *const variable = &frame->locals[i];
+    const Jvm_variable *const variable = &frame->locals[i];
     *physical_local_index -=
         cf_verification_info_kind_word_count(variable->verification_info.kind);
     if (variable->node_i != node_i)
@@ -7914,9 +7914,9 @@ static void cg_emit_gt(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7941,9 +7941,9 @@ static void cg_emit_ne(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7967,9 +7967,9 @@ static void cg_emit_eq(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -7993,9 +7993,9 @@ static void cg_emit_ge(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8020,9 +8020,9 @@ static void cg_emit_le(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8047,9 +8047,9 @@ static void cg_emit_lt(Cg_generator *gen, Arena *arena) {
   pg_assert(pg_array_len(gen->frame->stack) <= UINT16_MAX);
 
   pg_assert(pg_array_len(gen->frame->stack) >= 2);
-  const Jvm_verification_info kind_a =
+  const Jvm_verification_info_kind kind_a =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 1].kind;
-  const Jvm_verification_info kind_b =
+  const Jvm_verification_info_kind kind_b =
       gen->frame->stack[pg_array_len(gen->frame->stack) - 2].kind;
 
   pg_assert(kind_a == kind_b);
@@ -8291,7 +8291,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     pg_assert(gen->code->code != NULL);
     pg_assert(gen->frame != NULL);
 
-    const Cf_verification_info verification_info = {
+    const Jvm_verification_info verification_info = {
         .kind = VERIFICATION_INFO_INT};
     cg_emit_load_constant_single_word(gen, number_i, verification_info, arena);
     break;
@@ -8301,7 +8301,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
               pg_array_len(gen->resolver->parser->lexer->tokens));
 
     Jvm_constant_pool_kind pool_kind = CONSTANT_POOL_KIND_INT;
-    Jvm_verification_info verification_info_kind = VERIFICATION_INFO_INT;
+    Jvm_verification_info_kind verification_info_kind = VERIFICATION_INFO_INT;
     if (type->kind == TYPE_LONG) {
       pool_kind = CONSTANT_POOL_KIND_LONG;
       verification_info_kind = VERIFICATION_INFO_LONG;
@@ -8319,11 +8319,11 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
       cg_emit_load_constant_double_word(
           gen, number_i,
-          (Cf_verification_info){.kind = verification_info_kind}, arena);
+          (Jvm_verification_info){.kind = verification_info_kind}, arena);
     } else {
       cg_emit_load_constant_single_word(
           gen, number_i,
-          (Cf_verification_info){.kind = verification_info_kind}, arena);
+          (Jvm_verification_info){.kind = verification_info_kind}, arena);
     }
     break;
   }
@@ -8349,9 +8349,9 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
         // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
         // b c` with the corresponding verification info.
-        const Cf_verification_info verification_info =
+        const Jvm_verification_info verification_info =
             gen->frame->stack[stack_index];
-        const Cf_variable variable = {
+        const Jvm_variable variable = {
             .node_i = argument_i,
             .type_i = argument->type_i,
             .scope_depth = gen->frame->scope_depth,
@@ -8448,14 +8448,14 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     const u16 descriptor_i = cf_add_constant_string(
         &class_file->constant_pool, sb_build(descriptor), arena);
 
-    Cf_method method = {
+    Jvm_method method = {
         .access_flags = ACCESS_FLAGS_STATIC | ACCESS_FLAGS_PUBLIC,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
     pg_array_init_reserve(method.attributes, 1, arena);
 
-    Cf_attribute_code code = {0};
+    Jvm_attribute_code code = {0};
     cf_attribute_code_init(&code, arena);
     gen->code = &code;
     Cg_frame frame = {0};
@@ -8505,7 +8505,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     stack_map_resolve_frames(first_method_frame, gen->stack_map_frames, arena);
 
-    Cf_attribute attribute_stack_map_frames = {
+    Jvm_attribute attribute_stack_map_frames = {
         .kind = ATTRIBUTE_KIND_STACK_MAP_TABLE,
         .name = cf_add_constant_cstring(&class_file->constant_pool,
                                         "StackMapTable", arena),
@@ -8521,7 +8521,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
 
     pg_array_append(code.attributes, attribute_stack_map_frames, arena);
 
-    const Cf_attribute attribute_code = {
+    const Jvm_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
@@ -8816,9 +8816,9 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     cg_emit_node(gen, class_file, node->lhs, arena);
     cg_emit_node(gen, class_file, node->rhs, arena);
 
-    const Cf_verification_info verification_info =
+    const Jvm_verification_info verification_info =
         cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
-    const Cf_variable variable = {
+    const Jvm_variable variable = {
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
@@ -8849,7 +8849,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     pg_assert(cf_find_variable(gen->frame, node->lhs, &logical_local_index,
                                &physical_local_index));
 
-    const Cf_verification_info verification_info =
+    const Jvm_verification_info verification_info =
         gen->frame->locals[logical_local_index].verification_info;
     if (verification_info.kind == VERIFICATION_INFO_INT)
       cg_emit_load_variable_int(gen, physical_local_index, arena);
@@ -8917,7 +8917,7 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
                                        str_from_c("java/lang/String"), arena),
         }};
 
-    const Cf_verification_info verification_info = {
+    const Jvm_verification_info verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = cf_constant_array_push(&class_file->constant_pool,
                                              &string_class_info, arena),
@@ -8935,9 +8935,9 @@ static void cg_emit_node(Cg_generator *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_FUNCTION_PARAMETER: {
-    const Cf_verification_info verification_info =
+    const Jvm_verification_info verification_info =
         cg_type_to_verification_info(resolver_eval_type(gen->resolver, type));
-    const Cf_variable argument = {
+    const Jvm_variable argument = {
         .node_i = node_i,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
@@ -9043,12 +9043,12 @@ static void cg_emit_synthetic_class(Cg_generator *gen,
 }
 
 static u16 cg_add_method(Class_file *class_file, u16 access_flags,
-                         u16 name, u16 descriptor, Cf_attribute *attributes,
+                         u16 name, u16 descriptor, Jvm_attribute *attributes,
                          Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(class_file->methods != NULL);
 
-  Cf_method method = {
+  Jvm_method method = {
       .access_flags = access_flags,
       .attributes = attributes,
       .descriptor = descriptor,
@@ -9070,7 +9070,7 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
   Str source_descriptor_str = str_from_c("([Ljava/lang/String;)V");
 
   for (u16 i = 0; i < pg_array_len(class_file->methods); i++) {
-    const Cf_method *const method = &class_file->methods[i];
+    const Jvm_method *const method = &class_file->methods[i];
 
     if ((method->access_flags & (ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC)) ==
         0)
@@ -9106,9 +9106,9 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
     return; // Nothing to do.
 
   pg_assert((u16)method_i < pg_array_len(class_file->methods));
-  const Cf_method *const target_method = &class_file->methods[method_i];
+  const Jvm_method *const target_method = &class_file->methods[method_i];
 
-  Cf_attribute *attributes = NULL;
+  Jvm_attribute *attributes = NULL;
   pg_array_init_reserve(attributes, 1, arena);
 
   // Generate code section for the new method.
@@ -9139,7 +9139,7 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
 
     const Method target_method_type = {.return_type_i = TYPE_UNIT_I};
 
-    Cf_attribute_code code = {0};
+    Jvm_attribute_code code = {0};
     pg_array_init_reserve(code.code, 4, arena);
 
     gen->code = &code;
@@ -9177,7 +9177,7 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
       const u16 source_method_arg0_class_i = cf_constant_array_push(
           &class_file->constant_pool, &source_method_arg0_class, arena);
 
-      const Cf_variable arg0 = {
+      const Jvm_variable arg0 = {
           .node_i = 0,
           .type_i = source_argument_types_i,
           .scope_depth = gen->frame->scope_depth,
@@ -9201,7 +9201,7 @@ static void cg_supplement_entrypoint_if_exists(Cg_generator *gen,
     gen->code = NULL;
     gen->frame = NULL;
 
-    Cf_attribute attribute_code = {
+    Jvm_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             cf_add_constant_cstring(&class_file->constant_pool, "Code", arena),
