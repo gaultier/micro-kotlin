@@ -187,26 +187,6 @@ typedef struct {
 } Stack_map_frame;
 Array32_struct(Stack_map_frame);
 
-enum __attribute__((packed)) Type_kind {
-  TYPE_ANY = 0,
-  TYPE_UNIT = 1 << 0,
-  TYPE_BOOLEAN = 1 << 1,
-  TYPE_BYTE = 1 << 2,
-  TYPE_CHAR = 1 << 3,
-  TYPE_SHORT = 1 << 4,
-  TYPE_INT = 1 << 5,
-  TYPE_FLOAT = 1 << 6,
-  TYPE_LONG = 1 << 7,
-  TYPE_DOUBLE = 1 << 8,
-  TYPE_STRING = 1 << 9,
-  TYPE_METHOD = 1 << 10,
-  TYPE_INSTANCE = 1 << 11,
-  TYPE_ARRAY = 1 << 12,
-  TYPE_INTEGER_LITERAL = 1 << 13,
-  TYPE_CONSTRUCTOR = 1 << 14,
-};
-typedef enum Type_kind Type_kind;
-
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct codegen_frame {
@@ -220,65 +200,8 @@ struct codegen_frame {
   pg_pad(4);
 };
 
-struct Type;
-
 struct Jvm_constant_pool;
 typedef struct Jvm_constant_pool Jvm_constant_pool;
-
-typedef struct {
-  Str name;
-  Str source_file_name;
-  Array32(u8) code;                 // In case of InlineOnly.
-  Jvm_constant_pool *constant_pool; // In case of InlineOnly.
-  Array32(u32) argument_types_i;
-  u32 return_type_i;
-  u32 this_class_type_i;
-  // TODO: Move to `type.flags` to reduce size?
-  u16 access_flags;
-  u16 source_line;
-  pg_pad(4);
-} Method;
-
-typedef enum {
-  TYPE_FLAG_INLINE_ONLY = 1 << 10,
-} Type_flag;
-
-struct Type {
-  Str this_class_name;
-  Str super_class_name;
-  Str package_name;
-  union {
-    Method method;             // TYPE_METHOD, TYPE_CONSTRUCTOR
-    u32 array_type_i;          // TYPE_ARRAY_REFERENCE
-    u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
-  } v;
-  Type_kind kind;
-  u16 flags;
-  u32 super_type_i;
-};
-
-typedef struct Type Type;
-Array32_struct(Type);
-
-static Type_handle new_type(const Type *type, Arena *arena) {
-  Type *const type_ptr = arena_alloc(arena, sizeof(Type), _Alignof(Type), 1);
-  *type_ptr = *type;
-
-  const u32 offset = arena_offset_from_end(type_ptr, *arena);
-
-  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
-
-  return (Type_handle){offset | (u32)HANDLE_FLAGS_TYPE};
-}
-
-static Type *type_handle_to_ptr(Type_handle handle, Arena arena) {
-  pg_assert((handle.value & (u32)HANDLE_FLAGS_TYPE) == (u32)HANDLE_FLAGS_TYPE);
-
-  handle.value &= ~(u32)HANDLE_FLAGS_TYPE;
-  pg_assert(((u8 *)(u64)handle.value) < arena.end);
-
-  return (Type *)(arena.end - handle.value);
-}
 
 typedef struct {
   u16 start_pc;
@@ -337,6 +260,60 @@ static Str ast_kind_to_string[AST_KIND_MAX] = {
     [AST_KIND_CALL] = str_from_c_literal("CALL"),
 };
 
+enum __attribute__((packed)) Type_kind {
+  TYPE_ANY = 0,
+  TYPE_UNIT = 1 << 0,
+  TYPE_BOOLEAN = 1 << 1,
+  TYPE_BYTE = 1 << 2,
+  TYPE_CHAR = 1 << 3,
+  TYPE_SHORT = 1 << 4,
+  TYPE_INT = 1 << 5,
+  TYPE_FLOAT = 1 << 6,
+  TYPE_LONG = 1 << 7,
+  TYPE_DOUBLE = 1 << 8,
+  TYPE_STRING = 1 << 9,
+  TYPE_METHOD = 1 << 10,
+  TYPE_INSTANCE = 1 << 11,
+  TYPE_ARRAY = 1 << 12,
+  TYPE_INTEGER_LITERAL = 1 << 13,
+  TYPE_CONSTRUCTOR = 1 << 14,
+};
+
+typedef enum Type_kind Type_kind;
+typedef struct {
+  Str name;
+  Str source_file_name;
+  Array32(u8) code;                 // In case of InlineOnly.
+  Jvm_constant_pool *constant_pool; // In case of InlineOnly.
+  Array32(u32) argument_types_i;
+  u32 return_type_i;
+  u32 this_class_type_i;
+  // TODO: Move to `type.flags` to reduce size?
+  u16 access_flags;
+  u16 source_line;
+  pg_pad(4);
+} Method;
+
+typedef enum {
+  TYPE_FLAG_INLINE_ONLY = 1 << 10,
+} Type_flag;
+
+struct Type {
+  Str this_class_name;
+  Str super_class_name;
+  Str package_name;
+  union {
+    Method method;             // TYPE_METHOD, TYPE_CONSTRUCTOR
+    u32 array_type_i;          // TYPE_ARRAY_REFERENCE
+    u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
+  } v;
+  Type_kind kind;
+  u16 flags;
+  u32 super_type_i;
+};
+
+typedef struct Type Type;
+Array32_struct(Type);
 // TODO: compact fields.
 typedef struct Ast Ast;
 struct Ast {
@@ -372,6 +349,26 @@ static Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
   pg_assert(((u8 *)(u64)handle.value) < arena.end);
 
   return (Ast *)(arena.end - handle.value);
+}
+
+static Type_handle new_type(const Type *type, Arena *arena) {
+  Type *const type_ptr = arena_alloc(arena, sizeof(Type), _Alignof(Type), 1);
+  *type_ptr = *type;
+
+  const u32 offset = arena_offset_from_end(type_ptr, *arena);
+
+  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
+
+  return (Type_handle){offset | (u32)HANDLE_FLAGS_TYPE};
+}
+
+static Type *type_handle_to_ptr(Type_handle handle, Arena arena) {
+  pg_assert((handle.value & (u32)HANDLE_FLAGS_TYPE) == (u32)HANDLE_FLAGS_TYPE);
+
+  handle.value &= ~(u32)HANDLE_FLAGS_TYPE;
+  pg_assert(((u8 *)(u64)handle.value) < arena.end);
+
+  return (Type *)(arena.end - handle.value);
 }
 
 typedef enum __attribute__((packed)) {
