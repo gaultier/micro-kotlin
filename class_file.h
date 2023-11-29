@@ -4708,7 +4708,6 @@ static u32 parser_parse_function_value_parameters(Parser *parser,
 
   Ast node = {.kind = AST_KIND_LIST};
 
-  const u32 root_i = parser_add_node(parser, &node, arena);
   do {
     *array32_push(&node.nodes, arena) =
         parser_parse_function_value_parameter(parser, arena);
@@ -4716,7 +4715,7 @@ static u32 parser_parse_function_value_parameters(Parser *parser,
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                       "expected right parenthesis after the arguments");
-  return root_i;
+  return parser_add_node(parser, &node, arena);
 }
 
 // functionBody:
