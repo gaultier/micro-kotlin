@@ -51,7 +51,7 @@ static bool cli_log_verbose = false;
 
 #define pg_unused(x) (void)(x)
 
-#define pg_assert(condition) (condition) ? 0 : abort()
+#define pg_assert(condition) assert(condition)
 
 #define pg_max(a, b) (((a) > (b)) ? (a) : (b))
 

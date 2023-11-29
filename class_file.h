@@ -550,6 +550,13 @@ static bool resolver_is_type_integer(Type_handle type, Arena arena) {
 static bool resolver_are_types_equal(const Resolver *resolver,
                                      Type_handle lhs_handle,
                                      Type_handle rhs_handle, Arena arena) {
+  if (type_handle_is_nil(lhs_handle) && type_handle_is_nil(rhs_handle))
+    return true;
+  if (type_handle_is_nil(lhs_handle) && !type_handle_is_nil(rhs_handle))
+    return false;
+  if (!type_handle_is_nil(lhs_handle) && type_handle_is_nil(rhs_handle))
+    return false;
+
   const Type *const lhs = type_handle_to_ptr(lhs_handle, arena);
   const Type *const rhs = type_handle_to_ptr(rhs_handle, arena);
 
@@ -5808,7 +5815,19 @@ static bool typechecker_merge_types(const Resolver *resolver, Type_handle lhs_i,
     return true;
   }
 
+  // Any is compatible with everything.
+  if (type_handle_is_nil(lhs_i)) {
+    *result_i = rhs_i;
+    return true;
+  }
+
   const Type *const lhs_type = type_handle_to_ptr(lhs_i, arena);
+
+  if (type_handle_is_nil(rhs_i)) {
+    *result_i = lhs_i;
+    return true;
+  }
+
   const Type *const rhs_type = type_handle_to_ptr(rhs_i, arena);
 
   // Any is compatible with everything.
@@ -6686,7 +6705,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     break;
   }
 
-  case AST_KIND_THEN_ELSE:
+  case AST_KIND_THEN_ELSE: {
     typechecker_begin_scope(resolver);
     const Type_handle lhs_type_i =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
@@ -6709,7 +6728,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     return node->type_i;
 
     break;
-
+  }
   case AST_KIND_ASSIGNMENT:
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
 

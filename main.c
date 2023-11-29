@@ -188,8 +188,8 @@ int main(int argc, char *argv[]) {
     LOG("After loading known types: arena_available=%lu",
         arena.end - arena.start);
 
-    resolver_user_defined_function_signatures(&resolver, root_i,
-                                                      scratch_arena, &arena);
+    resolver_user_defined_function_signatures(&resolver, root_i, scratch_arena,
+                                              &arena);
     resolver_resolve_ast(&resolver, root_i, scratch_arena, &arena);
 
     // Debug types.
@@ -228,7 +228,6 @@ int main(int argc, char *argv[]) {
     }
     jvm_write(&class_file, file);
     fclose(file);
-
 
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
 
