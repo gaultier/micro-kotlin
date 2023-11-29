@@ -93,20 +93,10 @@ Array32_struct(isize);
 
 // ----------------------
 
-typedef struct List List;
-struct List {
-  List *next;
-  List *last;
-};
-
-#define LIST List *next, *last
-
-#define list_append(_list, _new)                                               \
-  do {                                                                         \
-    List *list = (List *)_list;                                                \
-    List *new = (List *)_new;                                                  \
-    List *last = list->last ? list->last : list;                               \
-    list->last = last->next = new;                                             \
-  } while (0)
-
-#define list_for_each(l) for (List *it = (List *)l; it; it = it->next)
+// #define list_append(_list, _new)                                               \
+//   do {                                                                         \
+//     List *list = (List *)_list;                                                \
+//     List *new = (List *)_new;                                                  \
+//     List *last = list->last ? list->last : list;                               \
+//     list->last = last->next = new;                                             \
+//   } while (0)
