@@ -343,7 +343,7 @@ static Ast_handle new_ast(const Ast *ast, Arena *arena) {
 
   const u32 offset = arena_offset_from_end(ast_ptr, *arena);
 
-  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
+  pg_assert((offset & (u32)HANDLE_FLAGS_AST) == 0);
 
   return (Ast_handle){offset | (u32)HANDLE_FLAGS_AST};
 }
@@ -363,7 +363,7 @@ static Type_handle new_type(const Type *type, Arena *arena) {
 
   const u32 offset = arena_offset_from_end(type_ptr, *arena);
 
-  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
+  pg_assert((offset & (u32)HANDLE_FLAGS_TYPE) == 0);
 
   return (Type_handle){offset | (u32)HANDLE_FLAGS_TYPE};
 }
@@ -5559,6 +5559,7 @@ static bool resolver_is_package_imported(const Resolver *resolver,
   return false;
 }
 
+// TODO: Keep an hashtable/hashtrie of callables by name.
 static void resolver_collect_callables_with_name(const Resolver *resolver,
                                                  Str function_name,
                                                  Array32(Type_handle) *
@@ -5998,6 +5999,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
   // TODO: Flag types coming from java as nullable.
 
   // Check if cached first.
+  // TODO: Keep an hashtable/hashtrie of non callable types by package/name.
   for (Type_handle handle = resolver->first_type->list_next;
        !type_handle_handles_nil(handle);
        handle = type_handle_to_ptr(handle, *arena)->list_next) {
@@ -6078,11 +6080,13 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
   // that contains
   // `$CLASS_NAME.class`.
   for (u64 i = 0; i < resolver->class_path_entries.len; i++) {
+    Arena _scratch_arena = scratch_arena;
+
     Str class_path_entry = resolver->class_path_entries.data[i];
     if (!str_ends_with(class_path_entry, str_from_c(".jar")))
       continue;
 
-    jvm_read_jar_file(resolver, class_path_entry, scratch_arena, arena);
+    jvm_read_jar_file(resolver, class_path_entry, _scratch_arena, arena);
 
     for (Type_handle handle = resolver->first_type->list_next;
          !type_handle_handles_nil(handle);
@@ -6091,7 +6095,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
 
       if (type->kind == TYPE_INSTANCE &&
           type_fqn_equal_to_package_and_name(
-              fqn, type->package_name, type->this_class_name, scratch_arena)) {
+              fqn, type->package_name, type->this_class_name, _scratch_arena)) {
         *type_handle = handle;
         return true;
       }
