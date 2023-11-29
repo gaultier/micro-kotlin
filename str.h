@@ -287,9 +287,9 @@ __attribute__((warn_unused_result)) static Str_builder sb_clone(Str src,
   Str_builder res = sb_new(src.len, arena);
   pg_assert(res.data);
   pg_assert(src.len <= res.cap);
-  pg_assert(src.data);
 
   if (src.len) {
+    pg_assert(src.data);
     memmove(res.data, src.data, src.len);
   }
 
