@@ -28,12 +28,10 @@ typedef struct {
 } Ast_handle;
 Array32_struct(Ast_handle);
 
-const static Ast_handle ast_handle_nil = {(u32)HANDLE_FLAGS_AST};
+const static Ast_handle ast_handle_nil = {0};
 
 static bool ast_handle_is_nil(Ast_handle handle) {
-
-  // Make zero values usable.
-  return handle.value == 0 || handle.value == (u32)HANDLE_FLAGS_AST;
+  return handle.value == 0;
 }
 
 static Array32(Str)
@@ -137,7 +135,7 @@ typedef enum __attribute__((packed)) {
 
 typedef struct {
   u32 scope_depth;
-  Ast_handle var_definition_node_i;
+  Ast_handle var_definition_ast_handle;
   Str name;
 } Type_variable;
 Array32_struct(Type_variable);
@@ -161,7 +159,7 @@ typedef struct {
 Array32_struct(Jvm_verification_info);
 
 typedef struct {
-  Ast_handle node_i;
+  Ast_handle ast_handle;
   u32 type_i;
   u32 scope_depth;
   Jvm_verification_info verification_info;
@@ -3961,10 +3959,10 @@ static Ast_handle parser_parse_block(Parser *parser, Arena *arena) {
 
   parser_expect_token(parser, TOKEN_KIND_LEFT_BRACE,
                       "Expected a left curly brace to start a block");
-  const Ast_handle node_i = parser_parse_statements(parser, arena);
+  const Ast_handle ast_handle = parser_parse_statements(parser, arena);
   parser_expect_token(parser, TOKEN_KIND_RIGHT_BRACE,
                       "Expected a right curly brace to end a block");
-  return node_i;
+  return ast_handle;
 }
 
 // controlStructureBody:
@@ -4024,13 +4022,13 @@ static Ast_handle parser_parse_if_expression(Parser *parser, Arena *arena) {
                  ? parser_parse_control_structure_body(parser, arena)
                  : ast_handle_nil,
   };
-  const Ast_handle binary_node_i = new_ast(&binary_node, arena);
+  const Ast_handle binary_ast_handle = new_ast(&binary_node, arena);
 
   const Ast if_node = {
       .kind = AST_KIND_IF,
       .main_token_i = main_token_i,
       .lhs = condition_i,
-      .rhs = binary_node_i,
+      .rhs = binary_ast_handle,
   };
   return new_ast(&if_node, arena);
 }
@@ -4101,11 +4099,11 @@ static Ast_handle parser_parse_primary_expression(Parser *parser,
     };
     return new_ast(&node, arena);
   } else if (parser_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
-    const Ast_handle node_i = parser_parse_expression(parser, arena);
+    const Ast_handle ast_handle = parser_parse_expression(parser, arena);
     // TODO: Locate left parenthesis for the error message.
     parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                         "Expected matching right parenthesis");
-    return node_i;
+    return ast_handle;
   } else if (parser_match_token(parser, TOKEN_KIND_IDENTIFIER)) {
     Ast node = {
         .kind = AST_KIND_UNRESOLVED_NAME,
@@ -4159,11 +4157,11 @@ static Ast_handle parser_parse_var_declaration(Parser *parser, Arena *arena) {
   return new_ast(&node, arena);
 }
 
-static bool parser_is_lvalue(const Parser *parser, Ast_handle node_i,
+static bool parser_is_lvalue(const Parser *parser, Ast_handle ast_handle,
                              Arena arena) {
   pg_assert(parser != NULL);
 
-  const Ast *const node = ast_handle_to_ptr(node_i, arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, arena);
   switch (node->kind) {
   case AST_KIND_VAR_REFERENCE:
     return true;
@@ -4231,12 +4229,12 @@ static Ast_handle parser_parse_while_statement(Parser *parser, Arena *arena) {
       .main_token_i = main_token_i,
       .lhs = condition_i,
   };
-  const Ast_handle node_i = new_ast(&node, arena);
+  const Ast_handle ast_handle = new_ast(&node, arena);
 
-  ast_handle_to_ptr(node_i, *arena)->rhs =
+  ast_handle_to_ptr(ast_handle, *arena)->rhs =
       parser_parse_control_structure_body(parser, arena);
 
-  return node_i;
+  return ast_handle;
 }
 
 static Ast_handle parser_parse_loop_statement(Parser *parser, Arena *arena) {
@@ -4262,15 +4260,16 @@ static Ast_handle parser_parse_statement(Parser *parser, Arena *arena) {
                  "code outside of a function body");
   }
 
-  Ast_handle node_i = {0};
-  if (!ast_handle_is_nil(node_i = parser_parse_loop_statement(parser, arena)))
-    return node_i;
+  Ast_handle ast_handle = {0};
+  if (!ast_handle_is_nil(ast_handle =
+                             parser_parse_loop_statement(parser, arena)))
+    return ast_handle;
 
-  if (!ast_handle_is_nil(node_i = parser_parse_declaration(parser, arena)))
-    return node_i;
+  if (!ast_handle_is_nil(ast_handle = parser_parse_declaration(parser, arena)))
+    return ast_handle;
 
-  if (!ast_handle_is_nil(node_i = parser_parse_assignment(parser, arena)))
-    return node_i;
+  if (!ast_handle_is_nil(ast_handle = parser_parse_assignment(parser, arena)))
+    return ast_handle;
 
   return parser_parse_expression(parser, arena);
 }
@@ -4301,10 +4300,10 @@ static Ast_handle parser_parse_navigation_suffix(Parser *parser,
   }
 
   if (parser_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
-    const Ast_handle node_i = parser_parse_expression(parser, arena);
+    const Ast_handle ast_handle = parser_parse_expression(parser, arena);
     parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                         "Expected matching right parenthesis after expression");
-    return node_i;
+    return ast_handle;
   }
 
   pg_assert(0 && "todo"); // TODO: `class`
@@ -4448,15 +4447,15 @@ static Ast_handle parser_parse_multiplicative_expression(Parser *parser,
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i = parser_parse_as_expression(parser, arena);
+  const Ast_handle ast_handle = parser_parse_as_expression(parser, arena);
   if (!(parser_match_token(parser, TOKEN_KIND_STAR) ||
         parser_match_token(parser, TOKEN_KIND_SLASH) ||
         parser_match_token(parser, TOKEN_KIND_PERCENT)))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_multiplicative_expression(parser, arena),
   };
@@ -4472,15 +4471,15 @@ static Ast_handle parser_parse_additive_expression(Parser *parser,
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i =
+  const Ast_handle ast_handle =
       parser_parse_multiplicative_expression(parser, arena);
   if (!(parser_match_token(parser, TOKEN_KIND_PLUS) ||
         parser_match_token(parser, TOKEN_KIND_MINUS)))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_additive_expression(parser, arena),
   };
@@ -4548,17 +4547,17 @@ static Ast_handle parser_parse_comparison(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i =
+  const Ast_handle ast_handle =
       parser_parse_generic_call_like_comparison(parser, arena);
   if (!(parser_match_token(parser, TOKEN_KIND_LT) ||
         parser_match_token(parser, TOKEN_KIND_GT) ||
         parser_match_token(parser, TOKEN_KIND_LE) ||
         parser_match_token(parser, TOKEN_KIND_GE)))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_comparison(parser, arena),
   };
@@ -4572,14 +4571,14 @@ static Ast_handle parser_parse_equality(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i = parser_parse_comparison(parser, arena);
+  const Ast_handle ast_handle = parser_parse_comparison(parser, arena);
   if (!(parser_match_token(parser, TOKEN_KIND_EQUAL_EQUAL) ||
         parser_match_token(parser, TOKEN_KIND_NOT_EQUAL)))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_equality(parser, arena),
   };
@@ -4593,13 +4592,13 @@ static Ast_handle parser_parse_conjunction(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i = parser_parse_equality(parser, arena);
+  const Ast_handle ast_handle = parser_parse_equality(parser, arena);
   if (!parser_match_token(parser, TOKEN_KIND_AMPERSAND_AMPERSAND))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_conjunction(parser, arena),
   };
@@ -4613,13 +4612,13 @@ static Ast_handle parser_parse_disjunction(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  const Ast_handle node_i = parser_parse_conjunction(parser, arena);
+  const Ast_handle ast_handle = parser_parse_conjunction(parser, arena);
   if (!parser_match_token(parser, TOKEN_KIND_PIPE_PIPE))
-    return node_i;
+    return ast_handle;
 
   const Ast node = {
       .kind = AST_KIND_BINARY,
-      .lhs = node_i,
+      .lhs = ast_handle,
       .main_token_i = parser->tokens_i - 1,
       .rhs = parser_parse_disjunction(parser, arena),
   };
@@ -4646,15 +4645,15 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
   if (parser_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)
     return ast_handle_nil;
 
-  Ast_handle node_i = parser_parse_statement(parser, arena);
-  if (ast_handle_is_nil(node_i))
-    return node_i;
+  Ast_handle ast_handle = parser_parse_statement(parser, arena);
+  if (ast_handle_is_nil(ast_handle))
+    return ast_handle;
 
   Ast node = {.kind = AST_KIND_LIST};
-  *array32_push(&node.nodes, arena) = node_i;
+  *array32_push(&node.nodes, arena) = ast_handle;
 
-  while (!ast_handle_is_nil(node_i = parser_parse_statement(parser, arena)))
-    *array32_push(&node.nodes, arena) = node_i;
+  while (!ast_handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
+    *array32_push(&node.nodes, arena) = ast_handle;
 
   return new_ast(&node, arena);
 }
@@ -4716,9 +4715,9 @@ static Ast_handle parser_parse_parameter(Parser *parser, Arena *arena) {
       .main_token_i = name_i,
       .lhs = parser_parse_type(parser, arena),
   };
-  const Ast_handle node_i = new_ast(&node, arena);
+  const Ast_handle ast_handle = new_ast(&node, arena);
 
-  return node_i;
+  return ast_handle;
 }
 
 // functionValueParameter:
@@ -4876,18 +4875,18 @@ static Ast_handle parser_parse_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  Ast_handle new_node_i = ast_handle_nil;
-  if (!ast_handle_is_nil(new_node_i =
+  Ast_handle new_ast_handle = ast_handle_nil;
+  if (!ast_handle_is_nil(new_ast_handle =
                              parser_parse_function_declaration(parser, arena)))
-    return new_node_i;
+    return new_ast_handle;
 
-  if (!ast_handle_is_nil(new_node_i =
+  if (!ast_handle_is_nil(new_ast_handle =
                              parser_parse_property_declaration(parser, arena)))
-    return new_node_i;
+    return new_ast_handle;
 
   parser_sync_if_panicked(parser);
 
-  return new_node_i;
+  return new_ast_handle;
 }
 
 // topLevelObject: declaration [semis]
@@ -4918,10 +4917,10 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
 
   // TODO: package, import, etc.
 
-  Ast_handle node_i = ast_handle_nil;
-  while (!ast_handle_is_nil(node_i =
+  Ast_handle ast_handle = ast_handle_nil;
+  while (!ast_handle_is_nil(ast_handle =
                                 parser_parse_top_level_object(parser, arena))) {
-    *array32_push(&node.nodes, arena) = node_i;
+    *array32_push(&node.nodes, arena) = ast_handle;
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -4945,7 +4944,7 @@ static Ast_handle parser_parse(Parser *parser, Arena *arena) {
   return root_i;
 }
 
-static void parser_ast_fprint(const Parser *parser, Ast_handle node_i,
+static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
                               FILE *file, u16 indent, u32 count, Arena arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
@@ -4954,10 +4953,10 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle node_i,
   if (!cli_log_verbose)
     return;
 
-  if (ast_handle_is_nil(node_i))
+  if (ast_handle_is_nil(ast_handle))
     return;
 
-  const Ast *const node = ast_handle_to_ptr(node_i, arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, arena);
   if (node->kind == AST_KIND_NONE)
     return;
 
@@ -5812,7 +5811,7 @@ static bool typechecker_merge_types(const Resolver *resolver, u32 lhs_i,
   return false;
 }
 
-static void resolver_ast_fprint(const Resolver *resolver, Ast_handle node_i,
+static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
                                 FILE *file, u16 indent, u32 count,
                                 Arena *arena) {
   pg_assert(resolver != NULL);
@@ -5823,7 +5822,7 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle node_i,
   if (!cli_log_verbose)
     return;
 
-  const Ast *const node = ast_handle_to_ptr(node_i, *arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   if (node->kind == AST_KIND_NONE)
     return;
 
@@ -6171,7 +6170,7 @@ static void typechecker_end_scope(Resolver *resolver) {
 }
 
 static u32 typechecker_declare_variable(Resolver *resolver, Str name,
-                                        Ast_handle node_i, Arena *arena) {
+                                        Ast_handle ast_handle, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->scope_depth > 0);
   pg_assert(arena != NULL);
@@ -6181,7 +6180,7 @@ static u32 typechecker_declare_variable(Resolver *resolver, Str name,
   const Type_variable variable = {
       .name = name,
       .scope_depth = UINT32_MAX,
-      .var_definition_node_i = node_i,
+      .var_definition_ast_handle = ast_handle,
   };
   *array32_push(&resolver->variables, arena) = variable;
   return (u32)array32_last_index(resolver->variables);
@@ -6224,9 +6223,9 @@ static u32 typechecker_find_variable(Resolver *resolver, u32 token_i) {
 }
 
 static Str resolver_get_fqn_from_navigation_chain(const Resolver *resolver,
-                                                  Ast_handle node_i,
+                                                  Ast_handle ast_handle,
                                                   Arena arena) {
-  const Ast *const node = ast_handle_to_ptr(node_i, arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, arena);
   pg_assert(node->kind == AST_KIND_NAVIGATION);
 
   const Token start = resolver->parser->lexer->tokens.data[node->main_token_i];
@@ -6259,7 +6258,7 @@ static bool typechecker_variable_shadows(Resolver *resolver, u32 name_token_i,
       &resolver->variables.data[previous_var_i];
 
   const Ast *const previous_var_node =
-      ast_handle_to_ptr(previous_var->var_definition_node_i, arena);
+      ast_handle_to_ptr(previous_var->var_definition_ast_handle, arena);
 
   const Token previous_var_name_token =
       resolver->parser->lexer->tokens.data[previous_var_node->main_token_i];
@@ -6277,15 +6276,15 @@ static bool typechecker_variable_shadows(Resolver *resolver, u32 name_token_i,
   return false;
 }
 
-static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
+static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle ast_handle,
                                 Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
 
-  if (ast_handle_is_nil(node_i))
+  if (ast_handle_is_nil(ast_handle))
     return 0;
 
-  Ast *const node = ast_handle_to_ptr(node_i, *arena);
+  Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   const Token token = resolver->parser->lexer->tokens.data[node->main_token_i];
 
   switch (node->kind) {
@@ -6308,10 +6307,10 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
         array32_make(u32, 0, node->nodes.len, &tmp_arena);
 
     for (u64 i = 0; i < node->nodes.len; i++) {
-      const Ast_handle node_i = node->nodes.data[i];
+      const Ast_handle ast_handle = node->nodes.data[i];
 
       const u32 type_i =
-          resolver_resolve_ast(resolver, node_i, tmp_arena, arena);
+          resolver_resolve_ast(resolver, ast_handle, tmp_arena, arena);
       *array32_push(&call_site_argument_types_i, &tmp_arena) = type_i;
     }
 
@@ -6476,7 +6475,7 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
     // TODO: We could optimize it by not creating new types at this point.
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
 
-    resolver->current_function_i = node_i;
+    resolver->current_function_i = ast_handle;
 
     // Inspect body (rhs).
     resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
@@ -6494,8 +6493,8 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
 
     const u32 variable_i = typechecker_declare_variable(
         resolver,
-        parser_token_to_str_view(resolver->parser, node->main_token_i), node_i,
-        arena);
+        parser_token_to_str_view(resolver->parser, node->main_token_i),
+        ast_handle, arena);
 
     const u32 lhs_type_i =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
@@ -6593,7 +6592,7 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
 
     if (variable_i == (u32)-1) {
       Str fqn =
-          resolver_get_fqn_from_navigation_chain(resolver, node_i, *arena);
+          resolver_get_fqn_from_navigation_chain(resolver, ast_handle, *arena);
 
       if (resolver_resolve_fully_qualified_name(resolver, fqn, &node->type_i,
                                                 scratch_arena, arena)) {
@@ -6625,8 +6624,8 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
   case AST_KIND_FUNCTION_PARAMETER: {
     const u32 variable_i = typechecker_declare_variable(
         resolver,
-        parser_token_to_str_view(resolver->parser, node->main_token_i), node_i,
-        arena);
+        parser_token_to_str_view(resolver->parser, node->main_token_i),
+        ast_handle, arena);
     node->type_i =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     typechecker_mark_variable_as_initialized(resolver, variable_i);
@@ -6696,9 +6695,9 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
     }
 
     node->kind = AST_KIND_VAR_REFERENCE;
-    node->lhs = resolver->variables.data[variable_i].var_definition_node_i;
+    node->lhs = resolver->variables.data[variable_i].var_definition_ast_handle;
 
-    return resolver_resolve_ast(resolver, node_i, scratch_arena, arena);
+    return resolver_resolve_ast(resolver, ast_handle, scratch_arena, arena);
 
     break;
   }
@@ -6844,8 +6843,8 @@ static void resolver_collect_user_defined_function_signatures(
       type.v.method.argument_types_i =
           array32_make(u32, 0, lhs->nodes.len, arena);
       for (u64 i = 0; i < lhs->nodes.len; i++) {
-        const Ast_handle node_i = lhs->nodes.data[i];
-        const u32 type_i = ast_handle_to_ptr(node_i, *arena)->type_i;
+        const Ast_handle ast_handle = lhs->nodes.data[i];
+        const u32 type_i = ast_handle_to_ptr(ast_handle, *arena)->type_i;
         *array32_push(&type.v.method.argument_types_i, arena) = type_i;
       }
     }
@@ -7778,11 +7777,11 @@ static void codegen_end_scope(codegen_generator *gen) {
 
 // TODO: Should the AST_KIND_VAR_DEFINITION node simply store the variable
 // slot number? Or use a lookup table?
-static bool jvm_find_variable(const codegen_frame *frame, Ast_handle node_i,
+static bool jvm_find_variable(const codegen_frame *frame, Ast_handle ast_handle,
                               u16 *logical_local_index,
                               u16 *physical_local_index) {
   pg_assert(frame != NULL);
-  pg_assert(!ast_handle_is_nil(node_i));
+  pg_assert(!ast_handle_is_nil(ast_handle));
   pg_assert(logical_local_index != NULL);
   pg_assert(physical_local_index != NULL);
 
@@ -7791,7 +7790,7 @@ static bool jvm_find_variable(const codegen_frame *frame, Ast_handle node_i,
     const Jvm_variable *const variable = &frame->locals.data[i];
     *physical_local_index -=
         jvm_verification_info_kind_word_count(variable->verification_info.kind);
-    if (variable->node_i.value != node_i.value)
+    if (variable->ast_handle.value != ast_handle.value)
       continue;
 
     pg_assert(*physical_local_index < frame->locals_physical_count);
@@ -7803,7 +7802,7 @@ static bool jvm_find_variable(const codegen_frame *frame, Ast_handle node_i,
 }
 
 static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
-                              Ast_handle node_i, Arena *arena);
+                              Ast_handle ast_handle, Arena *arena);
 
 static void codegen_patch_jump_at(codegen_generator *gen, u16 at, u16 target) {
   pg_assert(gen != NULL);
@@ -8023,8 +8022,8 @@ static void codegen_emit_lt(codegen_generator *gen, Arena *arena) {
 }
 
 static void codegen_emit_if_then_else(codegen_generator *gen,
-                                      Class_file *class_file, Ast_handle node_i,
-                                      Arena *arena) {
+                                      Class_file *class_file,
+                                      Ast_handle ast_handle, Arena *arena) {
   // clang-format off
 //
 //               IF 
@@ -8052,7 +8051,7 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
   pg_assert(arena != NULL);
   pg_assert(gen->frame != NULL);
 
-  const Ast *const node = ast_handle_to_ptr(node_i, *arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   pg_assert(node->type_i > 0);
 
   // Emit condition.
@@ -8206,7 +8205,7 @@ codegen_add_class_name_in_constant_pool(Class_file *class_file, Str class_name,
 }
 
 static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
-                              Ast_handle node_i, Arena *arena) {
+                              Ast_handle ast_handle, Arena *arena) {
   pg_assert(gen != NULL);
   pg_assert(gen->resolver->parser != NULL);
   pg_assert(gen->resolver->parser->lexer != NULL);
@@ -8214,9 +8213,10 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
             gen->resolver->parser->lexer->tokens.len);
   pg_assert(class_file != NULL);
 
-  if (ast_handle_is_nil(node_i))return;
+  if (ast_handle_is_nil(ast_handle))
+    return;
 
-  const Ast *const node = ast_handle_to_ptr(node_i, *arena);
+  const Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   const Token token =
       gen->resolver->parser->lexer->tokens.data[node->main_token_i];
   const Type *const type = &gen->resolver->types.data[node->type_i];
@@ -8295,7 +8295,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         const Jvm_verification_info verification_info =
             gen->frame->stack.data[stack_index];
         const Jvm_variable variable = {
-            .node_i = argument_i,
+            .ast_handle = argument_i,
             .type_i = argument->type_i,
             .scope_depth = gen->frame->scope_depth,
             .verification_info = verification_info,
@@ -8429,8 +8429,9 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         if (rhs->nodes.len == 0) {
           codegen_emit_return_nothing(gen, arena);
         } else {
-          const Ast_handle last_node_i = *array32_last(rhs->nodes);
-          const Ast *const last_node = ast_handle_to_ptr(last_node_i, *arena);
+          const Ast_handle last_ast_handle = *array32_last(rhs->nodes);
+          const Ast *const last_node =
+              ast_handle_to_ptr(last_ast_handle, *arena);
 
           if (last_node->kind != AST_KIND_RETURN) {
             codegen_emit_return_nothing(gen, arena);
@@ -8754,7 +8755,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         codegen_type_to_verification_info(
             resolver_eval_type(gen->resolver, type));
     const Jvm_variable variable = {
-        .node_i = node_i,
+        .ast_handle = ast_handle,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
         .verification_info = verification_info,
@@ -8794,7 +8795,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_IF: {
-    codegen_emit_if_then_else(gen, class_file, node_i, arena);
+    codegen_emit_if_then_else(gen, class_file, ast_handle, arena);
     break;
   }
   case AST_KIND_WHILE_LOOP: {
@@ -8874,7 +8875,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         codegen_type_to_verification_info(
             resolver_eval_type(gen->resolver, type));
     const Jvm_variable argument = {
-        .node_i = node_i,
+        .ast_handle = ast_handle,
         .type_i = node->type_i,
         .scope_depth = gen->frame->scope_depth,
         .verification_info = verification_info,
