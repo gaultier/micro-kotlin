@@ -30,10 +30,6 @@ Array32_struct(Ast_handle);
 
 const static Ast_handle ast_handle_nil = {(u32)HANDLE_FLAGS_AST};
 
-static Ast_handle ast_handle_make_nil() {
-  return (Ast_handle){(u32)HANDLE_FLAGS_AST};
-}
-
 static bool ast_handle_is_nil(Ast_handle handle) {
 
   // Make zero values usable.
@@ -349,6 +345,7 @@ Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
   pg_assert((handle.value & (u32)HANDLE_FLAGS_AST) == (u32)HANDLE_FLAGS_AST);
 
   handle.value &= ~(u32)HANDLE_FLAGS_AST;
+  pg_assert(((u8 *)(u64)handle.value )< arena.end);
 
   return (Ast *)arena.end - handle.value;
 }
@@ -6776,14 +6773,21 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
 }
 
 static void resolver_collect_user_defined_function_signatures(
-    Resolver *resolver, Arena scratch_arena, Arena *arena) {
-  for (u64 i = 0; i < resolver->parser->nodes.len; i++) {
-    Ast *const node = &resolver->parser->nodes.data[i];
-    if (node->kind != AST_KIND_FUNCTION_DEFINITION)
-      continue;
+    Resolver *resolver, Ast_handle ast_handle, Arena scratch_arena,
+    Arena *arena) {
 
+  Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
+  switch (node->kind) {
+  case AST_KIND_LIST:
+    for (u64 i = 0; i < node->nodes.len; i++)
+      resolver_collect_user_defined_function_signatures(
+          resolver, node->nodes.data[i], scratch_arena, arena);
+
+    break;
+
+  case AST_KIND_FUNCTION_DEFINITION: {
     typechecker_begin_scope(resolver);
-    resolver->current_function_i = (u32)i;
+    resolver->current_function_i = ast_handle;
 
     // Arguments (lhs).
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
@@ -6800,12 +6804,12 @@ static void resolver_collect_user_defined_function_signatures(
         .kind = TYPE_METHOD,
         .package_name = resolver->parser->current_package,
         .this_class_name = resolver->this_class_name,
-        .v = {.method =
-                  {
-                      .return_type_i = return_type_i,
-                      .source_file_name = resolver->parser->lexer->file_path,
-                      .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
-                  }},
+        .v.method =
+            {
+                .return_type_i = return_type_i,
+                .source_file_name = resolver->parser->lexer->file_path,
+                .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+            },
     };
     u32 column = 0;
     u32 line = 0;
@@ -6835,6 +6839,13 @@ static void resolver_collect_user_defined_function_signatures(
 
     resolver->current_function_i = ast_handle_nil;
     typechecker_end_scope(resolver);
+  } break;
+  default:
+    resolver_collect_user_defined_function_signatures(resolver, node->lhs,
+                                                      scratch_arena, arena);
+    resolver_collect_user_defined_function_signatures(resolver, node->rhs,
+                                                      scratch_arena, arena);
+    break;
   }
 }
 
@@ -8194,8 +8205,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     return;
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i < gen->resolver->parser->lexer->tokens.len);
-    const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_INT,
-                                              .v = {.number = node->extra_data_i}};
+    const Jvm_constant_pool_entry constant = {
+        .kind = CONSTANT_POOL_KIND_INT, .v = {.number = node->extra_data_i}};
     const u16 number_i =
         jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
