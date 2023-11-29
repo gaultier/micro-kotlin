@@ -21,6 +21,7 @@
 
 typedef enum {
   HANDLE_FLAGS_AST = 1 << 31,
+  HANDLE_FLAGS_TYPE = 1 << 30,
 } Handle_flags;
 
 typedef struct {
@@ -30,7 +31,14 @@ Array32_struct(Ast_handle);
 
 static const Ast_handle ast_handle_nil = {0};
 
-static bool ast_handle_is_nil(Ast_handle handle) { return handle.value == 0; }
+static bool handle_is_nil(Ast_handle handle) { return handle.value == 0; }
+
+typedef struct {
+  u32 value;
+} Type_handle;
+Array32_struct(Type_handle);
+
+static const Type_handle type_handle_nil = {0};
 
 static Array32(Str)
     class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
@@ -4048,7 +4056,7 @@ static Ast_handle parser_parse_jump_expression(Parser *parser, Arena *arena) {
 
   // TODO: check we are in a function.
   if (parser_match_token(parser, TOKEN_KIND_KEYWORD_RETURN)) {
-    if (ast_handle_is_nil(parser->current_function_i)) {
+    if (handle_is_nil(parser->current_function_i)) {
       parser_error(parser, parser_peek_token(parser),
                    "code outside of a function body");
       return ast_handle_nil;
@@ -4257,20 +4265,20 @@ static Ast_handle parser_parse_statement(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  if (ast_handle_is_nil(parser->current_function_i)) {
+  if (handle_is_nil(parser->current_function_i)) {
     parser_error(parser, parser_peek_token(parser),
                  "code outside of a function body");
   }
 
   Ast_handle ast_handle = {0};
-  if (!ast_handle_is_nil(ast_handle =
+  if (!handle_is_nil(ast_handle =
                              parser_parse_loop_statement(parser, arena)))
     return ast_handle;
 
-  if (!ast_handle_is_nil(ast_handle = parser_parse_declaration(parser, arena)))
+  if (!handle_is_nil(ast_handle = parser_parse_declaration(parser, arena)))
     return ast_handle;
 
-  if (!ast_handle_is_nil(ast_handle = parser_parse_assignment(parser, arena)))
+  if (!handle_is_nil(ast_handle = parser_parse_assignment(parser, arena)))
     return ast_handle;
 
   return parser_parse_expression(parser, arena);
@@ -4321,7 +4329,7 @@ static Array32(Ast_handle)
 
   while (!parser_is_at_end(parser)) {
     Ast_handle argument_i = parser_parse_expression(parser, arena);
-    if (ast_handle_is_nil(argument_i)) {
+    if (handle_is_nil(argument_i)) {
       const Token main_token = parser->lexer->tokens.data[parser->tokens_i];
       parser_error(
           parser, main_token,
@@ -4402,7 +4410,7 @@ static Ast_handle parser_parse_postfix_unary_expression(Parser *parser,
   // TODO: multiple suffixes.
   const Ast_handle rhs_i =
       parser_parse_postfix_unary_suffix(parser, &main_token_i, arena);
-  if (ast_handle_is_nil(rhs_i))
+  if (handle_is_nil(rhs_i))
     return lhs_i;
 
   ast_handle_to_ptr(rhs_i, *arena)->lhs = lhs_i;
@@ -4648,13 +4656,13 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
     return ast_handle_nil;
 
   Ast_handle ast_handle = parser_parse_statement(parser, arena);
-  if (ast_handle_is_nil(ast_handle))
+  if (handle_is_nil(ast_handle))
     return ast_handle;
 
   Ast node = {.kind = AST_KIND_LIST};
   *array32_push(&node.nodes, arena) = ast_handle;
 
-  while (!ast_handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
+  while (!handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
     *array32_push(&node.nodes, arena) = ast_handle;
 
   return new_ast(&node, arena);
@@ -4878,11 +4886,11 @@ static Ast_handle parser_parse_declaration(Parser *parser, Arena *arena) {
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
   Ast_handle new_ast_handle = ast_handle_nil;
-  if (!ast_handle_is_nil(new_ast_handle =
+  if (!handle_is_nil(new_ast_handle =
                              parser_parse_function_declaration(parser, arena)))
     return new_ast_handle;
 
-  if (!ast_handle_is_nil(new_ast_handle =
+  if (!handle_is_nil(new_ast_handle =
                              parser_parse_property_declaration(parser, arena)))
     return new_ast_handle;
 
@@ -4920,7 +4928,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   // TODO: package, import, etc.
 
   Ast_handle ast_handle = ast_handle_nil;
-  while (!ast_handle_is_nil(ast_handle =
+  while (!handle_is_nil(ast_handle =
                                 parser_parse_top_level_object(parser, arena))) {
     *array32_push(&node.nodes, arena) = ast_handle;
   }
@@ -4955,7 +4963,7 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
   if (!cli_log_verbose)
     return;
 
-  if (ast_handle_is_nil(ast_handle))
+  if (handle_is_nil(ast_handle))
     return;
 
   const Ast *const node = ast_handle_to_ptr(ast_handle, arena);
@@ -6283,7 +6291,7 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle ast_handle,
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
 
-  if (ast_handle_is_nil(ast_handle))
+  if (handle_is_nil(ast_handle))
     return 0;
 
   Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
@@ -6799,7 +6807,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
                                                       Arena scratch_arena,
                                                       Arena *arena) {
 
-  if (ast_handle_is_nil(ast_handle))
+  if (handle_is_nil(ast_handle))
     return;
 
   Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
@@ -6819,7 +6827,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
     u32 return_type_i = TYPE_UNIT_I;
-    if (!ast_handle_is_nil(node->return_type_ast)) {
+    if (!handle_is_nil(node->return_type_ast)) {
       return_type_i = resolver_resolve_ast(resolver, node->return_type_ast,
                                            scratch_arena, arena);
     }
@@ -6844,7 +6852,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
     pg_assert(line <= UINT16_MAX);
     type.v.method.source_line = (u16)line;
 
-    if (!ast_handle_is_nil(node->lhs)) {
+    if (!handle_is_nil(node->lhs)) {
       const Ast *const lhs = ast_handle_to_ptr(node->lhs, *arena);
       pg_assert(lhs->kind == AST_KIND_LIST);
 
@@ -7790,7 +7798,7 @@ static bool jvm_find_variable(const codegen_frame *frame, Ast_handle ast_handle,
                               u16 *logical_local_index,
                               u16 *physical_local_index) {
   pg_assert(frame != NULL);
-  pg_assert(!ast_handle_is_nil(ast_handle));
+  pg_assert(!handle_is_nil(ast_handle));
   pg_assert(logical_local_index != NULL);
   pg_assert(physical_local_index != NULL);
 
@@ -8080,7 +8088,7 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
 
   codegen_emit_node(gen, class_file, rhs->lhs, arena);
   const u16 jump_from_i =
-      ast_handle_is_nil(rhs->rhs) ? 0 : codegen_emit_jump(gen, arena);
+      handle_is_nil(rhs->rhs) ? 0 : codegen_emit_jump(gen, arena);
   const u16 conditional_jump_target_absolute = (u16)gen->code->bytecode.len;
 
   // Save a clone of the frame after the `then` branch executed so that we
@@ -8110,7 +8118,7 @@ static void codegen_emit_if_then_else(codegen_generator *gen,
   }
   // Patch second, unconditional, jump.
   {
-    if (!ast_handle_is_nil(rhs->rhs)) {
+    if (!handle_is_nil(rhs->rhs)) {
       codegen_patch_jump_at(gen, jump_from_i,
                             unconditional_jump_target_absolute);
 
@@ -8222,7 +8230,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
             gen->resolver->parser->lexer->tokens.len);
   pg_assert(class_file != NULL);
 
-  if (ast_handle_is_nil(ast_handle))
+  if (handle_is_nil(ast_handle))
     return;
 
   const Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
@@ -8429,7 +8437,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       // return type is Unit.
       // TODO: Should it be in the lowering phase instead?
 
-      if (ast_handle_is_nil(node->rhs)) { // Empty body
+      if (handle_is_nil(node->rhs)) { // Empty body
         codegen_emit_return_nothing(gen, arena);
       } else {
         const Ast *const rhs = ast_handle_to_ptr(node->rhs, *arena);
