@@ -390,13 +390,20 @@ struct Mem_profile {
 // TODO: Maybe use varints to reduce the size.
 __attribute__((warn_unused_result)) static u64 ut_record_call_stack(u64 *dst,
                                                                     u64 cap) {
-  uintptr_t *rbp = __builtin_frame_address(0);
+  u64 *rbp = __builtin_frame_address(0);
 
   u64 len = 0;
 
   while (rbp != 0 && ((u64)rbp & 7) == 0 && *rbp != 0) {
-    const uintptr_t rip = *(rbp + 1);
-    rbp = (uintptr_t *)*rbp;
+    const u64 rip = *(rbp + 1);
+    const u64 caller_rsp = (u64)rbp + 16;
+    const u64 caller_rbp = *(u64 *)rbp;
+
+    // Check that rbp is within the right frame
+    if (caller_rsp <= (u64)rbp || caller_rbp <= caller_rsp)
+      return len;
+
+    rbp = (u64 *)caller_rbp;
 
     // `rip` points to the return instruction in the caller, once this call is
     // done. But: We want the location of the call i.e. the `call xxx`
@@ -446,8 +453,8 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
       .in_use_space = bytes_count,
-      .call_stack = array32_make_from_slice(u64, call_stack, (u32)call_stack_len,
-                                        &profile->arena),
+      .call_stack = array32_make_from_slice(
+          u64, call_stack, (u32)call_stack_len, &profile->arena),
   };
 
   *array32_push(&profile->records, &profile->arena) = record;

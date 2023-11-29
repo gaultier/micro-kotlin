@@ -4928,14 +4928,14 @@ static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
   case AST_KIND_BOOL:
-    LOG("[%ld] %.*s %.*s: (at %.*s:%u:%u:%u)", node - parser->nodes.data,
+    LOG("[%ld] %.*s %.*s at %.*s:%u:%u:%u)", node - parser->nodes.data,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)parser->lexer->file_path.len,
         parser->lexer->file_path.data, line, column, token.source_offset);
     break;
 
   case AST_KIND_LIST:
-    LOG("[%ld] %.*s %.*s: (at %.*s:%u:%u:%u), %u children",
+    LOG("[%ld] %.*s %.*s at %.*s:%u:%u:%u), %u children",
         node - parser->nodes.data, (int)kind_string.len, kind_string.data,
         (int)token_string.len, token_string.data,
         (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
