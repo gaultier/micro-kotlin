@@ -92,7 +92,7 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
                                      u64 bytes_count);
 
 __attribute__((warn_unused_result))
-__attribute((malloc, alloc_size(2, 3), alloc_align(3))) static void *
+__attribute((malloc, alloc_size(2, 4), alloc_align(3))) static void *
 arena_alloc(Arena *a, size_t size, size_t align, size_t count) {
   pg_assert(a->start <= a->end);
   pg_assert(size > 0);
