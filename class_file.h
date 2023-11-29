@@ -306,13 +306,13 @@ struct Type {
   Str super_class_name;
   Str package_name;
   union {
-    Method method;             // TYPE_METHOD, TYPE_CONSTRUCTOR
-    Type_handle array_type_i;  // TYPE_ARRAY_REFERENCE
-    u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
+    Method method;                 // TYPE_METHOD, TYPE_CONSTRUCTOR
+    Type_handle array_type_handle; // TYPE_ARRAY_REFERENCE
+    u16 integer_literal_types;     // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   Type_kind kind;
   u16 flags;
-  Type_handle super_type_i;
+  Type_handle super_type_handle;
   Type_handle list_next;
   pg_pad(4);
 };
@@ -327,7 +327,7 @@ struct Ast {
   Ast_handle rhs;
   Type_handle type_handle; // TODO: should it be separate?
   Array32(Ast_handle) nodes;
-  u64 extra_data_i;
+  u64 extra_data;
   u16 flags;
   Ast_kind kind;
   pg_pad(1);
@@ -437,11 +437,10 @@ typedef struct {
 } Lexer;
 
 typedef struct {
-  // FIXME: Use Str
   Str buf;
   Lexer *lexer;
   Str current_package;
-  Ast_handle current_function_i;
+  Ast_handle current_function_handle;
   u32 buf_len;
   u32 tokens_i;
   Parser_state state;
@@ -591,10 +590,13 @@ static bool resolver_are_types_equal(const Resolver *resolver,
       return false;
 
     for (u64 i = 0; i < lhs_method->argument_type_handles.len; i++) {
-      const Type_handle lhs_arg_i = lhs_method->argument_type_handles.data[i];
-      const Type_handle rhs_arg_i = rhs_method->argument_type_handles.data[i];
+      const Type_handle lhs_arg_handle =
+          lhs_method->argument_type_handles.data[i];
+      const Type_handle rhs_arg_handle =
+          rhs_method->argument_type_handles.data[i];
 
-      if (!resolver_are_types_equal(resolver, lhs_arg_i, rhs_arg_i, arena))
+      if (!resolver_are_types_equal(resolver, lhs_arg_handle, rhs_arg_handle,
+                                    arena))
         return false;
     }
 
@@ -695,7 +697,7 @@ static bool resolver_is_type_subtype_of(Resolver *resolver,
 
       const Type *const it = type_handle_to_ptr(it_handle, *arena);
 
-      if (type_handle_handles_nil(it->super_type_i))
+      if (type_handle_handles_nil(it->super_type_handle))
         return false; // Reached the top
 
       if (resolver_are_types_equal(resolver, it_handle, b_handle, *arena))
@@ -714,7 +716,7 @@ static bool resolver_is_type_subtype_of(Resolver *resolver,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    Resolver *resolver, Array32(Type_handle) call_site_argument_types_i,
+    Resolver *resolver, Array32(Type_handle) call_site_argument_types_handle,
     Type_handle function_definition_type_handle, Arena scratch_arena,
     Arena *arena) {
   const Type *const function_definition_type =
@@ -723,7 +725,7 @@ static bool resolver_is_function_candidate_applicable(
 
   const Method *definition = &function_definition_type->v.method;
 
-  const u8 call_argument_count = (u8)call_site_argument_types_i.len;
+  const u8 call_argument_count = (u8)call_site_argument_types_handle.len;
   const u8 definition_argument_count =
       (u8)definition->argument_type_handles.len;
 
@@ -733,11 +735,11 @@ static bool resolver_is_function_candidate_applicable(
     return false;
 
   for (u8 i = 0; i < call_argument_count; i++) {
-    const Type_handle call_site_argument_type_i =
-        call_site_argument_types_i.data[i];
+    const Type_handle call_site_argument_type_handle =
+        call_site_argument_types_handle.data[i];
 
     const bool is_call_argument_subtype_of_definition_argument =
-        resolver_is_type_subtype_of(resolver, call_site_argument_type_i,
+        resolver_is_type_subtype_of(resolver, call_site_argument_type_handle,
                                     definition->argument_type_handles.data[i],
                                     scratch_arena, arena);
 
@@ -1065,7 +1067,7 @@ static Str_builder jvm_fill_descriptor_string(Str_builder sb,
   }
   case TYPE_ARRAY: {
     sb = sb_append_char(sb, '[', arena);
-    return jvm_fill_descriptor_string(sb, type->v.array_type_i, arena);
+    return jvm_fill_descriptor_string(sb, type->v.array_type_handle, arena);
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
@@ -1185,7 +1187,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
                                  &type->this_class_name, arena);
     }
 
-    type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
+    type->v.array_type_handle = resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -1196,7 +1198,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
     type->kind = TYPE_METHOD;
     remaining = str_advance(remaining, 1);
 
-    Array32(Type_handle) argument_types_i =
+    Array32(Type_handle) argument_types_handle =
         array32_make(Type_handle, 0, (u32)remaining.len, arena);
 
     for (u64 i = 0; i < 255; i++) {
@@ -1206,9 +1208,9 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
       Type argument_type = {0};
       remaining =
           jvm_parse_descriptor(resolver, remaining, &argument_type, arena);
-      const Type_handle argument_type_i =
+      const Type_handle argument_type_handle =
           resolver_add_type(resolver, &argument_type, arena);
-      *array32_push(&argument_types_i, arena) = argument_type_i;
+      *array32_push(&argument_types_handle, arena) = argument_type_handle;
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] = ')');
@@ -1218,7 +1220,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
     remaining = jvm_parse_descriptor(resolver, remaining, &return_type, arena);
     // TODO: Check cache before adding the type.
 
-    type->v.method.argument_type_handles = argument_types_i;
+    type->v.method.argument_type_handles = argument_types_handle;
     type->v.method.return_type_handle =
         resolver_add_type(resolver, &return_type, arena);
 
@@ -2194,13 +2196,13 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(class_i > 0);
     pg_assert(class_i <= constant_pool_count);
 
-    const u16 name_and_type_i = buf_read_be_u16(buf, current);
-    pg_assert(name_and_type_i > 0);
-    pg_assert(name_and_type_i <= constant_pool_count);
+    const u16 name_and_type_handle = buf_read_be_u16(buf, current);
+    pg_assert(name_and_type_handle > 0);
+    pg_assert(name_and_type_handle <= constant_pool_count);
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.name_and_type = name_and_type_i,
+        .v = {.method_ref = {.name_and_type = name_and_type_handle,
                              .class = class_i}}};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
@@ -2210,9 +2212,9 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(class_i > 0);
     pg_assert(class_i <= constant_pool_count);
 
-    const u16 name_and_type_i = buf_read_be_u16(buf, current);
-    pg_assert(name_and_type_i > 0);
-    pg_assert(name_and_type_i <= constant_pool_count);
+    const u16 name_and_type_handle = buf_read_be_u16(buf, current);
+    pg_assert(name_and_type_handle > 0);
+    pg_assert(name_and_type_handle <= constant_pool_count);
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
@@ -3784,7 +3786,7 @@ static Str type_to_human_string(Type_handle type_handle, Arena *arena) {
   case TYPE_ARRAY: {
     Str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
-    res = sb_append(res, type_to_human_string(type->v.array_type_i, arena),
+    res = sb_append(res, type_to_human_string(type->v.array_type_handle, arena),
                     arena);
     res = sb_append_char(res, '>', arena);
     return sb_build(res);
@@ -3799,9 +3801,10 @@ static Str type_to_human_string(Type_handle type_handle, Arena *arena) {
     Str_builder res = sb_new(128, arena);
     res = sb_append_c(res, "(", arena);
     for (u64 i = 0; i < method_type->argument_type_handles.len; i++) {
-      const Type_handle argument_type_i =
+      const Type_handle argument_type_handle =
           method_type->argument_type_handles.data[i];
-      res = sb_append(res, type_to_human_string(argument_type_i, arena), arena);
+      res = sb_append(res, type_to_human_string(argument_type_handle, arena),
+                      arena);
 
       if (i < method_type->argument_type_handles.len - 1)
         res = sb_append_c(res, ", ", arena);
@@ -4067,7 +4070,7 @@ static Ast_handle parser_parse_if_expression(Parser *parser, Arena *arena) {
   parser_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                       "expected left parenthesis following if");
 
-  const Ast_handle condition_i = parser_parse_expression(parser, arena);
+  const Ast_handle condition_handle = parser_parse_expression(parser, arena);
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                       "expected right parenthesis following if condition");
@@ -4095,7 +4098,7 @@ static Ast_handle parser_parse_if_expression(Parser *parser, Arena *arena) {
   const Ast if_node = {
       .kind = AST_KIND_IF,
       .main_token_i = main_token_i,
-      .lhs = condition_i,
+      .lhs = condition_handle,
       .rhs = binary_ast_handle,
   };
   return new_ast(&if_node, arena);
@@ -4114,7 +4117,7 @@ static Ast_handle parser_parse_jump_expression(Parser *parser, Arena *arena) {
 
   // TODO: check we are in a function.
   if (parser_match_token(parser, TOKEN_KIND_KEYWORD_RETURN)) {
-    if (ast_handle_is_nil(parser->current_function_i)) {
+    if (ast_handle_is_nil(parser->current_function_handle)) {
       parser_error(parser, parser_peek_token(parser),
                    "code outside of a function body");
       return ast_handle_nil;
@@ -4163,7 +4166,7 @@ static Ast_handle parser_parse_primary_expression(Parser *parser,
     const Ast node = {
         .kind = AST_KIND_BOOL,
         .main_token_i = parser->tokens_i - 1,
-        .extra_data_i = is_true,
+        .extra_data = is_true,
     };
     return new_ast(&node, arena);
   } else if (parser_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
@@ -4212,14 +4215,14 @@ static Ast_handle parser_parse_var_declaration(Parser *parser, Arena *arena) {
   parser_expect_token(parser, TOKEN_KIND_COLON,
                       "expected colon between variable name and type");
 
-  const Ast_handle node_type_i = parser_parse_type(parser, arena);
+  const Ast_handle node_type_handle = parser_parse_type(parser, arena);
 
   parser_expect_token(parser, TOKEN_KIND_EQUAL, "expected type");
 
   const Ast node = {
       .kind = AST_KIND_VAR_DEFINITION,
       .main_token_i = name_token_i,
-      .lhs = node_type_i,
+      .lhs = node_type_handle,
       .rhs = parser_parse_expression(parser, arena),
   };
   return new_ast(&node, arena);
@@ -4255,21 +4258,21 @@ static Ast_handle parser_parse_assignment(Parser *parser, Arena *arena) {
   // Instead, we first parse it as an expression, and if the next
   // token is `TOKEN_KIND_EQUAL`, we check that this expression was indeed a
   // lvalue. Otherwise, we just return this expression, no more work to do.
-  Ast_handle lhs_i = parser_parse_expression(parser, arena);
+  Ast_handle lhs_handle = parser_parse_expression(parser, arena);
 
   if (parser_match_token(parser, TOKEN_KIND_EQUAL)) { // Assignment
     const u32 main_token_i = parser->tokens_i - 1;
 
     const Ast node = {
         .kind = AST_KIND_ASSIGNMENT,
-        .lhs = lhs_i,
+        .lhs = lhs_handle,
         .main_token_i = main_token_i,
         .rhs = parser_parse_expression(parser, arena),
     };
     return new_ast(&node, arena);
   }
 
-  return lhs_i;
+  return lhs_handle;
 }
 // whileStatement:
 //     'while'
@@ -4287,7 +4290,7 @@ static Ast_handle parser_parse_while_statement(Parser *parser, Arena *arena) {
   parser_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                       "Expect left parenthesis after the while keyword");
 
-  const Ast_handle condition_i = parser_parse_expression(parser, arena);
+  const Ast_handle condition_handle = parser_parse_expression(parser, arena);
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                       "Expect right parenthesis after the while condition");
@@ -4295,7 +4298,7 @@ static Ast_handle parser_parse_while_statement(Parser *parser, Arena *arena) {
   const Ast node = {
       .kind = AST_KIND_WHILE_LOOP,
       .main_token_i = main_token_i,
-      .lhs = condition_i,
+      .lhs = condition_handle,
   };
   const Ast_handle ast_handle = new_ast(&node, arena);
 
@@ -4323,7 +4326,7 @@ static Ast_handle parser_parse_statement(Parser *parser, Arena *arena) {
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  if (ast_handle_is_nil(parser->current_function_i)) {
+  if (ast_handle_is_nil(parser->current_function_handle)) {
     parser_error(parser, parser_peek_token(parser),
                  "code outside of a function body");
   }
@@ -4462,18 +4465,18 @@ static Ast_handle parser_parse_postfix_unary_expression(Parser *parser,
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
 
-  Ast_handle lhs_i = parser_parse_primary_expression(parser, arena);
+  Ast_handle lhs_handle = parser_parse_primary_expression(parser, arena);
 
   u32 main_token_i = 0;
   // TODO: multiple suffixes.
-  const Ast_handle rhs_i =
+  const Ast_handle rhs_handle =
       parser_parse_postfix_unary_suffix(parser, &main_token_i, arena);
-  if (ast_handle_is_nil(rhs_i))
-    return lhs_i;
+  if (ast_handle_is_nil(rhs_handle))
+    return lhs_handle;
 
-  ast_handle_to_ptr(rhs_i, *arena)->lhs = lhs_i;
+  ast_handle_to_ptr(rhs_handle, *arena)->lhs = lhs_handle;
 
-  return rhs_i;
+  return rhs_handle;
 }
 
 // prefixUnaryExpression:
@@ -4868,23 +4871,24 @@ static Ast_handle parser_parse_function_declaration(Parser *parser,
       .main_token_i = start_token,
   };
 
-  const Ast_handle fn_i = parser->current_function_i = new_ast(&node, arena);
+  const Ast_handle fn_i = parser->current_function_handle =
+      new_ast(&node, arena);
 
   parser_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
                       "expected left parenthesis before the arguments");
 
-  ast_handle_to_ptr(parser->current_function_i, *arena)->lhs =
+  ast_handle_to_ptr(parser->current_function_handle, *arena)->lhs =
       parser_parse_function_value_parameters(parser, arena);
 
   if (parser_match_token(parser, TOKEN_KIND_COLON)) {
-    ast_handle_to_ptr(parser->current_function_i, *arena)->return_type_ast =
-        parser_parse_type(parser, arena);
+    ast_handle_to_ptr(parser->current_function_handle, *arena)
+        ->return_type_ast = parser_parse_type(parser, arena);
   }
 
-  ast_handle_to_ptr(parser->current_function_i, *arena)->rhs =
+  ast_handle_to_ptr(parser->current_function_handle, *arena)->rhs =
       parser_parse_function_body(parser, arena);
 
-  parser->current_function_i = ast_handle_nil;
+  parser->current_function_handle = ast_handle_nil;
 
   return fn_i;
 }
@@ -5154,16 +5158,15 @@ static bool jvm_method_has_inline_only_annotation(const Class_file *class_file,
   return false;
 }
 
-static void resolver_load_methods_from_class_file(Resolver *resolver,
-                                                  Type_handle this_class_type_i,
-                                                  const Class_file *class_file,
-                                                  Arena *arena) {
+static void resolver_load_methods_from_class_file(
+    Resolver *resolver, Type_handle this_class_type_handle,
+    const Class_file *class_file, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
   const Type *const this_class_type =
-      type_handle_to_ptr(this_class_type_i, *arena);
+      type_handle_to_ptr(this_class_type_handle, *arena);
 
   Jvm_constant_pool *constant_pool_clone = NULL;
   for (u64 i = 0; i < class_file->methods.len; i++) {
@@ -5188,7 +5191,7 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
     }
 
     type.v.method.access_flags = method->access_flags;
-    type.v.method.this_class_type_handle = this_class_type_i;
+    type.v.method.this_class_type_handle = this_class_type_handle;
     jvm_get_source_location_of_function(class_file, method,
                                         &type.v.method.source_file_name,
                                         &type.v.method.source_line, arena);
@@ -5406,7 +5409,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
-        const Type_handle this_class_type_i =
+        const Type_handle this_class_type_handle =
             resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
@@ -5417,7 +5420,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
         }
 
-        resolver_load_methods_from_class_file(resolver, this_class_type_i,
+        resolver_load_methods_from_class_file(resolver, this_class_type_handle,
                                               &class_file, arena);
 
         resolver->class_file_loaded_count += 1;
@@ -5459,7 +5462,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
-        const u32 this_class_type_i =
+        const u32 this_class_type_handle =
             resolver_add_type(resolver, resolver, &type, arena);
 
         if (class_file.super_class != 0) {
@@ -5475,7 +5478,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
           }
         }
 
-        resolver_load_methods_from_class_file(resolver, this_class_type_i,
+        resolver_load_methods_from_class_file(resolver, this_class_type_handle,
                                               &class_file, arena);
 
         LOG("Loaded class_file_path=%.*s  archive_file_path=%.*s "
@@ -5719,27 +5722,27 @@ static Type_handle resolver_select_most_specific_candidate_function(
       for (u64 j = 0; j < i; j++) {
         const u32 a_index = (u32)i;
         const u32 b_index = (u32)j;
-        const Type_handle a_type_i = candidates.data[a_index];
-        const Type_handle b_type_i = candidates.data[b_index];
+        const Type_handle a_type_handle = candidates.data[a_index];
+        const Type_handle b_type_handle = candidates.data[b_index];
 
         if (tombstones.data[a_index] || tombstones.data[b_index])
           continue;
 
         const Type_applicability a_b =
             resolver_check_applicability_of_candidate_pair(
-                resolver, a_type_i, b_type_i, scratch_arena, arena);
+                resolver, a_type_handle, b_type_handle, scratch_arena, arena);
         const Type_applicability b_a =
             resolver_check_applicability_of_candidate_pair(
-                resolver, b_type_i, a_type_i, scratch_arena, arena);
+                resolver, b_type_handle, a_type_handle, scratch_arena, arena);
 
         const bool a_more_applicable_than_b = a_b & APPLICABILITY_MORE;
         const bool b_more_applicable_than_a = b_a & APPLICABILITY_MORE;
 
         if (cli_log_verbose) {
           Str a_human_type =
-              resolver_function_to_human_string(a_type_i, &scratch_arena);
+              resolver_function_to_human_string(a_type_handle, &scratch_arena);
           Str b_human_type =
-              resolver_function_to_human_string(b_type_i, &scratch_arena);
+              resolver_function_to_human_string(b_type_handle, &scratch_arena);
 
           LOG("[D001] %.*s vs %.*s: a_b=%u b_a=%u", (int)a_human_type.len,
               a_human_type.data, (int)b_human_type.len, b_human_type.data, a_b,
@@ -5785,12 +5788,12 @@ static Type_handle resolver_select_most_specific_candidate_function(
 static bool
 resolver_resolve_free_function(Resolver *resolver, Str method_name,
                                Array32(Type_handle) call_site_argument_types_i,
-                               Type_handle *picked_method_type_i,
+                               Type_handle *picked_method_type_handle,
                                Array32(Type_handle) * candidate_functions_i,
                                Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
-  pg_assert(picked_method_type_i != NULL);
+  pg_assert(picked_method_type_handle != NULL);
 
   resolver_collect_callables_with_name(resolver, method_name,
                                        candidate_functions_i, arena);
@@ -5808,73 +5811,74 @@ resolver_resolve_free_function(Resolver *resolver, Str method_name,
     return false;
   }
   if (candidate_functions_i->len == 1) {
-    *picked_method_type_i = candidate_functions_i->data[0];
+    *picked_method_type_handle = candidate_functions_i->data[0];
     return true;
   }
 
-  *picked_method_type_i = resolver_select_most_specific_candidate_function(
+  *picked_method_type_handle = resolver_select_most_specific_candidate_function(
       resolver, *candidate_functions_i, scratch_arena, arena);
 
   return true;
 }
 
 // TODO: Remove.
-static bool typechecker_merge_types(const Resolver *resolver, Type_handle lhs_i,
-                                    Type_handle rhs_i, Type_handle *result_i,
-                                    Arena arena) {
+static bool typechecker_merge_types(const Resolver *resolver,
+                                    Type_handle lhs_handle,
+                                    Type_handle rhs_handle,
+                                    Type_handle *result_i, Arena arena) {
   pg_assert(resolver != NULL);
   pg_assert(result_i != NULL);
 
-  if (resolver_are_types_equal(resolver, lhs_i, rhs_i, arena)) {
-    *result_i = lhs_i;
+  if (resolver_are_types_equal(resolver, lhs_handle, rhs_handle, arena)) {
+    *result_i = lhs_handle;
     return true;
   }
 
   // Any is compatible with everything.
-  if (type_handle_handles_nil(lhs_i)) {
-    *result_i = rhs_i;
+  if (type_handle_handles_nil(lhs_handle)) {
+    *result_i = rhs_handle;
     return true;
   }
 
-  const Type *const lhs_type = type_handle_to_ptr(lhs_i, arena);
+  const Type *const lhs_type = type_handle_to_ptr(lhs_handle, arena);
 
-  if (type_handle_handles_nil(rhs_i)) {
-    *result_i = lhs_i;
+  if (type_handle_handles_nil(rhs_handle)) {
+    *result_i = lhs_handle;
     return true;
   }
 
-  const Type *const rhs_type = type_handle_to_ptr(rhs_i, arena);
+  const Type *const rhs_type = type_handle_to_ptr(rhs_handle, arena);
 
   // Any is compatible with everything.
   if (lhs_type->kind == TYPE_ANY) {
-    *result_i = rhs_i;
+    *result_i = rhs_handle;
     return true;
   }
 
   // Any is compatible with everything.
   if (rhs_type->kind == TYPE_ANY) {
-    *result_i = lhs_i;
+    *result_i = lhs_handle;
     return true;
   }
 
   // FIXME: Widen.
   if ((lhs_type->kind == TYPE_INT) && (rhs_type->kind == TYPE_BYTE)) {
-    *result_i = rhs_i;
+    *result_i = rhs_handle;
     return true;
   }
 
   if ((lhs_type->kind == TYPE_BYTE) && (rhs_type->kind == TYPE_INT)) {
-    *result_i = lhs_i;
+    *result_i = lhs_handle;
     return true;
   }
 
   if ((lhs_type->kind == TYPE_INT) && (rhs_type->kind == TYPE_SHORT)) {
-    *result_i = rhs_i;
+    *result_i = rhs_handle;
     return true;
   }
 
   if ((lhs_type->kind == TYPE_SHORT) && (rhs_type->kind == TYPE_INT)) {
-    *result_i = lhs_i;
+    *result_i = lhs_handle;
     return true;
   }
 
@@ -6105,7 +6109,7 @@ static bool resolver_resolve_super_lazily(Resolver *resolver,
   // Already done?
   Type *const type = type_handle_to_ptr(type_handle, *arena);
 
-  if (!type_handle_handles_nil(type->super_type_i))
+  if (!type_handle_handles_nil(type->super_type_handle))
     return true;
 
   if (str_eq_c(type->this_class_name, "java/lang/Object"))
@@ -6115,12 +6119,12 @@ static bool resolver_resolve_super_lazily(Resolver *resolver,
   // for optimization purposes.
   if (str_is_empty(type->super_class_name)) {
     return resolver_resolve_fully_qualified_name(
-        resolver, str_from_c("java.lang.Object"), &type->super_type_i,
+        resolver, str_from_c("java.lang.Object"), &type->super_type_handle,
         scratch_arena, arena);
   }
 
   return resolver_resolve_fully_qualified_name(resolver, type->super_class_name,
-                                               &type->super_type_i,
+                                               &type->super_type_handle,
                                                scratch_arena, arena);
 }
 
@@ -6321,13 +6325,13 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
       *array32_push(&call_site_argument_types_i, &tmp_arena) = type_handle;
     }
 
-    Type_handle picked_method_type_i = type_handle_nil;
+    Type_handle picked_method_type_handle = type_handle_nil;
     {
       Array32(Type_handle) candidate_functions_i =
           array32_make(Type_handle, 0, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
-              resolver, name, call_site_argument_types_i, &picked_method_type_i,
+              resolver, name, call_site_argument_types_i, &picked_method_type_handle,
               &candidate_functions_i, tmp_arena, arena)) {
 
         Str_builder error = sb_new(256, &scratch_arena);
@@ -6341,12 +6345,12 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
           error = sb_append_c(error, ", possible candidates: ", arena);
 
           for (u64 i = 0; i < candidate_functions_i.len; i++) {
-            const Type_handle candidate_type_i = candidate_functions_i.data[i];
+            const Type_handle candidate_type_handle = candidate_functions_i.data[i];
 
             error = sb_append_c(error, "\n  ", arena);
             error = sb_append(
                 error,
-                resolver_function_to_human_string(candidate_type_i, arena),
+                resolver_function_to_human_string(candidate_type_handle, arena),
                 arena);
           }
         }
@@ -6355,13 +6359,13 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
       }
     }
 
-    pg_assert(!type_handle_handles_nil(picked_method_type_i));
+    pg_assert(!type_handle_handles_nil(picked_method_type_handle));
     const Type *picked_method_type =
-        type_handle_to_ptr(picked_method_type_i, *arena);
+        type_handle_to_ptr(picked_method_type_handle, *arena);
     pg_assert(picked_method_type->kind == TYPE_METHOD ||
               picked_method_type->kind == TYPE_CONSTRUCTOR);
 
-    node->type_handle = picked_method_type_i;
+    node->type_handle = picked_method_type_handle;
 
     return picked_method_type->v.method.return_type_handle;
   }
@@ -6387,7 +6391,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
             resolver_add_type(resolver, &(Type){.kind = TYPE_LONG}, arena);
       }
     }
-    node->extra_data_i = number;
+    node->extra_data = number;
 
     return node->type_handle;
   }
@@ -6420,18 +6424,18 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
   case AST_KIND_BINARY: {
     pg_assert(node->main_token_i > 0);
 
-    const Type_handle lhs_i =
+    const Type_handle lhs_handle =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
-    const Type_handle rhs_i =
+    const Type_handle rhs_handle =
         resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
-    if (!typechecker_merge_types(resolver, lhs_i, rhs_i, &node->type_handle,
-                                 *arena)) {
+    if (!typechecker_merge_types(resolver, lhs_handle, rhs_handle,
+                                 &node->type_handle, *arena)) {
       Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
-      error = sb_append(error, type_to_human_string(lhs_i, arena), arena);
+      error = sb_append(error, type_to_human_string(lhs_handle, arena), arena);
       error = sb_append_c(error, " vs ", arena);
-      error = sb_append(error, type_to_human_string(rhs_i, arena), arena);
+      error = sb_append(error, type_to_human_string(rhs_handle, arena), arena);
       parser_error(resolver->parser, token, (char *)error.data);
     }
 
@@ -6447,12 +6451,13 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
-      const Type *const lhs_type = type_handle_to_ptr(lhs_i, *arena);
+      const Type *const lhs_type = type_handle_to_ptr(lhs_handle, *arena);
       if (lhs_type->kind != TYPE_BOOLEAN) {
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(
             error, "incompatible types: expected Boolean, got: ", arena);
-        error = sb_append(error, type_to_human_string(lhs_i, arena), arena);
+        error =
+            sb_append(error, type_to_human_string(lhs_handle, arena), arena);
         parser_error(resolver->parser, token, (char *)error.data);
       }
       return type_handle_nil;
@@ -6504,15 +6509,15 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
         parser_token_to_str_view(resolver->parser, node->main_token_i),
         ast_handle, arena);
 
-    const Type_handle lhs_type_i =
+    const Type_handle lhs_type_handle =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
-    const Type_handle rhs_type_i =
+    const Type_handle rhs_type_handle =
         resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
-    if (!typechecker_merge_types(resolver, lhs_type_i, rhs_type_i,
+    if (!typechecker_merge_types(resolver, lhs_type_handle, rhs_type_handle,
                                  &node->type_handle, *arena)) {
-      Str lhs_type_human = type_to_human_string(lhs_type_i, arena);
-      Str rhs_type_human = type_to_human_string(rhs_type_i, arena);
+      Str lhs_type_human = type_to_human_string(lhs_type_handle, arena);
+      Str rhs_type_human = type_to_human_string(rhs_type_handle, arena);
 
       Str_builder error = sb_new(256, &scratch_arena);
       error =
@@ -6524,7 +6529,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
       // Still assign a type to be able to proceed to catch as many errors
       // as possible.
-      node->type_handle = lhs_type_i;
+      node->type_handle = lhs_type_handle;
     }
 
     typechecker_mark_variable_as_initialized(resolver, variable_i);
@@ -6726,22 +6731,24 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
   case AST_KIND_THEN_ELSE: {
     typechecker_begin_scope(resolver);
-    const Type_handle lhs_type_i =
+    const Type_handle lhs_type_handle =
         resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
     typechecker_begin_scope(resolver);
-    const Type_handle rhs_type_i =
+    const Type_handle rhs_type_handle =
         resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
-    if (!typechecker_merge_types(resolver, lhs_type_i, rhs_type_i,
+    if (!typechecker_merge_types(resolver, lhs_type_handle, rhs_type_handle,
                                  &node->type_handle, *arena)) {
       Str_builder error = sb_new(256, &scratch_arena);
       error = sb_append_c(error, "incompatible types: ", arena);
-      error = sb_append(error, type_to_human_string(lhs_type_i, arena), arena);
+      error =
+          sb_append(error, type_to_human_string(lhs_type_handle, arena), arena);
       error = sb_append_c(error, " vs ", arena);
-      error = sb_append(error, type_to_human_string(rhs_type_i, arena), arena);
+      error =
+          sb_append(error, type_to_human_string(rhs_type_handle, arena), arena);
       parser_error(resolver->parser, token, (char *)error.data);
     }
     return node->type_handle;
@@ -6771,10 +6778,10 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
     pg_assert(function_type->kind == TYPE_METHOD ||
               function_type->kind == TYPE_CONSTRUCTOR);
-    const Type_handle return_type_i =
+    const Type_handle return_type_handle =
         function_type->v.method.return_type_handle;
 
-    if (!resolver_are_types_equal(resolver, node->type_handle, return_type_i,
+    if (!resolver_are_types_equal(resolver, node->type_handle, return_type_handle,
                                   *arena)) {
       Str_builder error = sb_new(256, &scratch_arena);
       error =
@@ -6793,7 +6800,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
                         arena);
       error = sb_append_c(error, ", expected ", arena);
       error =
-          sb_append(error, type_to_human_string(return_type_i, arena), arena);
+          sb_append(error, type_to_human_string(return_type_handle, arena), arena);
       parser_error(resolver->parser, token, (char *)error.data);
     }
 
@@ -6832,10 +6839,10 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
     // Arguments (lhs).
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
-    Type_handle return_type_i =
+    Type_handle return_type_handle =
         resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
     if (!ast_handle_is_nil(node->return_type_ast)) {
-      return_type_i = resolver_resolve_ast(resolver, node->return_type_ast,
+      return_type_handle = resolver_resolve_ast(resolver, node->return_type_ast,
                                            scratch_arena, arena);
     }
 
@@ -6847,7 +6854,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
         .this_class_name = resolver->this_class_name,
         .v.method =
             {
-                .return_type_handle = return_type_i,
+                .return_type_handle = return_type_handle,
                 .source_file_name = resolver->parser->lexer->file_path,
                 .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
             },
@@ -7399,11 +7406,11 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
           codegen_import_constant(&class_file->constant_pool,
                                   method->constant_pool, method_ref_i, arena);
 
-      const Type_handle invoked_type_i =
+      const Type_handle invoked_type_handle =
           codegen_make_type_from_method_descriptor(gen, class_file,
                                                    method_ref_gen_i, arena);
       const Type *const invoked_type =
-          type_handle_to_ptr(invoked_type_i, *arena);
+          type_handle_to_ptr(invoked_type_handle, *arena);
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
       codegen_emit_invoke_virtual(gen, method_ref_gen_i,
@@ -7485,11 +7492,11 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
           codegen_import_constant(&class_file->constant_pool,
                                   method->constant_pool, method_ref_i, arena);
 
-      const Type_handle invoked_type_i =
+      const Type_handle invoked_type_handle =
           codegen_make_type_from_method_descriptor(gen, class_file,
                                                    method_ref_gen_i, arena);
       const Type *const invoked_type =
-          type_handle_to_ptr(invoked_type_i, *arena);
+          type_handle_to_ptr(invoked_type_handle, *arena);
       pg_assert(invoked_type->kind == TYPE_METHOD);
 
       codegen_emit_invoke_static(gen, method_ref_gen_i, &invoked_type->v.method,
@@ -8255,7 +8262,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i < gen->resolver->parser->lexer->tokens.len);
     const Jvm_constant_pool_entry constant = {
-        .kind = CONSTANT_POOL_KIND_INT, .v = {.number = node->extra_data_i}};
+        .kind = CONSTANT_POOL_KIND_INT, .v = {.number = node->extra_data}};
     const u16 number_i =
         jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
@@ -8279,7 +8286,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     }
     // TODO: Float, Double, etc.
 
-    const u64 number = node->extra_data_i;
+    const u64 number = node->extra_data;
     const Jvm_constant_pool_entry constant = {.kind = pool_kind,
                                               .v = {.number = number}};
     const u16 number_i =
@@ -8378,13 +8385,13 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const Jvm_constant_pool_entry name_and_type = {
           .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
           .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
-      const u16 name_and_type_i = jvm_constant_array_push(
+      const u16 name_and_type_handle = jvm_constant_array_push(
           &class_file->constant_pool, &name_and_type, arena);
 
       Jvm_constant_pool_entry method_ref = {
           .kind = CONSTANT_POOL_KIND_METHOD_REF,
           .v = {.method_ref = {.class = class_i,
-                               .name_and_type = name_and_type_i}}};
+                               .name_and_type = name_and_type_handle}}};
       const u16 method_ref_i = jvm_constant_array_push(
           &class_file->constant_pool, &method_ref, arena);
 
@@ -9086,12 +9093,12 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         .v = {.name_and_type = {.name = target_method->name,
                                 .descriptor = target_descriptor_i}},
     };
-    const u16 target_name_and_type_i = jvm_constant_array_push(
+    const u16 target_name_and_type_handle = jvm_constant_array_push(
         &class_file->constant_pool, &target_name_and_type, arena);
     const Jvm_constant_pool_entry target_method_ref = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
         .v = {.method_ref = {.class = class_file->this_class,
-                             .name_and_type = target_name_and_type_i}}};
+                             .name_and_type = target_name_and_type_handle}}};
     const u16 target_method_ref_i = jvm_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
@@ -9115,13 +9122,13 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
           .this_class_name = str_from_c("java/lang/String"),
       };
 
-      const Type_handle string_type_i =
+      const Type_handle string_type_handle =
           resolver_add_type(gen->resolver, &string_type, arena);
 
       Type source_method_argument_types = {
           .kind = TYPE_ARRAY,
           .this_class_name = str_from_c("FIXME"),
-          .v = {.array_type_i = string_type_i},
+          .v = {.array_type_handle = string_type_handle},
       };
 
       const Type_handle source_argument_types_i = resolver_add_type(
