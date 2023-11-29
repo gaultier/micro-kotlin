@@ -1109,49 +1109,41 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
 
   case 'S': {
     type->kind = TYPE_SHORT;
-
     return str_advance(remaining, 1);
   }
 
   case 'B': {
     type->kind = TYPE_BYTE;
-
     return str_advance(remaining, 1);
   }
 
   case 'C': {
     type->kind = TYPE_CHAR;
-
     return str_advance(remaining, 1);
   }
 
   case 'D': {
     type->kind = TYPE_DOUBLE;
-
     return str_advance(remaining, 1);
   }
 
   case 'F': {
     type->kind = TYPE_FLOAT;
-
     return str_advance(remaining, 1);
   }
 
   case 'I': {
     type->kind = TYPE_INT;
-
     return str_advance(remaining, 1);
   }
 
   case 'J': {
     type->kind = TYPE_LONG;
-
     return str_advance(remaining, 1);
   }
 
   case 'Z': {
     type->kind = TYPE_BOOLEAN;
-
     return str_advance(remaining, 1);
   }
 
@@ -1219,7 +1211,6 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
 
     Type return_type = {0};
     remaining = jvm_parse_descriptor(resolver, remaining, &return_type, arena);
-    // TODO: Check cache before adding the type.
 
     type->v.method.argument_type_handles = argument_types_handle;
     type->v.method.return_type_handle =
