@@ -170,8 +170,8 @@ int main(int argc, char *argv[]) {
         .buf = source,
         .lexer = &lexer,
     };
-    const Ast_handle root_i = parser_parse(&parser, &arena);
-    parser_ast_fprint(&parser, root_i, stderr, 0, 0, arena);
+    const Ast_handle root_handle = parser_parse(&parser, &arena);
+    parser_ast_fprint(&parser, root_handle, stderr, 0, 0, arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
@@ -188,9 +188,9 @@ int main(int argc, char *argv[]) {
     LOG("After loading known types: arena_available=%lu",
         arena.end - arena.start);
 
-    resolver_user_defined_function_signatures(&resolver, root_i, scratch_arena,
-                                              &arena);
-    resolver_resolve_ast(&resolver, root_i, scratch_arena, &arena);
+    resolver_user_defined_function_signatures(&resolver, root_handle,
+                                              scratch_arena, &arena);
+    resolver_resolve_ast(&resolver, root_handle, scratch_arena, &arena);
 
     // Debug types.
     {
@@ -198,7 +198,7 @@ int main(int argc, char *argv[]) {
       LOG("After type checking: arena_available=%lu", arena.end - arena.start);
 
       Arena tmp_arena = arena;
-      resolver_ast_fprint(&resolver, root_i, stderr, 0, 0, &tmp_arena);
+      resolver_ast_fprint(&resolver, root_handle, stderr, 0, 0, &tmp_arena);
     }
 
     if (parser.state != PARSER_STATE_OK)
@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
     jvm_init(&class_file, &arena);
-    codegen_emit(&resolver, &class_file, root_i, &arena);
+    codegen_emit(&resolver, &class_file, root_handle, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
 
