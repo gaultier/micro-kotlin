@@ -171,6 +171,7 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const u32 root_i = parser_parse(&parser, &arena);
+    parser_ast_fprint_node(&parser, root_i, stderr, 0);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?

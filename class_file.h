@@ -3103,7 +3103,7 @@ static u32 lex_string_length(Str buf, u32 current_offset) {
 
 // FIXME: probably need to memoize it actually to be able to support:
 // - `a.b.c = 1` => `a` has length 1.
-// - `var a : kotlin.Int` => `kotlin.Int` has length 9.
+// - `var a: kotlin.Int` => `kotlin.Int` has length 9.
 static u32 lex_identifier_length(Str buf, u32 current_offset) {
   pg_assert(current_offset < buf.len);
 
@@ -3710,7 +3710,7 @@ static Str type_to_human_string(Array32(Type) types, u32 type_i, Arena *arena) {
       if (i < method_type->argument_types_i.len - 1)
         res = sb_append_c(res, ", ", arena);
     }
-    res = sb_append_c(res, ") : ", arena);
+    res = sb_append_c(res, "): ", arena);
     res = sb_append(
         res, type_to_human_string(types, method_type->return_type_i, arena),
         arena);
@@ -4902,6 +4902,71 @@ static u32 parser_parse(Parser *parser, Arena *arena) {
   return root_i;
 }
 
+static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
+                                   u16 indent) {
+  pg_assert(parser != NULL);
+  pg_assert(parser->lexer != NULL);
+  pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
+  pg_assert(node_i < parser->nodes.len);
+
+  if (!cli_log_verbose)
+    return;
+
+  const Ast *const node = &parser->nodes.data[node_i];
+  if (node->kind == AST_KIND_NONE)
+    return;
+
+  const Str kind_string = ast_kind_to_string[node->kind];
+  const Token token = parser->lexer->tokens.data[node->main_token_i];
+  u32 line = 0;
+  u32 column = 0;
+  Str token_string = {0};
+  parser_find_token_position(parser, token, &line, &column, &token_string);
+
+  ut_fwrite_indent(file, indent);
+
+  pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
+  switch (node->kind) {
+  case AST_KIND_BOOL:
+    LOG("[%ld] %.*s %.*s: (at %.*s:%u:%u:%u)", node - parser->nodes.data,
+        (int)kind_string.len, kind_string.data, (int)token_string.len,
+        token_string.data, (int)parser->lexer->file_path.len,
+        parser->lexer->file_path.data, line, column, token.source_offset);
+    break;
+
+  case AST_KIND_LIST:
+    LOG("[%ld] %.*s %.*s: (at %.*s:%u:%u:%u), %u children",
+        node - parser->nodes.data, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data,
+        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
+        column, token.source_offset, node->nodes.len);
+
+    for (u64 i = 0; i < node->nodes.len; i++)
+      parser_ast_fprint_node(parser, node->nodes.data[i], file, indent + 2);
+
+    break;
+  case AST_KIND_CALL: {
+    LOG("[%ld] %.*s %.*s (at %.*s:%u:%u:%u), %u children",
+        node - parser->nodes.data, (int)kind_string.len, kind_string.data,
+        (int)token_string.len, token_string.data,
+        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
+        column, token.source_offset, node->nodes.len);
+
+    for (u64 i = 0; i < node->nodes.len; i++)
+      parser_ast_fprint_node(parser, node->nodes.data[i], file, indent + 2);
+    break;
+  }
+  default:
+    LOG("[%ld] %.*s %.*s (at %.*s:%u:%u:%u)", node - parser->nodes.data,
+        (int)kind_string.len, kind_string.data, (int)token_string.len,
+        token_string.data, (int)parser->lexer->file_path.len,
+        parser->lexer->file_path.data, line, column, token.source_offset);
+    parser_ast_fprint_node(parser, node->lhs, file, indent + 2);
+    parser_ast_fprint_node(parser, node->rhs, file, indent + 2);
+    break;
+  }
+}
+
 // --------------------------------- Typing
 
 // TODO: Caching?
@@ -5445,7 +5510,7 @@ static Str resolver_function_to_human_string(const Resolver *resolver,
       res = sb_append_c(res, ", ", arena);
   }
 
-  res = sb_append_c(res, ") : ", arena);
+  res = sb_append_c(res, "): ", arena);
   Str return_type_string =
       type_to_human_string(resolver->types, method->return_type_i, arena);
   res = sb_append(res, return_type_string, arena);
@@ -5720,7 +5785,7 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
   pg_assert(indent < UINT16_MAX - 1); // Avoid overflow.
   switch (node->kind) {
   case AST_KIND_BOOL:
-    LOG("[%ld] %.*s %.*s : %.*s (%s) (at %.*s:%u:%u:%u)",
+    LOG("[%ld] %.*s %.*s: %.*s (%s) (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
@@ -5730,7 +5795,7 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %u children",
+    LOG("[%ld] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
@@ -5746,7 +5811,7 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
 
     human_type =
         resolver_function_to_human_string(resolver, node->type_i, arena);
-    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u), %u children",
+    LOG("[%ld] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
@@ -5760,7 +5825,7 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
     break;
   }
   default:
-    LOG("[%ld] %.*s %.*s : %.*s %s (at %.*s:%u:%u:%u)",
+    LOG("[%ld] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u)",
         node - resolver->parser->nodes.data, (int)kind_string.len,
         kind_string.data, (int)token_string.len, token_string.data,
         (int)human_type.len, human_type.data, type_kind,
