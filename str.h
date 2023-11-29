@@ -289,8 +289,9 @@ __attribute__((warn_unused_result)) static Str_builder sb_clone(Str src,
   pg_assert(src.len <= res.cap);
   pg_assert(src.data);
 
-  if (src.data)
+  if (src.len) {
     memmove(res.data, src.data, src.len);
+  }
 
   res.len = src.len;
   return res;
@@ -299,6 +300,8 @@ __attribute__((warn_unused_result)) static Str_builder sb_clone(Str src,
 __attribute__((warn_unused_result)) static Str_builder
 sb_replace_element_starting_at(Str_builder sb, u64 start, u8 from, u8 to) {
   for (u64 i = start; i < sb.len; i++) {
+    pg_assert(sb.data);
+
     if (sb.data[i] == from)
       sb.data[i] = to;
   }

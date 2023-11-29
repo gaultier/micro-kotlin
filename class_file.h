@@ -28,7 +28,7 @@ typedef struct {
 } Ast_handle;
 Array32_struct(Ast_handle);
 
-const static Ast_handle ast_handle_nil = {0};
+static const Ast_handle ast_handle_nil = {0};
 
 static bool ast_handle_is_nil(Ast_handle handle) { return handle.value == 0; }
 
@@ -735,7 +735,7 @@ static void codegen_frame_stack_push(codegen_frame *frame,
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  const u64 word_count =
+  const u16 word_count =
       jvm_verification_info_kind_word_count(verification_info.kind);
 
   pg_assert(frame->stack_physical_count + word_count < UINT16_MAX);
@@ -1307,8 +1307,8 @@ static void file_write_be_u16(FILE *file, u16 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[2] = {
-      (x & 0xff00) >> 8,
-      (x & 0x00ff) >> 0,
+      (u8)((x & (u16)0xff00) >> 8),
+      (u8)((x & (u16)0x00ff) >> 0),
   };
   fwrite(x_be, sizeof(x_be), 1, file);
 }
@@ -1317,10 +1317,10 @@ static void file_write_be_u32(FILE *file, u32 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[4] = {
-      (x & 0xff000000) >> 24,
-      (x & 0x00ff0000) >> 16,
-      (x & 0x0000ff00) >> 8,
-      (x & 0x000000ff) >> 0,
+      (u8)((x & 0xff000000U) >> 24),
+      (u8)((x & 0x00ff0000U) >> 16),
+      (u8)((x & 0x0000ff00U) >> 8),
+      (u8)((x & 0x000000ffU) >> 0),
   };
   fwrite(x_be, sizeof(x_be), 1, file);
 }
@@ -1329,10 +1329,14 @@ static void file_write_be_u64(FILE *file, u64 x) {
   pg_assert(file != NULL);
 
   const u8 x_be[8] = {
-      (x & 0xfff0000000000000) >> 56, (x & 0x00ff000000000000) >> 48,
-      (x & 0x0000ff0000000000) >> 40, (x & 0x000000ff00000000) >> 32,
-      (x & 0x00000000ff000000) >> 24, (x & 0x0000000000ff0000) >> 16,
-      (x & 0x000000000000ff00) >> 8,  (x & 0x00000000000000ff) >> 0,
+      (u8)((x & 0xfff0000000000000UL) >> 56),
+      (u8)((x & 0x00ff000000000000UL) >> 48),
+      (u8)((x & 0x0000ff0000000000UL) >> 40),
+      (u8)((x & 0x000000ff00000000UL) >> 32),
+      (u8)((x & 0x00000000ff000000UL) >> 24),
+      (u8)((x & 0x0000000000ff0000UL) >> 16),
+      (u8)((x & 0x000000000000ff00UL) >> 8),
+      (u8)((x & 0x00000000000000ffUL) >> 0),
   };
   fwrite(x_be, sizeof(x_be), 1, file);
 }
@@ -2588,7 +2592,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
 
     for (u64 i = 0; i < code->attributes.len; i++) {
       const Jvm_attribute *const child_attribute = &code->attributes.data[i];
-      size += sizeof(u16) + sizeof(u32) +
+      size += (u32)sizeof(u16) + (u32)sizeof(u32) +
               jvm_compute_attribute_size(child_attribute);
     }
     return size;
@@ -2647,7 +2651,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
 
         size += delta;
       } else { // full_frame
-        size += sizeof(u8) + 3 * sizeof(u16) +
+        size += (u32)sizeof(u8) + 3 * (u32)sizeof(u16) +
                 jvm_compute_verification_infos_size(stack_map_frame);
       }
     }
@@ -2655,8 +2659,8 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
     return size;
   }
   case ATTRIBUTE_KIND_EXCEPTIONS:
-    return sizeof(u16) /* count */ +
-           attribute->v.exception_index_table.len * sizeof(u16);
+    return (u32)sizeof(u16) /* count */ +
+           attribute->v.exception_index_table.len * (u32)sizeof(u16);
   case ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS: {
     pg_assert(0 && "todo");
   }
@@ -5122,7 +5126,7 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
     if (jvm_method_has_inline_only_annotation(class_file, method)) {
       // Do as if the method was public, not private.
       type.v.method.access_flags |= ACCESS_FLAGS_PUBLIC;
-      type.v.method.access_flags &= (~1UL << ACCESS_FLAGS_PRIVATE);
+      type.v.method.access_flags &= (u16)(~1U << ACCESS_FLAGS_PRIVATE);
       type.flags |= TYPE_FLAG_INLINE_ONLY;
 
       has_at_least_one_inline_only_method = true;
@@ -6899,7 +6903,7 @@ static void codegen_frame_locals_push(codegen_generator *gen,
 
   *array32_push(&gen->frame->locals, arena) = *variable;
 
-  const u64 word_count =
+  const u16 word_count =
       jvm_verification_info_kind_word_count(variable->verification_info.kind);
 
   *logical_local_index = (u16)array32_last_index(gen->frame->locals);
@@ -7749,7 +7753,7 @@ static void stack_map_record_frame_at_pc(const codegen_frame *frame,
 static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
   pg_assert(frame != NULL);
 
-  u64 to_drop = 0;
+  u32 to_drop = 0;
   for (i64 i = (i64)frame->locals.len - 1; i >= 0; i--) {
     const Jvm_variable *const variable = &frame->locals.data[i];
     if (variable->scope_depth < frame->scope_depth)
@@ -7757,6 +7761,7 @@ static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
 
     pg_assert(variable->scope_depth == frame->scope_depth);
 
+    pg_assert(to_drop < UINT32_MAX);
     to_drop += 1;
   }
 
@@ -8808,7 +8813,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     const u16 unconditional_jump = codegen_emit_jump(gen, arena);
 
     const i16 unconditional_jump_delta =
-        -((i16)unconditional_jump - (i16)1 - (i16)pc_start);
+        (i16) - ((i16)unconditional_jump - (i16)1 - (i16)pc_start);
     gen->code->bytecode.data[unconditional_jump + 0] =
         (u8)(((u16)(unconditional_jump_delta & 0xff00)) >> 8);
     gen->code->bytecode.data[unconditional_jump + 1] =
