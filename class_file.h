@@ -4954,6 +4954,8 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle node_i,
   if (!cli_log_verbose)
     return;
 
+  if (ast_handle_is_nil(node_i)) return;
+
   const Ast *const node = ast_handle_to_ptr(node_i, arena);
   if (node->kind == AST_KIND_NONE)
     return;
@@ -4998,6 +5000,18 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle node_i,
     for (u64 i = 0; i < node->nodes.len; i++)
       parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2, ++count,
                         arena);
+    break;
+  }
+  case AST_KIND_FUNCTION_DEFINITION: {
+    LOG("[%u] %.*s %.*s (at %.*s:%u:%u:%u)", count, (int)kind_string.len,
+        kind_string.data, (int)token_string.len, token_string.data,
+        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
+        column, token.source_offset);
+
+    parser_ast_fprint(parser, node->lhs, file, indent + 2, ++count, arena);
+    parser_ast_fprint(parser, node->return_type_ast, file, indent + 2, ++count,
+                      arena);
+    parser_ast_fprint(parser, node->rhs, file, indent + 2, ++count, arena);
     break;
   }
   default:
@@ -6267,7 +6281,8 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
 
-  if (ast_handle_is_nil(node_i)) return 0;
+  if (ast_handle_is_nil(node_i))
+    return 0;
 
   Ast *const node = ast_handle_to_ptr(node_i, *arena);
   const Token token = resolver->parser->lexer->tokens.data[node->main_token_i];
