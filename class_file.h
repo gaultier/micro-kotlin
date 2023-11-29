@@ -4279,8 +4279,9 @@ static u32 parser_parse_navigation_suffix(Parser *parser, u32 *main_token_i,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static void parser_parse_value_arguments(Parser *parser, Array32(u32) * nodes,
-                                         Arena *arena) {
+static Array32(u32) parser_parse_value_arguments(Parser *parser, Arena *arena) {
+
+  Array32(u32) nodes = array32_make(u32, 0, 256, arena);
 
   while (!parser_is_at_end(parser)) {
     u32 argument_i = parser_parse_expression(parser, arena);
@@ -4290,12 +4291,11 @@ static void parser_parse_value_arguments(Parser *parser, Array32(u32) * nodes,
           parser, main_token,
           "Expected expression or closing right parenthesis for function "
           "arguments");
-      return;
+      return nodes;
     }
-    *array32_push(nodes, arena) = argument_i;
+    *array32_push(&nodes, arena) = argument_i;
 
-    if (parser_match_token(parser, TOKEN_KIND_COMMA)) {
-    }
+    parser_match_token(parser, TOKEN_KIND_COMMA);
 
     if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
       break;
@@ -4305,6 +4305,7 @@ static void parser_parse_value_arguments(Parser *parser, Array32(u32) * nodes,
     parser_error(parser, *array32_last(parser->lexer->tokens),
                  "Expect matching right parenthesis after function call");
   }
+  return nodes;
 }
 
 // callSuffix:
@@ -4325,7 +4326,7 @@ static u32 parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
     return parser_add_node(parser, &node, arena);
   }
 
-  parser_parse_value_arguments(parser, &node.nodes, arena);
+  node.nodes = parser_parse_value_arguments(parser, arena);
 
   return parser_add_node(parser, &node, arena);
 }
