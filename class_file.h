@@ -331,7 +331,7 @@ struct Ast {
 Array32_struct(Ast);
 
 Ast_handle new_ast(const Ast *ast, Arena *arena) {
-  Ast *ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
+  Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
   *ast_ptr = *ast;
 
   const u32 offset = arena_offset_from_end(ast_ptr, *arena);
@@ -345,9 +345,9 @@ Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
   pg_assert((handle.value & (u32)HANDLE_FLAGS_AST) == (u32)HANDLE_FLAGS_AST);
 
   handle.value &= ~(u32)HANDLE_FLAGS_AST;
-  pg_assert(((u8 *)(u64)handle.value )< arena.end);
+  pg_assert(((u8 *)(u64)handle.value) < arena.end);
 
-  return (Ast *)arena.end - handle.value;
+  return (Ast *)(arena.end - handle.value);
 }
 
 typedef enum __attribute__((packed)) {
