@@ -319,6 +319,7 @@ struct Type {
 
 typedef struct Type Type;
 Array32_struct(Type);
+
 // TODO: compact fields.
 typedef struct Ast Ast;
 struct Ast {
@@ -6331,8 +6332,9 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
           array32_make(Type_handle, 0, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
-              resolver, name, call_site_argument_types_i, &picked_method_type_handle,
-              &candidate_functions_i, tmp_arena, arena)) {
+              resolver, name, call_site_argument_types_i,
+              &picked_method_type_handle, &candidate_functions_i, tmp_arena,
+              arena)) {
 
         Str_builder error = sb_new(256, &scratch_arena);
         error = sb_append_c(error, "failed to find matching function", arena);
@@ -6345,7 +6347,8 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
           error = sb_append_c(error, ", possible candidates: ", arena);
 
           for (u64 i = 0; i < candidate_functions_i.len; i++) {
-            const Type_handle candidate_type_handle = candidate_functions_i.data[i];
+            const Type_handle candidate_type_handle =
+                candidate_functions_i.data[i];
 
             error = sb_append_c(error, "\n  ", arena);
             error = sb_append(
@@ -6781,8 +6784,8 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     const Type_handle return_type_handle =
         function_type->v.method.return_type_handle;
 
-    if (!resolver_are_types_equal(resolver, node->type_handle, return_type_handle,
-                                  *arena)) {
+    if (!resolver_are_types_equal(resolver, node->type_handle,
+                                  return_type_handle, *arena)) {
       Str_builder error = sb_new(256, &scratch_arena);
       error =
           sb_append_c(error, "incompatible return type in function `", arena);
@@ -6799,8 +6802,8 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
       error = sb_append(error, type_to_human_string(node->type_handle, arena),
                         arena);
       error = sb_append_c(error, ", expected ", arena);
-      error =
-          sb_append(error, type_to_human_string(return_type_handle, arena), arena);
+      error = sb_append(error, type_to_human_string(return_type_handle, arena),
+                        arena);
       parser_error(resolver->parser, token, (char *)error.data);
     }
 
@@ -6843,7 +6846,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
         resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
     if (!ast_handle_is_nil(node->return_type_ast)) {
       return_type_handle = resolver_resolve_ast(resolver, node->return_type_ast,
-                                           scratch_arena, arena);
+                                                scratch_arena, arena);
     }
 
     const Token name_token =
