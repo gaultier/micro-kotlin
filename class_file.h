@@ -30,9 +30,7 @@ Array32_struct(Ast_handle);
 
 const static Ast_handle ast_handle_nil = {0};
 
-static bool ast_handle_is_nil(Ast_handle handle) {
-  return handle.value == 0;
-}
+static bool ast_handle_is_nil(Ast_handle handle) { return handle.value == 0; }
 
 static Array32(Str)
     class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
@@ -328,7 +326,7 @@ struct Ast {
 };
 Array32_struct(Ast);
 
-Ast_handle new_ast(const Ast *ast, Arena *arena) {
+static Ast_handle new_ast(const Ast *ast, Arena *arena) {
   Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
   *ast_ptr = *ast;
 
@@ -339,7 +337,7 @@ Ast_handle new_ast(const Ast *ast, Arena *arena) {
   return (Ast_handle){offset | (u32)HANDLE_FLAGS_AST};
 }
 
-Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
+static Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
   pg_assert((handle.value & (u32)HANDLE_FLAGS_AST) == (u32)HANDLE_FLAGS_AST);
 
   handle.value &= ~(u32)HANDLE_FLAGS_AST;
@@ -1276,10 +1274,10 @@ struct Jvm_method {
   Array32(Jvm_attribute) attributes;
 };
 
-const u32 jvm_MAGIC_NUMBER = 0xbebafeca;
-const u16 jvm_MAJOR_VERSION_6 = 50;
-const u16 jvm_MAJOR_VERSION_7 = 51;
-const u16 jvm_MINOR_VERSION = 0;
+static const u32 jvm_MAGIC_NUMBER = 0xbebafeca;
+static const u16 jvm_MAJOR_VERSION_6 = 50;
+static const u16 jvm_MAJOR_VERSION_7 = 51;
+static const u16 jvm_MINOR_VERSION = 0;
 
 struct Jvm_class_file {
   Str archive_file_path;
