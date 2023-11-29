@@ -6223,7 +6223,7 @@ static bool typechecker_variable_shadows(Resolver *resolver, u32 name_token_i) {
 }
 
 static u32 resolver_resolve_ast(Resolver *resolver, u32 node_i,
-                                 Arena scratch_arena, Arena *arena) {
+                                Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(node_i < resolver->parser->nodes.len);
@@ -6348,7 +6348,7 @@ static u32 resolver_resolve_ast(Resolver *resolver, u32 node_i,
 
     case TOKEN_KIND_MINUS:
       return node->type_i = resolver_resolve_ast(resolver, node->lhs,
-                                                  scratch_arena, arena);
+                                                 scratch_arena, arena);
 
     default:
       pg_assert(0 && "todo");
@@ -6402,8 +6402,7 @@ static u32 resolver_resolve_ast(Resolver *resolver, u32 node_i,
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < node->nodes.len; i++) {
-      resolver_resolve_ast(resolver, node->nodes.data[i], scratch_arena,
-                            arena);
+      resolver_resolve_ast(resolver, node->nodes.data[i], scratch_arena, arena);
       // Clean up after each statement.
       resolver->current_type_i = 0;
     }
@@ -6761,7 +6760,7 @@ static void resolver_collect_user_defined_function_signatures(
     u32 return_type_i = TYPE_UNIT_I;
     if (node->extra_data_i > 0) {
       return_type_i = resolver_resolve_ast(resolver, (u32)node->extra_data_i,
-                                            scratch_arena, arena);
+                                           scratch_arena, arena);
     }
 
     const Token name_token =
