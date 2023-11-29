@@ -171,7 +171,7 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const u32 root_i = parser_parse(&parser, &arena);
-    parser_ast_fprint_node(&parser, root_i, stderr, 0);
+    parser_ast_fprint(&parser, root_i, stderr, 0);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
@@ -190,7 +190,7 @@ int main(int argc, char *argv[]) {
 
     resolver_collect_user_defined_function_signatures(&resolver, scratch_arena,
                                                       &arena);
-    resolver_resolve_node(&resolver, root_i, scratch_arena, &arena);
+    resolver_resolve_ast(&resolver, root_i, scratch_arena, &arena);
 
     // Debug types.
     {
@@ -198,7 +198,7 @@ int main(int argc, char *argv[]) {
       LOG("After type checking: arena_available=%lu", arena.end - arena.start);
 
       Arena tmp_arena = arena;
-      resolver_ast_fprint_node(&resolver, root_i, stderr, 0, &tmp_arena);
+      resolver_ast_fprint(&resolver, root_i, stderr, 0, &tmp_arena);
     }
 
     if (parser.state != PARSER_STATE_OK)

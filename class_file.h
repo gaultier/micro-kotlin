@@ -4901,8 +4901,8 @@ static u32 parser_parse(Parser *parser, Arena *arena) {
   return root_i;
 }
 
-static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
-                                   u16 indent) {
+static void parser_ast_fprint(const Parser *parser, u32 node_i, FILE *file,
+                              u16 indent) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
@@ -4941,7 +4941,7 @@ static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
         column, token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
-      parser_ast_fprint_node(parser, node->nodes.data[i], file, indent + 2);
+      parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2);
 
     break;
   case AST_KIND_CALL: {
@@ -4952,7 +4952,7 @@ static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
         column, token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
-      parser_ast_fprint_node(parser, node->nodes.data[i], file, indent + 2);
+      parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2);
     break;
   }
   default:
@@ -4960,8 +4960,8 @@ static void parser_ast_fprint_node(const Parser *parser, u32 node_i, FILE *file,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)parser->lexer->file_path.len,
         parser->lexer->file_path.data, line, column, token.source_offset);
-    parser_ast_fprint_node(parser, node->lhs, file, indent + 2);
-    parser_ast_fprint_node(parser, node->rhs, file, indent + 2);
+    parser_ast_fprint(parser, node->lhs, file, indent + 2);
+    parser_ast_fprint(parser, node->rhs, file, indent + 2);
     break;
   }
 }
@@ -5752,8 +5752,8 @@ static bool typechecker_merge_types(const Resolver *resolver, u32 lhs_i,
   return false;
 }
 
-static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
-                                     FILE *file, u16 indent, Arena *arena) {
+static void resolver_ast_fprint(const Resolver *resolver, u32 node_i,
+                                FILE *file, u16 indent, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
   pg_assert(resolver->parser->lexer != NULL);
@@ -5803,8 +5803,8 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
         token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_ast_fprint_node(resolver, node->nodes.data[i], file, indent + 2,
-                               arena);
+      resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
+                          arena);
     break;
   case AST_KIND_CALL: {
 
@@ -5819,8 +5819,8 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
         token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_ast_fprint_node(resolver, node->nodes.data[i], file, indent + 2,
-                               arena);
+      resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
+                          arena);
     break;
   }
   default:
@@ -5831,8 +5831,8 @@ static void resolver_ast_fprint_node(const Resolver *resolver, u32 node_i,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
         token.source_offset);
-    resolver_ast_fprint_node(resolver, node->lhs, file, indent + 2, arena);
-    resolver_ast_fprint_node(resolver, node->rhs, file, indent + 2, arena);
+    resolver_ast_fprint(resolver, node->lhs, file, indent + 2, arena);
+    resolver_ast_fprint(resolver, node->rhs, file, indent + 2, arena);
     break;
   }
 }
@@ -6222,7 +6222,7 @@ static bool typechecker_variable_shadows(Resolver *resolver, u32 name_token_i) {
   return false;
 }
 
-static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
+static u32 resolver_resolve_ast(Resolver *resolver, u32 node_i,
                                  Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(resolver->parser != NULL);
@@ -6255,7 +6255,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
       pg_assert(node_i > 0);
 
       const u32 type_i =
-          resolver_resolve_node(resolver, node_i, tmp_arena, arena);
+          resolver_resolve_ast(resolver, node_i, tmp_arena, arena);
       *array32_push(&call_site_argument_types_i, &tmp_arena) = type_i;
     }
 
@@ -6331,7 +6331,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     switch (token.kind) {
     case TOKEN_KIND_NOT:
       node->type_i =
-          resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+          resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
       const Type *const type = &resolver->types.data[node->type_i];
       if (type->kind != TYPE_BOOLEAN) {
         Str_builder error = sb_new(256, &scratch_arena);
@@ -6347,7 +6347,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
       return node->type_i;
 
     case TOKEN_KIND_MINUS:
-      return node->type_i = resolver_resolve_node(resolver, node->lhs,
+      return node->type_i = resolver_resolve_ast(resolver, node->lhs,
                                                   scratch_arena, arena);
 
     default:
@@ -6358,9 +6358,9 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     pg_assert(node->main_token_i > 0);
 
     const u32 lhs_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const u32 rhs_i =
-        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
     if (!typechecker_merge_types(resolver, lhs_i, rhs_i, &node->type_i)) {
       Str_builder error = sb_new(256, &scratch_arena);
@@ -6402,7 +6402,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
   }
   case AST_KIND_LIST: {
     for (u64 i = 0; i < node->nodes.len; i++) {
-      resolver_resolve_node(resolver, node->nodes.data[i], scratch_arena,
+      resolver_resolve_ast(resolver, node->nodes.data[i], scratch_arena,
                             arena);
       // Clean up after each statement.
       resolver->current_type_i = 0;
@@ -6419,12 +6419,12 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     // Need to re-process them to have the right variables (the function
     // arguments) in the current scope.
     // TODO: We could optimize it by not creating new types at this point.
-    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
 
     resolver->current_function_i = node_i;
 
     // Inspect body (rhs).
-    resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+    resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
     typechecker_end_scope(resolver);
 
@@ -6445,9 +6445,9 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
         arena);
 
     const u32 lhs_type_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const u32 rhs_type_i =
-        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
     if (!typechecker_merge_types(resolver, lhs_type_i, rhs_type_i,
                                  &node->type_i)) {
@@ -6484,7 +6484,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     pg_assert(node->rhs < resolver->parser->nodes.len);
 
     const u32 type_condition_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const Type *const type_condition = &resolver->types.data[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
@@ -6499,7 +6499,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     }
 
     return node->type_i =
-               resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+               resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
   }
   case AST_KIND_WHILE_LOOP: {
     pg_assert(node->lhs > 0);
@@ -6507,7 +6507,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     pg_assert(node->rhs < resolver->parser->nodes.len);
 
     const u32 type_condition_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const Type *const type_condition = &resolver->types.data[type_condition_i];
 
     if (type_condition->kind != TYPE_BOOLEAN) {
@@ -6522,7 +6522,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     }
 
     typechecker_begin_scope(resolver);
-    resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+    resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
     return node->type_i = TYPE_UNIT_I;
@@ -6570,7 +6570,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
       const Ast *const variable = &resolver->parser->nodes.data[variable_i];
       node->type_i = variable->type_i;
 
-      return resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+      return resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     }
     break;
   }
@@ -6581,7 +6581,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
         parser_token_to_str_view(resolver->parser, node->main_token_i), node_i,
         arena);
     node->type_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     typechecker_mark_variable_as_initialized(resolver, variable_i);
 
     return node->type_i;
@@ -6651,7 +6651,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     node->kind = AST_KIND_VAR_REFERENCE;
     node->lhs = resolver->variables.data[variable_i].var_definition_node_i;
 
-    return resolver_resolve_node(resolver, node_i, scratch_arena, arena);
+    return resolver_resolve_ast(resolver, node_i, scratch_arena, arena);
 
     break;
   }
@@ -6659,12 +6659,12 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
   case AST_KIND_THEN_ELSE:
     typechecker_begin_scope(resolver);
     const u32 lhs_type_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
     typechecker_begin_scope(resolver);
     const u32 rhs_type_i =
-        resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
     if (!typechecker_merge_types(resolver, lhs_type_i, rhs_type_i,
@@ -6685,7 +6685,7 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     break;
 
   case AST_KIND_ASSIGNMENT:
-    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
 
     if (!parser_is_lvalue(resolver->parser, node->lhs)) {
       parser_error(resolver->parser,
@@ -6695,12 +6695,12 @@ static u32 resolver_resolve_node(Resolver *resolver, u32 node_i,
     }
 
     return node->type_i =
-               resolver_resolve_node(resolver, node->rhs, scratch_arena, arena);
+               resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
   case AST_KIND_RETURN: {
     pg_assert(resolver->current_function_i);
     node->type_i =
-        resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const Ast *const current_function =
         &resolver->parser->nodes.data[resolver->current_function_i];
     const Type *const function_type =
@@ -6756,11 +6756,11 @@ static void resolver_collect_user_defined_function_signatures(
     resolver->current_function_i = (u32)i;
 
     // Arguments (lhs).
-    resolver_resolve_node(resolver, node->lhs, scratch_arena, arena);
+    resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
     u32 return_type_i = TYPE_UNIT_I;
     if (node->extra_data_i > 0) {
-      return_type_i = resolver_resolve_node(resolver, (u32)node->extra_data_i,
+      return_type_i = resolver_resolve_ast(resolver, (u32)node->extra_data_i,
                                             scratch_arena, arena);
     }
 
