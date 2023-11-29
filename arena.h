@@ -64,6 +64,16 @@ typedef struct {
   Mem_profile *profile;
 } Arena;
 
+__attribute__((warn_unused_result)) static u32 arena_offset_from_end(void *ptr,
+                                                                     Arena a) {
+  pg_assert((u8 *)ptr <= a.end);
+
+  const u64 offset = (u64)(a.end - (u8 *)ptr);
+  pg_assert(offset <= UINT32_MAX);
+  // Ensure that the last bits are clear to store the flags.
+  return (u32)offset;
+}
+
 __attribute__((warn_unused_result)) static Arena
 arena_new(u64 cap, Mem_profile *profile) {
   u8 *mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,

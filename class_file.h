@@ -19,6 +19,14 @@
 #include <zlib.h>
 #endif
 
+typedef enum {
+  HANDLE_FLAGS_AST = 1 << 31,
+} Handle_flags;
+
+typedef struct {
+  u32 value;
+} Ast_handle;
+
 Array32(Str)
     class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
   pg_assert(!str_is_empty(class_path));
@@ -310,6 +318,25 @@ struct Ast {
   pg_pad(5);
 };
 Array32_struct(Ast);
+
+Ast_handle new_ast(const Ast *ast, Arena *arena) {
+  Ast *ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
+  *ast_ptr = *ast;
+
+  const u32 offset = arena_offset_from_end(ast_ptr, *arena);
+
+  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
+
+  return (Ast_handle){offset | (u32)HANDLE_FLAGS_AST};
+}
+
+Ast *arena_handle_to_ast(Ast_handle handle, Arena arena) {
+  pg_assert((handle.value & (u32)HANDLE_FLAGS_AST) == (u32)HANDLE_FLAGS_AST);
+
+  handle.value &= ~(u32)HANDLE_FLAGS_AST;
+
+  return (Ast *)arena.end - handle.value;
+}
 
 typedef enum __attribute__((packed)) {
   PARSER_STATE_OK,
