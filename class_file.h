@@ -260,6 +260,26 @@ struct Type {
 typedef struct Type Type;
 Array32_struct(Type);
 
+static Type_handle new_type(const Type *type, Arena *arena) {
+  Type *const type_ptr = arena_alloc(arena, sizeof(Type), _Alignof(Type), 1);
+  *type_ptr = *type;
+
+  const u32 offset = arena_offset_from_end(type_ptr, *arena);
+
+  pg_assert((offset & ((u32)1 << (32 - 3))) == 0);
+
+  return (Type_handle){offset | (u32)HANDLE_FLAGS_TYPE};
+}
+
+static Type *type_handle_to_ptr(Type_handle handle, Arena arena) {
+  pg_assert((handle.value & (u32)HANDLE_FLAGS_TYPE) == (u32)HANDLE_FLAGS_TYPE);
+
+  handle.value &= ~(u32)HANDLE_FLAGS_TYPE;
+  pg_assert(((u8 *)(u64)handle.value) < arena.end);
+
+  return (Type *)(arena.end - handle.value);
+}
+
 typedef struct {
   u16 start_pc;
   u16 end_pc;
@@ -4271,8 +4291,7 @@ static Ast_handle parser_parse_statement(Parser *parser, Arena *arena) {
   }
 
   Ast_handle ast_handle = {0};
-  if (!handle_is_nil(ast_handle =
-                             parser_parse_loop_statement(parser, arena)))
+  if (!handle_is_nil(ast_handle = parser_parse_loop_statement(parser, arena)))
     return ast_handle;
 
   if (!handle_is_nil(ast_handle = parser_parse_declaration(parser, arena)))
@@ -4887,11 +4906,11 @@ static Ast_handle parser_parse_declaration(Parser *parser, Arena *arena) {
 
   Ast_handle new_ast_handle = ast_handle_nil;
   if (!handle_is_nil(new_ast_handle =
-                             parser_parse_function_declaration(parser, arena)))
+                         parser_parse_function_declaration(parser, arena)))
     return new_ast_handle;
 
   if (!handle_is_nil(new_ast_handle =
-                             parser_parse_property_declaration(parser, arena)))
+                         parser_parse_property_declaration(parser, arena)))
     return new_ast_handle;
 
   parser_sync_if_panicked(parser);
@@ -4929,7 +4948,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
 
   Ast_handle ast_handle = ast_handle_nil;
   while (!handle_is_nil(ast_handle =
-                                parser_parse_top_level_object(parser, arena))) {
+                            parser_parse_top_level_object(parser, arena))) {
     *array32_push(&node.nodes, arena) = ast_handle;
   }
 
