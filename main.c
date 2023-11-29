@@ -170,8 +170,8 @@ int main(int argc, char *argv[]) {
         .buf = source,
         .lexer = &lexer,
     };
-    const u32 root_i = parser_parse(&parser, &arena);
-    parser_ast_fprint(&parser, root_i, stderr, 0);
+    const Ast_handle root_i = parser_parse(&parser, &arena);
+    parser_ast_fprint(&parser, root_i, stderr, 0, 0, arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
@@ -198,7 +198,7 @@ int main(int argc, char *argv[]) {
       LOG("After type checking: arena_available=%lu", arena.end - arena.start);
 
       Arena tmp_arena = arena;
-      resolver_ast_fprint(&resolver, root_i, stderr, 0, &tmp_arena);
+      resolver_ast_fprint(&resolver, root_i, stderr, 0, 0, &tmp_arena);
     }
 
     if (parser.state != PARSER_STATE_OK)
@@ -229,8 +229,6 @@ int main(int argc, char *argv[]) {
     jvm_write(&class_file, file);
     fclose(file);
 
-    LOG("nodes=%u sizeof(parser_ast_node_t)=%lu mem=%lu", parser.nodes.len,
-        sizeof(Ast), parser.nodes.len * sizeof(Ast));
     LOG("types=%u sizeof(Type)=%lu mem=%lu", resolver.types.len, sizeof(Type),
         resolver.types.len * sizeof(Type));
 
