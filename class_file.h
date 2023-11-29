@@ -311,6 +311,8 @@ struct Type {
   Type_kind kind;
   u16 flags;
   Type_handle super_type_i;
+  Type_handle list_next;
+  pg_pad(4);
 };
 
 typedef struct Type Type;
@@ -445,6 +447,9 @@ typedef struct {
 } Parser;
 
 typedef struct {
+  Type *first_type;
+  Type *last_type;
+
   Parser *parser;
   Str this_class_name;
   Array32(Str) class_path_entries;
@@ -458,12 +463,19 @@ typedef struct {
 } Resolver;
 
 static Str codegen_make_class_name_from_path(Str path, Arena *arena);
+static Type_handle resolver_add_type(Resolver *resolver, Type *new_type,
+                                     Arena *arena);
 
 static void resolver_init(Resolver *resolver, Parser *parser,
                           Array32(Str) class_path_entries, Str class_file_path,
                           Arena *arena) {
 
   resolver->parser = parser;
+
+  resolver->first_type =
+      type_handle_to_ptr(new_type(&(Type){0}, arena), *arena);
+  resolver->last_type = resolver->first_type;
+
   resolver->class_path_entries = class_path_entries;
   resolver->this_class_name =
       codegen_make_class_name_from_path(class_file_path, arena);
@@ -726,8 +738,6 @@ static bool resolver_is_function_candidate_applicable(
 
   return true;
 }
-
-static Type_handle resolver_add_type(Type *new_type, Arena *arena);
 
 static u16
 jvm_verification_info_kind_word_count(Jvm_verification_info_kind kind) {
@@ -1159,7 +1169,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
                                  &type->this_class_name, arena);
     }
 
-    type->v.array_type_i = resolver_add_type(&item_type, arena);
+    type->v.array_type_i = resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -1181,7 +1191,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
       remaining =
           jvm_parse_descriptor(resolver, remaining, &argument_type, arena);
       const Type_handle argument_type_i =
-          resolver_add_type(&argument_type, arena);
+          resolver_add_type(resolver, &argument_type, arena);
       *array32_push(&argument_types_i, arena) = argument_type_i;
     }
     pg_assert(remaining.len >= 1);
@@ -1193,7 +1203,8 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
     // TODO: Check cache before adding the type.
 
     type->v.method.argument_types_i = argument_types_i;
-    type->v.method.return_type_i = resolver_add_type(&return_type, arena);
+    type->v.method.return_type_i =
+        resolver_add_type(resolver, &return_type, arena);
 
     return remaining;
   }
@@ -5066,7 +5077,8 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
 // --------------------------------- Typing
 
 // TODO: Caching?
-static Type_handle resolver_add_type(Type *type, Arena *arena) {
+static Type_handle resolver_add_type(Resolver *resolver, Type *type,
+                                     Arena *arena) {
   pg_assert(type != NULL);
 
   if (type->kind == TYPE_INSTANCE) { // Try to lower to a know type.
@@ -5090,7 +5102,12 @@ static Type_handle resolver_add_type(Type *type, Arena *arena) {
       type->kind = TYPE_STRING;
   }
 
-  return new_type(type, arena);
+  const Type_handle new_type_handle = new_type(type, arena);
+
+  resolver->last_type->list_next = new_type_handle;
+  resolver->last_type = type_handle_to_ptr(new_type_handle, *arena);
+
+  return new_type_handle;
 }
 
 static Str resolver_function_to_human_string(Type_handle function_i,
@@ -5183,7 +5200,7 @@ static void resolver_load_methods_from_class_file(Resolver *resolver,
       pg_assert(!array32_is_empty(type.v.method.code));
     }
 
-    const Type_handle type_i = resolver_add_type(&type, arena);
+    const Type_handle type_i = resolver_add_type(resolver, &type, arena);
 
     if (cli_log_verbose) {
       Arena tmp_arena = *arena;
@@ -5369,7 +5386,8 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
-        const Type_handle this_class_type_i = resolver_add_type(&type, arena);
+        const Type_handle this_class_type_i =
+            resolver_add_type(resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const Jvm_constant_pool_entry *const constant_super =
@@ -5421,7 +5439,8 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         type_init_package_and_name(class_file.class_name, &type.package_name,
                                    &type.this_class_name, arena);
 
-        const u32 this_class_type_i = resolver_add_type(resolver, &type, arena);
+        const u32 this_class_type_i =
+            resolver_add_type(resolver, resolver, &type, arena);
 
         if (class_file.super_class != 0) {
           const Jvm_constant *const constant_super = jvm_constant_array_get(
@@ -5524,8 +5543,11 @@ static void resolver_collect_callables_with_name(const Resolver *resolver,
   pg_assert(resolver != NULL);
   pg_assert(candidate_functions_i != NULL);
 
-  for (u64 i = 0; i < resolver->types.len; i++) {
-    const Type *const type = &resolver->types.data[i];
+  for (Type_handle handle = resolver->first_type->list_next;
+       !type_handle_is_nil(handle);
+       handle = type_handle_to_ptr(handle, *arena)->list_next) {
+    Type *const type = type_handle_to_ptr(handle, *arena);
+
     if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR) {
       const Method *const method = &type->v.method;
 
@@ -5540,7 +5562,7 @@ static void resolver_collect_callables_with_name(const Resolver *resolver,
       if (!resolver_is_package_imported(resolver, type->package_name))
         continue;
 
-      *array32_push(candidate_functions_i, arena) = (u32)i;
+      *array32_push(candidate_functions_i, arena) = handle;
     }
   }
 
@@ -5937,8 +5959,10 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
   // TODO: Flag types coming from java as nullable.
 
   // Check if cached first.
-  for (u64 i = 0; i < resolver->types.len; i++) {
-    const Type *const type = &resolver->types.data[i];
+  for (Type_handle handle = resolver->first_type->list_next;
+       !type_handle_is_nil(handle);
+       handle = type_handle_to_ptr(handle, *arena)->list_next) {
+    const Type *const type = type_handle_to_ptr(handle, *arena);
 
     if (type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR)
       continue;
@@ -5946,7 +5970,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
     if (type->kind == TYPE_INSTANCE &&
         type_fqn_equal_to_package_and_name(
             fqn, type->package_name, type->this_class_name, scratch_arena)) {
-      *type_i = (u32)i;
+      *type_i = handle;
       return true;
     }
   }
@@ -6005,7 +6029,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
       type_init_package_and_name(class_file.class_name, &this_type.package_name,
                                  &this_type.this_class_name, arena);
 
-      *type_i = resolver_add_type(&this_type, arena);
+      *type_i = resolver_add_type(resolver, &this_type, arena);
 
       return true;
     }
@@ -6019,15 +6043,17 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
     if (!str_ends_with(class_path_entry, str_from_c(".jar")))
       continue;
 
-    const u64 previous_len = resolver->types.len;
     jvm_read_jar_file(resolver, class_path_entry, scratch_arena, arena);
 
-    for (u64 i = previous_len; i < resolver->types.len; i++) {
-      const Type *const type = &resolver->types.data[i];
+    for (Type_handle handle = resolver->first_type->list_next;
+         !type_handle_is_nil(handle);
+         handle = type_handle_to_ptr(handle, *arena)->list_next) {
+      Type *const type = type_handle_to_ptr(handle, *arena);
+
       if (type->kind == TYPE_INSTANCE &&
           type_fqn_equal_to_package_and_name(
               fqn, type->package_name, type->this_class_name, scratch_arena)) {
-        *type_i = (u32)i;
+        *type_i = handle;
         return true;
       }
     }
@@ -6236,10 +6262,11 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
   switch (node->kind) {
   case AST_KIND_NONE:
-    return node->type_i = resolver_add_type(&(Type){.kind = TYPE_ANY}, arena);
-  case AST_KIND_BOOL:
     return node->type_i =
-               resolver_add_type(&(Type){.kind = TYPE_BOOLEAN}, arena);
+               resolver_add_type(resolver, &(Type){.kind = TYPE_ANY}, arena);
+  case AST_KIND_BOOL:
+    return node->type_i = resolver_add_type(
+               resolver, &(Type){.kind = TYPE_BOOLEAN}, arena);
 
   case AST_KIND_CALL: {
     Arena tmp_arena = scratch_arena;
@@ -6312,15 +6339,18 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
                    "Integer literal is too big (> 9223372036854775807)");
       return type_handle_nil;
     } else if (flag & NODE_NUMBER_FLAGS_LONG) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_LONG}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_LONG}, arena);
     } else {
       // >  it has an integer literal type containing all the
       // built-in integer types guaranteed to be able to represent this value.
 
       if (number <= INT32_MAX) {
-        node->type_i = resolver_add_type(&(Type){.kind = TYPE_INT}, arena);
+        node->type_i =
+            resolver_add_type(resolver, &(Type){.kind = TYPE_INT}, arena);
       } else {
-        node->type_i = resolver_add_type(&(Type){.kind = TYPE_LONG}, arena);
+        node->type_i =
+            resolver_add_type(resolver, &(Type){.kind = TYPE_LONG}, arena);
       }
     }
     node->extra_data_i = number;
@@ -6378,8 +6408,8 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     case TOKEN_KIND_GE:
     case TOKEN_KIND_NOT_EQUAL:
     case TOKEN_KIND_EQUAL_EQUAL: {
-      return node->type_i =
-                 resolver_add_type(&(Type){.kind = TYPE_BOOLEAN}, arena);
+      return node->type_i = resolver_add_type(
+                 resolver, &(Type){.kind = TYPE_BOOLEAN}, arena);
     }
     case TOKEN_KIND_AMPERSAND_AMPERSAND:
     case TOKEN_KIND_PIPE_PIPE: {
@@ -6405,7 +6435,8 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
       resolver->current_type_i = type_handle_nil;
     }
 
-    return node->type_i = resolver_add_type(&(Type){.kind = TYPE_UNIT}, arena);
+    return node->type_i =
+               resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
   }
   case AST_KIND_FUNCTION_DEFINITION: {
     // Already resolved by resolver_collect_user_defined_function_signatures().
@@ -6508,11 +6539,12 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
     typechecker_end_scope(resolver);
 
-    return node->type_i = resolver_add_type(&(Type){.kind = TYPE_UNIT}, arena);
+    return node->type_i =
+               resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
   }
   case AST_KIND_STRING: {
     return node->type_i =
-               resolver_add_type(&(Type){.kind = TYPE_STRING}, arena);
+               resolver_add_type(resolver, &(Type){.kind = TYPE_STRING}, arena);
   }
 
   case AST_KIND_CLASS_REFERENCE: {
@@ -6581,34 +6613,44 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
     if (str_eq_c(type_literal_string, "Any") ||
         str_eq_c(type_literal_string, "kotlin.Any")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_ANY}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_ANY}, arena);
     } else if (str_eq_c(type_literal_string, "Unit") ||
                str_eq_c(type_literal_string, "kotlin.Unit")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_UNIT}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
     } else if (str_eq_c(type_literal_string, "Int") ||
                str_eq_c(type_literal_string, "kotlin.Int")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_INT}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_INT}, arena);
     } else if (str_eq_c(type_literal_string, "Boolean") ||
                str_eq_c(type_literal_string, "kotlin.Boolean")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_BOOLEAN}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_BOOLEAN}, arena);
     } else if (str_eq_c(type_literal_string, "Byte") ||
                str_eq_c(type_literal_string, "kotlin.Byte")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_BYTE}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_BYTE}, arena);
     } else if (str_eq_c(type_literal_string, "Char") ||
                str_eq_c(type_literal_string, "kotlin.Char")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_CHAR}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_CHAR}, arena);
     } else if (str_eq_c(type_literal_string, "Short") ||
                str_eq_c(type_literal_string, "kotlin.Short")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_SHORT}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_SHORT}, arena);
     } else if (str_eq_c(type_literal_string, "Float") ||
                str_eq_c(type_literal_string, "kotlin.Float")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_FLOAT}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_FLOAT}, arena);
     } else if (str_eq_c(type_literal_string, "Double") ||
                str_eq_c(type_literal_string, "kotlin.Double")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_DOUBLE}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_DOUBLE}, arena);
     } else if (str_eq_c(type_literal_string, "Long") ||
                str_eq_c(type_literal_string, "kotlin.Long")) {
-      node->type_i = resolver_add_type(&(Type){.kind = TYPE_LONG}, arena);
+      node->type_i =
+          resolver_add_type(resolver, &(Type){.kind = TYPE_LONG}, arena);
     } else {
       const bool found = resolver_resolve_fully_qualified_name(
           resolver, type_literal_string, &node->type_i, scratch_arena, arena);
@@ -6751,7 +6793,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
     Type_handle return_type_i =
-        resolver_add_type(&(Type){.kind = TYPE_UNIT}, arena);
+        resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
     if (!ast_handle_is_nil(node->return_type_ast)) {
       return_type_i = resolver_resolve_ast(resolver, node->return_type_ast,
                                            scratch_arena, arena);
@@ -6791,7 +6833,7 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
       }
     }
 
-    node->type_i = resolver_add_type(&type, arena);
+    node->type_i = resolver_add_type(resolver, &type, arena);
 
     // NOTE: Skip function body by nature.
     // But: Once we allow return type inference based on body, we need to also
@@ -7269,7 +7311,7 @@ codegen_make_type_from_method_descriptor(codegen_generator *gen,
   Type new_type = {0};
   jvm_parse_descriptor(gen->resolver, descriptor, &new_type, arena);
 
-  return resolver_add_type(&new_type, arena);
+  return resolver_add_type(gen->resolver, &new_type, arena);
 }
 
 static void codegen_emit_inlined_method_call(codegen_generator *gen,
@@ -9012,7 +9054,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         &class_file->constant_pool, &target_method_ref, arena);
 
     const Method target_method_type = {
-        .return_type_i = resolver_add_type(&(Type){.kind = TYPE_UNIT}, arena),
+        .return_type_i =
+            resolver_add_type(gen->resolver, &(Type){.kind = TYPE_UNIT}, arena),
     };
 
     Jvm_attribute_code code = {0};
@@ -9030,7 +9073,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
           .this_class_name = str_from_c("java/lang/String"),
       };
 
-      const Type_handle string_type_i = resolver_add_type(&string_type, arena);
+      const Type_handle string_type_i =
+          resolver_add_type(gen->resolver, &string_type, arena);
 
       Type source_method_argument_types = {
           .kind = TYPE_ARRAY,
@@ -9038,8 +9082,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
           .v = {.array_type_i = string_type_i},
       };
 
-      const Type_handle source_argument_types_i =
-          resolver_add_type(&source_method_argument_types, arena);
+      const Type_handle source_argument_types_i = resolver_add_type(
+          gen->resolver, &source_method_argument_types, arena);
       const u16 source_method_arg0_string = jvm_add_constant_cstring(
           &class_file->constant_pool, "[Ljava/lang/String;", arena);
 

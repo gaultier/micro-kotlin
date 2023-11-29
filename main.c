@@ -229,8 +229,6 @@ int main(int argc, char *argv[]) {
     jvm_write(&class_file, file);
     fclose(file);
 
-    LOG("types=%u sizeof(Type)=%lu mem=%lu", resolver.types.len, sizeof(Type),
-        resolver.types.len * sizeof(Type));
 
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
 

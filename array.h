@@ -109,4 +109,4 @@ struct List {
     list->last = last->next = new;                                             \
   } while (0)
 
-#define list_for_each(l) for (List *it = l; it; it = it->next)
+#define list_for_each(l) for (List *it = (List *)l; it; it = it->next)
