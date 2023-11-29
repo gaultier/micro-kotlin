@@ -4954,7 +4954,8 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle node_i,
   if (!cli_log_verbose)
     return;
 
-  if (ast_handle_is_nil(node_i)) return;
+  if (ast_handle_is_nil(node_i))
+    return;
 
   const Ast *const node = ast_handle_to_ptr(node_i, arena);
   if (node->kind == AST_KIND_NONE)
@@ -6744,7 +6745,8 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle node_i,
                resolver_resolve_ast(resolver, node->rhs, scratch_arena, arena);
 
   case AST_KIND_RETURN: {
-    resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
+    node->type_i =
+        resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     const Ast *const current_function =
         ast_handle_to_ptr(resolver->current_function_i, *arena);
     const Type *const function_type =
@@ -6810,7 +6812,7 @@ static void resolver_collect_user_defined_function_signatures(
     resolver_resolve_ast(resolver, node->lhs, scratch_arena, arena);
     // Return type, if present.
     u32 return_type_i = TYPE_UNIT_I;
-    if (node->extra_data_i > 0) {
+    if (!ast_handle_is_nil(node->return_type_ast)) {
       return_type_i = resolver_resolve_ast(resolver, node->return_type_ast,
                                            scratch_arena, arena);
     }
@@ -8211,6 +8213,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   pg_assert(gen->resolver->parser->tokens_i <=
             gen->resolver->parser->lexer->tokens.len);
   pg_assert(class_file != NULL);
+
+  if (ast_handle_is_nil(node_i))return;
 
   const Ast *const node = ast_handle_to_ptr(node_i, *arena);
   const Token token =
