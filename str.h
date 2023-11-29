@@ -400,7 +400,7 @@ __attribute__((warn_unused_result)) static u64 ut_record_call_stack(u64 *dst,
     const u64 caller_rbp = *(u64 *)rbp;
 
     // Check that rbp is within the right frame
-    if (caller_rsp <= (u64)rbp || caller_rbp <= caller_rsp)
+    if (caller_rsp <= (u64)rbp || caller_rbp < caller_rsp)
       return len;
 
     rbp = (u64 *)caller_rbp;
