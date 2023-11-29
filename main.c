@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
     LOG("After loading known types: arena_available=%lu",
         arena.end - arena.start);
 
-    resolver_collect_user_defined_function_signatures(&resolver, root_i,
+    resolver_user_defined_function_signatures(&resolver, root_i,
                                                       scratch_arena, &arena);
     resolver_resolve_ast(&resolver, root_i, scratch_arena, &arena);
 

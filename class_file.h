@@ -6792,16 +6792,22 @@ static u32 resolver_resolve_ast(Resolver *resolver, Ast_handle ast_handle,
   pg_assert(0 && "unreachable");
 }
 
-static void resolver_collect_user_defined_function_signatures(
-    Resolver *resolver, Ast_handle ast_handle, Arena scratch_arena,
-    Arena *arena) {
+// First pass to resolve all the function signatures so that they can be called
+// before their definition in the source order.
+static void resolver_user_defined_function_signatures(Resolver *resolver,
+                                                      Ast_handle ast_handle,
+                                                      Arena scratch_arena,
+                                                      Arena *arena) {
+
+  if (ast_handle_is_nil(ast_handle))
+    return;
 
   Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   switch (node->kind) {
   case AST_KIND_LIST:
     for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_collect_user_defined_function_signatures(
-          resolver, node->nodes.data[i], scratch_arena, arena);
+      resolver_user_defined_function_signatures(resolver, node->nodes.data[i],
+                                                scratch_arena, arena);
 
     break;
 
@@ -6861,10 +6867,10 @@ static void resolver_collect_user_defined_function_signatures(
     typechecker_end_scope(resolver);
   } break;
   default:
-    resolver_collect_user_defined_function_signatures(resolver, node->lhs,
-                                                      scratch_arena, arena);
-    resolver_collect_user_defined_function_signatures(resolver, node->rhs,
-                                                      scratch_arena, arena);
+    resolver_user_defined_function_signatures(resolver, node->lhs,
+                                              scratch_arena, arena);
+    resolver_user_defined_function_signatures(resolver, node->rhs,
+                                              scratch_arena, arena);
     break;
   }
 }
