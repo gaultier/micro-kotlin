@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -352,7 +353,7 @@ __attribute__((warn_unused_result)) static char *str_to_c(Str s, Arena *arena) {
 }
 
 __attribute__((warn_unused_result)) static Read_result
-ut_read_all_from_file_path(char *path, Arena *arena) {
+ut_file_read_all(char *path, Arena *arena) {
   const int fd = open(path, O_RDONLY);
   if (fd == -1) {
     return (Read_result){.error = errno};
@@ -374,6 +375,37 @@ ut_read_all_from_file_path(char *path, Arena *arena) {
   Read_result res = ut_read_all_from_fd(fd, sb_new((u64)st.st_size, arena));
   close(fd);
   return res;
+}
+
+__attribute__((warn_unused_result)) static Read_result
+ut_file_mmap(char *path) {
+  const int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    return (Read_result){.error = errno};
+  }
+
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+    fprintf(stderr, "Failed to get the file size %s: %s\n", path,
+            strerror(errno));
+    close(fd);
+    return (Read_result){.error = errno};
+  }
+
+  if (st.st_size == 0) {
+    close(fd);
+    return (Read_result){0};
+  }
+
+  const u64 len = (u64)st.st_size;
+
+  void *data = mmap(NULL, len, PROT_READ, MAP_FILE, fd, -1);
+  if (data == NULL)
+    return (Read_result){.error = errno};
+
+  close(fd);
+
+  return (Read_result){.content = str_new(data, len)};
 }
 
 // --------------------------- Profile memory allocations

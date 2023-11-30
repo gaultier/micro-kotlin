@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
     }
 
     Read_result source_file_read_res =
-        ut_read_all_from_file_path(source_file_name_cstr, &arena);
+        ut_file_read_all(source_file_name_cstr, &arena);
     if (source_file_read_res.error) {
       fprintf(stderr, "Failed to read the file %s: %s\n", source_file_name_cstr,
               strerror(source_file_read_res.error));
@@ -232,7 +232,7 @@ int main(int argc, char *argv[]) {
       LOG("\n----------- Verifiying%s", "");
 
       Read_result read_res =
-          ut_read_all_from_file_path(class_file_path_c_str, &scratch_arena);
+          ut_file_read_all(class_file_path_c_str, &scratch_arena);
       if (read_res.error) {
         fprintf(stderr, "Failed to read the file %.*s: %s\n",
                 (int)class_file_path.len, (char *)class_file_path.data,

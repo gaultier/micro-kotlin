@@ -307,7 +307,7 @@ struct Type {
   Str package_name;
   union {
     Method method;                 // TYPE_METHOD, TYPE_CONSTRUCTOR
-    Type_handle array_type_handle; // TYPE_ARRAY_REFERENCE
+    Type_handle array_type_handles; // TYPE_ARRAY_REFERENCE
     u16 integer_literal_types;     // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   Type_kind kind;
@@ -1068,7 +1068,7 @@ static Str_builder jvm_fill_descriptor_string(Str_builder sb,
   }
   case TYPE_ARRAY: {
     sb = sb_append_char(sb, '[', arena);
-    return jvm_fill_descriptor_string(sb, type->v.array_type_handle, arena);
+    return jvm_fill_descriptor_string(sb, type->v.array_type_handles, arena);
   }
   case TYPE_METHOD:
   case TYPE_CONSTRUCTOR: {
@@ -1180,7 +1180,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
                                  &type->this_class_name, arena);
     }
 
-    type->v.array_type_handle = resolver_add_type(resolver, &item_type, arena);
+    type->v.array_type_handles = resolver_add_type(resolver, &item_type, arena);
     return remaining;
   }
 
@@ -3778,7 +3778,7 @@ static Str type_to_human_string(Type_handle type_handle, Arena *arena) {
   case TYPE_ARRAY: {
     Str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
-    res = sb_append(res, type_to_human_string(type->v.array_type_handle, arena),
+    res = sb_append(res, type_to_human_string(type->v.array_type_handles, arena),
                     arena);
     res = sb_append_char(res, '>', arena);
     return sb_build(res);
@@ -5502,7 +5502,7 @@ static bool jvm_read_jmod_file(Resolver *resolver, Str path,
       // not the *main* arena. That's because most of the stuff in there is
       // irrelevant. We pick afterwards just the few bits we want to retain and
       // clone them into the main arena.
-      ut_read_all_from_file_path(path_cstr, &scratch_arena);
+      ut_file_read_all(path_cstr, &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
@@ -5529,7 +5529,7 @@ static bool jvm_read_jar_file(Resolver *resolver, Str path, Arena scratch_arena,
   pg_assert(arena != NULL);
 
   char *path_cstr = str_to_c(path, &scratch_arena);
-  Read_result read_res = ut_read_all_from_file_path(path_cstr, &scratch_arena);
+  Read_result read_res = ut_file_read_all(path_cstr, &scratch_arena);
   if (read_res.error) {
     fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
@@ -6044,7 +6044,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
       // TODO: check if we can read the file content into `scratch_arena`
       char *tentative_class_file_path_cstr =
           str_to_c(tentative_class_file_path, &scratch_arena);
-      Read_result read_res = ut_read_all_from_file_path(
+      Read_result read_res = ut_file_read_all(
           tentative_class_file_path_cstr, &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
@@ -9126,7 +9126,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
       Type source_method_argument_types = {
           .kind = TYPE_ARRAY,
           .this_class_name = str_from_c("FIXME"),
-          .v = {.array_type_handle = string_type_handle},
+          .v = {.array_type_handles = string_type_handle},
       };
 
       const Type_handle source_argument_types_i = resolver_add_type(
