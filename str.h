@@ -537,3 +537,14 @@ static void mem_profile_write(Mem_profile *profile, FILE *out) {
 
   fflush(out);
 }
+
+// FNV-1a
+__attribute__((warn_unused_result)) static u64 fnv1_hash(const u8 *data,
+                                                         u64 len) {
+  u64 h = 0x100;
+  for (u64 i = 0; i < len; i++) {
+    h ^= data[i];
+    h *= 1111111111111111111u;
+  }
+  return h;
+}

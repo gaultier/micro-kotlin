@@ -51,9 +51,9 @@
 - [x] Trivial inline (no jumps, no exceptions, etc)
 - [x] Remove builtin println
 - [x] Split `string_t` into `string_builder_t` and `string_t` (immutable, allows for trivial equality comparison with interning)
+- [x] Use a pg_array in the constant pool
 - [ ] Hash every string in ty_type_t
 - [ ] Move `resolver->types` to a hash trie
-- [ ] **Use a pg_array in the constant pool**
 - [ ] Decode UCS-2 Strings in class files (in constant pool)
 - [ ] Field access
 - [ ] Explicit casts

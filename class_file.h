@@ -865,23 +865,36 @@ typedef enum __attribute__((packed)) {
 } Jvm_access_flags;
 
 struct Jvm_constant_pool_entry {
+  u64 hash;
   union {
     u64 number;        // CONSTANT_POOL_KIND_INT
     Str s;             // CONSTANT_POOL_KIND_UTF8
     u16 string_utf8_i; // CONSTANT_POOL_KIND_STRING
-    struct Jvm_constant_method_ref {
+    u16 module;        // CONSTANT_POOL_KIND_MODULE
+    u16 package;       // CONSTANT_POOL_KIND_PACKAGE
+    struct Jvm_constant_ref {
       u16 class;
       u16 name_and_type;
-    } method_ref;        // CONSTANT_POOL_KIND_METHOD_REF
+    } ref;               // CONSTANT_POOL_KIND_METHOD_REF,
+                         // CONSTANT_POOL_KIND_FIELD_REF,
+                         // CONSTANT_POOL_KIND_INTERFACE_METHOD_REF
     u16 java_class_name; // CONSTANT_POOL_KIND_CLASS_INFO
     struct Jvm_constant_name_and_type {
       u16 name;
       u16 descriptor;
     } name_and_type; // CONSTANT_POOL_KIND_NAME_AND_TYPE
-    struct Jvm_constant_field_ref {
-      u16 name;
+    struct Jvm_constant_method_handle {
+      u8 reference_kind;
+      pg_pad(1);
+      u16 reference_index;
+    } method_handle; // CONSTANT_POOL_KIND_METHOD_HANDLE
+    struct Jvm_constant_method_type {
       u16 descriptor;
-    } field_ref; // CONSTANT_POOL_KIND_FIELD_REF
+    } method_type; // CONSTANT_POOL_KIND_METHOD_TYPE
+    struct Jvm_constant_invoke_dynamic {
+      u16 bootstrap_method_attr_index;
+      u16 name_and_type_index;
+    } invoke_dynamic; // CONSTANT_POOL_KIND_INVOKE_DYNAMIC
   } v;
   enum __attribute__((packed)) Jvm_constant_pool_kind {
     CONSTANT_POOL_KIND_UTF8 = 1,
@@ -905,12 +918,10 @@ struct Jvm_constant_pool_entry {
   pg_pad(7);
 };
 
-typedef struct Jvm_constant_method_ref Jvm_constant_method_ref;
-
+typedef struct Jvm_constant_ref Jvm_constant_ref;
 typedef struct Jvm_constant_name_and_type Jvm_constant_name_and_type;
-
-typedef struct Jvm_constant_field_ref Jvm_constant_field_ref;
-
+typedef struct Jvm_constant_method_handle Jvm_constant_method_handle;
+typedef struct Jvm_constant_method_type Jvm_constant_method_type;
 typedef enum Jvm_constant_pool_kind Jvm_constant_pool_kind;
 
 struct Jvm_constant_pool {
@@ -923,9 +934,20 @@ static u16 jvm_constant_array_push(Array32(Jvm_constant_pool_entry) * pool,
                                    const Jvm_constant_pool_entry *x,
                                    Arena *arena) {
   pg_assert(pool->len < UINT16_MAX);
+  pg_assert(x->kind != 0);
 
-  // TODO: dedup.
+  const u64 hash = fnv1_hash((u8 *)x, sizeof(*x));
+
+  for (u64 i = 0; i < pool->len; i++) {
+    pg_assert(pool->data[i].hash != 0);
+
+    if (pool->data[i].hash == hash) {
+      return (u16)(i + 1);
+    }
+  }
+
   *array32_push(pool, arena) = *x;
+  array32_last(*pool)->hash = hash;
   return (u16)pool->len;
 }
 
@@ -2069,42 +2091,32 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     u8 *const s = *current;
     buf_read_n_u8(buf, len, current);
 
-    Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
-                                        .v = {.s = str_new(s, len)}};
+    const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
+                                              .v.s = str_new(s, len)};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     break;
   }
-  case CONSTANT_POOL_KIND_INT: {
-    const u32 value = buf_read_be_u32(buf, current);
-    pg_unused(value);
-
-    const Jvm_constant_pool_entry constant = {.kind = kind,
-                                              .v = {.number = 0}}; // FIXME
-    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-    break;
-  }
+  case CONSTANT_POOL_KIND_INT:
   case CONSTANT_POOL_KIND_FLOAT: {
-    const u32 value = buf_read_be_u32(buf, current);
-    pg_unused(value);
-
-    const Jvm_constant_pool_entry constant = {.kind = kind,
-                                              .v = {.number = 0}}; // FIXME
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.number = buf_read_be_u32(buf, current),
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_DOUBLE:
   case CONSTANT_POOL_KIND_LONG: {
     const u32 high = buf_read_be_u32(buf, current);
-    pg_unused(high);
     const u32 low = buf_read_be_u32(buf, current);
-    pg_unused(low);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind,
-                                              .v = {.number = 0}}; // FIXME
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.number = ((u64)high << 32) | low,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-    const Jvm_constant_pool_entry dummy = {0};
-    jvm_constant_array_push(&class_file->constant_pool, &dummy, arena);
+    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     return 1;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
@@ -2114,7 +2126,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {.java_class_name = java_class_name_i}};
+        .v.java_class_name = java_class_name_i};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2124,53 +2136,25 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(utf8_i <= constant_pool_count);
 
     const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_STRING,
-                                              .v = {.string_utf8_i = utf8_i}};
+                                              .v.string_utf8_i = utf8_i};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
-  case CONSTANT_POOL_KIND_FIELD_REF: {
-    const u16 name_i = buf_read_be_u16(buf, current);
-    pg_assert(name_i > 0);
-    pg_assert(name_i <= constant_pool_count);
-
-    const u16 descriptor_i = buf_read_be_u16(buf, current);
-    pg_assert(descriptor_i > 0);
-    pg_assert(descriptor_i <= constant_pool_count);
-
-    const Jvm_constant_pool_entry constant = {
-        .kind = CONSTANT_POOL_KIND_FIELD_REF,
-        .v = {.field_ref = {.name = name_i, .descriptor = descriptor_i}}};
-    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-    break;
-  }
-  case CONSTANT_POOL_KIND_METHOD_REF: {
-    const u16 class_i = buf_read_be_u16(buf, current);
-    pg_assert(class_i > 0);
-    pg_assert(class_i <= constant_pool_count);
-
-    const u16 name_and_type_handle = buf_read_be_u16(buf, current);
-    pg_assert(name_and_type_handle > 0);
-    pg_assert(name_and_type_handle <= constant_pool_count);
-
-    const Jvm_constant_pool_entry constant = {
-        .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.name_and_type = name_and_type_handle,
-                             .class = class_i}}};
-    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-    break;
-  }
+  case CONSTANT_POOL_KIND_METHOD_REF:
+  case CONSTANT_POOL_KIND_FIELD_REF:
   case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF: {
     const u16 class_i = buf_read_be_u16(buf, current);
     pg_assert(class_i > 0);
     pg_assert(class_i <= constant_pool_count);
 
-    const u16 name_and_type_handle = buf_read_be_u16(buf, current);
-    pg_assert(name_and_type_handle > 0);
-    pg_assert(name_and_type_handle <= constant_pool_count);
+    const u16 name_and_type_i = buf_read_be_u16(buf, current);
+    pg_assert(name_and_type_i > 0);
+    pg_assert(name_and_type_i <= constant_pool_count);
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
-    }; // FIXME
+        .v.ref = {.class = class_i, .name_and_type = name_and_type_i},
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2185,17 +2169,22 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = name_i, .descriptor = descriptor_i}}};
+        .v.name_and_type = {.name = name_i, .descriptor = descriptor_i}};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_HANDLE: {
-    const u8 reference_kind = buf_read_u8(buf, current);
-    pg_unused(reference_kind);
-    const u16 reference_i = buf_read_be_u16(buf, current);
-    pg_unused(reference_i);
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.method_handle = {
+            .reference_kind = buf_read_u8(buf, current),
+            .reference_index = buf_read_be_u16(buf, current),
+        }};
+    pg_assert(1 <= constant.v.method_handle.reference_kind &&
+              constant.v.method_handle.reference_kind <= 9);
+    pg_assert(constant.v.method_handle.reference_index > 0);
+    pg_assert(constant.v.method_handle.reference_index <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2204,31 +2193,26 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(descriptor > 0);
     pg_assert(descriptor <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
-    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-    break;
-  }
-  case CONSTANT_POOL_KIND_DYNAMIC: {
-    const u16 bootstrap_method_attr_index = buf_read_be_u16(buf, current);
-    pg_unused(bootstrap_method_attr_index);
-
-    const u16 name_and_type_index = buf_read_be_u16(buf, current);
-    pg_assert(name_and_type_index > 0);
-    pg_assert(name_and_type_index <= constant_pool_count);
-
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.method_type.descriptor = descriptor,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
   case CONSTANT_POOL_KIND_INVOKE_DYNAMIC: {
     const u16 bootstrap_method_attr_index = buf_read_be_u16(buf, current);
-    pg_unused(bootstrap_method_attr_index);
 
     const u16 name_and_type_index = buf_read_be_u16(buf, current);
     pg_assert(name_and_type_index > 0);
     pg_assert(name_and_type_index <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.invoke_dynamic = {
+            .bootstrap_method_attr_index = bootstrap_method_attr_index,
+            .name_and_type_index = name_and_type_index,
+        }};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2237,7 +2221,10 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.module = name_i,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2246,7 +2233,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind}; // FIXME
+    const Jvm_constant_pool_entry constant = {.kind = kind,.v.package=name_i,};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2447,16 +2434,15 @@ static u8 jvm_write_constant(const Class_file *class_file, FILE *file,
     file_write_be_u16(file, constant->v.string_utf8_i);
     break;
   case CONSTANT_POOL_KIND_FIELD_REF: {
+    const Jvm_constant_ref *const ref = &constant->v.ref;
 
-    const Jvm_constant_field_ref *const field_ref = &constant->v.field_ref;
-
-    file_write_be_u16(file, field_ref->name);
-    file_write_be_u16(file, field_ref->descriptor);
+    file_write_be_u16(file, ref->class);
+    file_write_be_u16(file, ref->name_and_type);
     break;
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
 
-    const Jvm_constant_method_ref *const method_ref = &constant->v.method_ref;
+    const Jvm_constant_ref *const method_ref = &constant->v.ref;
 
     file_write_be_u16(file, method_ref->class);
     file_write_be_u16(file, method_ref->name_and_type);
@@ -2920,7 +2906,7 @@ static u16 jvm_add_constant_cstring(Array32(Jvm_constant_pool_entry) *
   pg_assert(s != NULL);
 
   const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_UTF8,
-                                            .v = {.s = str_from_c(s)}};
+                                            .v.s = str_from_c(s)};
   return jvm_constant_array_push(constant_pool, &constant, arena);
 }
 
@@ -2930,9 +2916,8 @@ static u16 jvm_add_constant_jstring(Array32(Jvm_constant_pool_entry) *
   pg_assert(constant_pool != NULL);
   pg_assert(constant_utf8_i > 0);
 
-  const Jvm_constant_pool_entry constant = {
-      .kind = CONSTANT_POOL_KIND_STRING,
-      .v = {.string_utf8_i = constant_utf8_i}};
+  const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_STRING,
+                                            .v.string_utf8_i = constant_utf8_i};
 
   return jvm_constant_array_push(constant_pool, &constant, arena);
 }
@@ -6919,37 +6904,30 @@ static u16 codegen_import_constant(Array32(Jvm_constant_pool_entry) * dst,
 
   switch (constant->kind) {
   case CONSTANT_POOL_KIND_FIELD_REF: {
-    const Jvm_constant_field_ref field_ref = constant->v.field_ref;
+    const Jvm_constant_ref ref = constant->v.ref;
 
     Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
-        .v =
+        .v.ref =
             {
-                .field_ref =
-                    {
-                        .descriptor = codegen_import_constant(
-                            dst, src, field_ref.descriptor, arena),
-                        .name = codegen_import_constant(dst, src,
-                                                        field_ref.name, arena),
-                    },
+                .class = codegen_import_constant(dst, src, ref.class, arena),
+                .name_and_type =
+                    codegen_import_constant(dst, src, ref.name_and_type, arena),
             },
     };
     return jvm_constant_array_push(dst, &constant_gen, arena);
   }
   case CONSTANT_POOL_KIND_METHOD_REF: {
-    const Jvm_constant_method_ref method_ref = constant->v.method_ref;
+    const Jvm_constant_ref method_ref = constant->v.ref;
 
     Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
-        .v =
+        .v.ref =
             {
-                .method_ref =
-                    {
-                        .class = codegen_import_constant(
-                            dst, src, method_ref.class, arena),
-                        .name_and_type = codegen_import_constant(
-                            dst, src, method_ref.name_and_type, arena),
-                    },
+                .class =
+                    codegen_import_constant(dst, src, method_ref.class, arena),
+                .name_and_type = codegen_import_constant(
+                    dst, src, method_ref.name_and_type, arena),
             },
     };
     return jvm_constant_array_push(dst, &constant_gen, arena);
@@ -7314,8 +7292,8 @@ static Type_handle codegen_make_type_from_method_descriptor(
       jvm_constant_array_get(constant_pool, constant_i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_METHOD_REF);
 
-  const Jvm_constant_pool_entry *const name_and_type = jvm_constant_array_get(
-      constant_pool, constant->v.method_ref.name_and_type);
+  const Jvm_constant_pool_entry *const name_and_type =
+      jvm_constant_array_get(constant_pool, constant->v.ref.name_and_type);
   pg_assert(name_and_type->kind == CONSTANT_POOL_KIND_NAME_AND_TYPE);
 
   Str descriptor = jvm_constant_array_get_as_string(
@@ -7359,7 +7337,7 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
       pg_assert(field_ref_gen->kind == CONSTANT_POOL_KIND_FIELD_REF);
 
       codegen_emit_get_static(gen, field_ref_gen_i,
-                              field_ref_gen->v.field_ref.name, arena);
+                              field_ref_gen->v.ref.name_and_type, arena);
 
       break;
     }
@@ -8251,14 +8229,15 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     // TODO: Float, Double, etc.
 
     const u64 number = node->extra_data;
-    const Jvm_constant_pool_entry constant = {.kind = pool_kind,
-                                              .v = {.number = number}};
+    const Jvm_constant_pool_entry constant = {
+        .kind = pool_kind,
+        .v.number = number,
+    };
     const u16 number_i =
         jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     if (pool_kind == CONSTANT_POOL_KIND_LONG ||
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
-      const Jvm_constant_pool_entry dummy = {0};
-      jvm_constant_array_push(&class_file->constant_pool, &dummy, arena);
+      jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
       codegen_emit_load_constant_double_word(
           gen, number_i,
@@ -8354,8 +8333,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 
       Jvm_constant_pool_entry method_ref = {
           .kind = CONSTANT_POOL_KIND_METHOD_REF,
-          .v = {.method_ref = {.class = class_i,
-                               .name_and_type = name_and_type_handle}}};
+          .v = {.ref = {.class = class_i,
+                        .name_and_type = name_and_type_handle}}};
       const u16 method_ref_i = jvm_constant_array_push(
           &class_file->constant_pool, &method_ref, arena);
 
@@ -9061,8 +9040,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         &class_file->constant_pool, &target_name_and_type, arena);
     const Jvm_constant_pool_entry target_method_ref = {
         .kind = CONSTANT_POOL_KIND_METHOD_REF,
-        .v = {.method_ref = {.class = class_file->this_class,
-                             .name_and_type = target_name_and_type_handle}}};
+        .v.ref = {.class = class_file->this_class,
+                  .name_and_type = target_name_and_type_handle}};
     const u16 target_method_ref_i = jvm_constant_array_push(
         &class_file->constant_pool, &target_method_ref, arena);
 
