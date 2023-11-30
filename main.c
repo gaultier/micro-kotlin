@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
   LOG("Initial: arena_available=%lu", arena.end - arena.start);
 
   // This size should be at least the size of the biggest file we read.
-  Arena scratch_arena = arena_new(512 * MiB, NULL);
+  Arena scratch_arena = arena_new(32 * MiB, NULL);
 
   Array32(Str) class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);

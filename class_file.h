@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1004,7 +1005,7 @@ jvm_constant_array_clone(const Jvm_constant_pool *constant_pool, Arena *arena) {
     res->values[i] = constant;
 
     if (constant.kind == CONSTANT_POOL_KIND_UTF8) {
-      res->values[i].v.s = str_clone(constant.v.s,arena);
+      res->values[i].v.s = str_clone(constant.v.s, arena);
     }
   }
 
@@ -6048,7 +6049,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
       char *tentative_class_file_path_cstr =
           str_to_c(tentative_class_file_path, &scratch_arena);
       Read_result read_res =
-          ut_file_read_all(tentative_class_file_path_cstr, &scratch_arena);
+          ut_file_mmap(tentative_class_file_path_cstr);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 
@@ -6065,6 +6066,8 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
                                  &this_type.this_class_name, arena);
 
       *type_handle = resolver_add_type(resolver, &this_type, arena);
+
+      munmap(read_res.content.data,read_res.content.len);
 
       return true;
     }
