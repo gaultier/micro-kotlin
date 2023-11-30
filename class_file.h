@@ -5279,6 +5279,8 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
 
   u8 *cdfh = content.data + central_directory_offset;
   for (u64 i = 0; i < records_count; i++) {
+    Arena tmp_arena = scratch_arena;
+
     pg_assert(buf_read_u8(content, &cdfh) == 0x50);
     pg_assert(buf_read_u8(content, &cdfh) == 0x4b);
     pg_assert(buf_read_u8(content, &cdfh) == 0x01);
@@ -5396,7 +5398,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         jvm_buf_read_class_file(
             str_new(local_file_header,
                     uncompressed_size_according_to_directory_entry),
-            &local_file_header, &class_file, &scratch_arena);
+            &local_file_header, &class_file, &tmp_arena);
 
         Type type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
@@ -5429,8 +5431,8 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
       } else if (compressed_size_according_to_directory_entry > 0 &&
                  compression_method == 8 && str_eq_c(file_name, ".class")) {
 #if WITH_ZLIB
-        Str dst = sb_build(sb_new(
-            uncompressed_size_according_to_directory_entry, &scratch_arena));
+        Str dst = sb_build(
+            sb_new(uncompressed_size_according_to_directory_entry, &tmp_arena));
 
         z_stream stream = {
             .next_in = (u8 *)local_file_header,
@@ -5449,7 +5451,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         pg_assert(res == Z_STREAM_END);
 
         u8 *dst_current = dst.data;
-        jvm_buf_read_class_file(dst, &dst_current, &class_file, &scratch_arena);
+        jvm_buf_read_class_file(dst, &dst_current, &class_file, &tmp_arena);
 
         Type type = {.kind = TYPE_INSTANCE};
         type_init_package_and_name(class_file.class_name, &type.package_name,
@@ -6048,8 +6050,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
       // TODO: check if we can read the file content into `scratch_arena`
       char *tentative_class_file_path_cstr =
           str_to_c(tentative_class_file_path, &scratch_arena);
-      Read_result read_res =
-          ut_file_mmap(tentative_class_file_path_cstr);
+      Read_result read_res = ut_file_mmap(tentative_class_file_path_cstr);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 
@@ -6067,7 +6068,7 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
 
       *type_handle = resolver_add_type(resolver, &this_type, arena);
 
-      munmap(read_res.content.data,read_res.content.len);
+      munmap(read_res.content.data, read_res.content.len);
 
       return true;
     }
