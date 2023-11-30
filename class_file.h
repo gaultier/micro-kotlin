@@ -1206,7 +1206,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
       *array32_push(&argument_types_handle, arena) = argument_type_handle;
     }
     pg_assert(remaining.len >= 1);
-    pg_assert(remaining.data[0] = ')');
+    pg_assert(remaining.data[0] == ')');
     remaining = str_advance(remaining, 1);
 
     Type return_type = {0};
@@ -5179,7 +5179,7 @@ static void resolver_load_methods_from_class_file(
       type.kind = TYPE_CONSTRUCTOR;
       type.v.method.name = type.this_class_name;
     } else {
-      type.v.method.name = name;
+      type.v.method.name = str_clone(name, arena);
     }
 
     type.v.method.access_flags = method->access_flags;
@@ -5529,15 +5529,18 @@ static bool jvm_read_jar_file(Resolver *resolver, Str path, Arena scratch_arena,
   pg_assert(arena != NULL);
 
   char *path_cstr = str_to_c(path, &scratch_arena);
-  Read_result read_res = ut_file_read_all(path_cstr, &scratch_arena);
+  Read_result read_res = ut_file_mmap(path_cstr);
   if (read_res.error) {
     fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
     return false;
   }
 
-  return jvm_buf_read_jar_file(resolver, read_res.content, path, scratch_arena,
-                               arena);
+  const bool success = jvm_buf_read_jar_file(resolver, read_res.content, path,
+                                             scratch_arena, arena);
+  munmap(read_res.content.data, read_res.content.len);
+
+  return success;
 }
 
 static bool resolver_is_package_imported(const Resolver *resolver,
@@ -7339,20 +7342,22 @@ static void codegen_emit_invoke_special(codegen_generator *gen,
   codegen_frame_stack_push(gen->frame, verification_info, arena);
 }
 
+// Only useful when inlined code invokes another method (referencing it by its
+// descriptor).
 static Type_handle
 codegen_make_type_from_method_descriptor(codegen_generator *gen,
-                                         Class_file *class_file, u16 constant_i,
-                                         Arena *arena) {
+                                         const Jvm_constant_pool *constant_pool,
+                                         u16 constant_i, Arena *arena) {
   const Jvm_constant_pool_entry *const constant =
-      jvm_constant_array_get(&class_file->constant_pool, constant_i);
+      jvm_constant_array_get(constant_pool, constant_i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_METHOD_REF);
 
   const Jvm_constant_pool_entry *const name_and_type = jvm_constant_array_get(
-      &class_file->constant_pool, constant->v.method_ref.name_and_type);
+      constant_pool, constant->v.method_ref.name_and_type);
   pg_assert(name_and_type->kind == CONSTANT_POOL_KIND_NAME_AND_TYPE);
 
   Str descriptor = jvm_constant_array_get_as_string(
-      &class_file->constant_pool, name_and_type->v.name_and_type.descriptor);
+      constant_pool, name_and_type->v.name_and_type.descriptor);
 
   Type new_type = {0};
   jvm_parse_descriptor(gen->resolver, descriptor, &new_type, arena);
@@ -7405,8 +7410,8 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
                                   method->constant_pool, method_ref_i, arena);
 
       const Type_handle invoked_type_handle =
-          codegen_make_type_from_method_descriptor(gen, class_file,
-                                                   method_ref_gen_i, arena);
+          codegen_make_type_from_method_descriptor(
+              gen, &class_file->constant_pool, method_ref_gen_i, arena);
       const Type *const invoked_type =
           type_handle_to_ptr(invoked_type_handle, *arena);
       pg_assert(invoked_type->kind == TYPE_METHOD);
@@ -7491,8 +7496,8 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
                                   method->constant_pool, method_ref_i, arena);
 
       const Type_handle invoked_type_handle =
-          codegen_make_type_from_method_descriptor(gen, class_file,
-                                                   method_ref_gen_i, arena);
+          codegen_make_type_from_method_descriptor(
+              gen, &class_file->constant_pool, method_ref_gen_i, arena);
       const Type *const invoked_type =
           type_handle_to_ptr(invoked_type_handle, *arena);
       pg_assert(invoked_type->kind == TYPE_METHOD);
