@@ -1004,7 +1004,7 @@ jvm_constant_array_clone(const Jvm_constant_pool *constant_pool, Arena *arena) {
     res->values[i] = constant;
 
     if (constant.kind == CONSTANT_POOL_KIND_UTF8) {
-      res->values[i].v.s = constant.v.s;
+      res->values[i].v.s = str_clone(constant.v.s,arena);
     }
   }
 
