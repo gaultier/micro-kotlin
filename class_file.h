@@ -2126,7 +2126,8 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v.java_class_name = java_class_name_i};
+        .v.java_class_name = java_class_name_i,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2135,8 +2136,10 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(utf8_i > 0);
     pg_assert(utf8_i <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = CONSTANT_POOL_KIND_STRING,
-                                              .v.string_utf8_i = utf8_i};
+    const Jvm_constant_pool_entry constant = {
+        .kind = CONSTANT_POOL_KIND_STRING,
+        .v.string_utf8_i = utf8_i,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2153,7 +2156,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
-        .v.ref = {.class = class_i, .name_and_type = name_and_type_i},
+        .v.ref = {.class = class_i, .name_and_type = name_and_type_i,},
     };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
@@ -2169,7 +2172,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
 
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v.name_and_type = {.name = name_i, .descriptor = descriptor_i}};
+        .v.name_and_type = {.name = name_i, .descriptor = descriptor_i,}};
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
@@ -2233,7 +2236,10 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(name_i > 0);
     pg_assert(name_i <= constant_pool_count);
 
-    const Jvm_constant_pool_entry constant = {.kind = kind,.v.package=name_i,};
+    const Jvm_constant_pool_entry constant = {
+        .kind = kind,
+        .v.package = name_i,
+    };
     jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     break;
   }
