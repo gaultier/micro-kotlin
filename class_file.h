@@ -960,7 +960,7 @@ static u16 jvm_constant_array_push2(Array32(Jvm_constant_pool_entry) * pool,
 
   *array32_push(pool, arena) = *x;
   array32_last(*pool)->hash = hash;
-  const u16 res= (u16)pool->len;
+  const u16 res = (u16)pool->len;
 
   *array32_push(pool, arena) = *x;
   array32_last(*pool)->hash = hash;
@@ -2170,7 +2170,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
     pg_assert(name_and_type_i <= constant_pool_count);
 
     const Jvm_constant_pool_entry constant = {
-        .kind = CONSTANT_POOL_KIND_INTERFACE_METHOD_REF,
+        .kind = kind,
         .v.ref =
             {
                 .class = class_i,
@@ -6931,49 +6931,16 @@ static u16 codegen_import_constant(Array32(Jvm_constant_pool_entry) * dst,
       jvm_constant_array_get(src, constant_i);
 
   switch (constant->kind) {
-  case CONSTANT_POOL_KIND_FIELD_REF: {
-    const Jvm_constant_ref ref = constant->v.ref;
-
-    Jvm_constant_pool_entry constant_gen = {
-        .kind = constant->kind,
-        .v.ref =
-            {
-                .class = codegen_import_constant(dst, src, ref.class, arena),
-                .name_and_type =
-                    codegen_import_constant(dst, src, ref.name_and_type, arena),
-            },
-    };
-    return jvm_constant_array_push(dst, &constant_gen, arena);
-  }
-  case CONSTANT_POOL_KIND_METHOD_REF: {
-    const Jvm_constant_ref method_ref = constant->v.ref;
-
-    Jvm_constant_pool_entry constant_gen = {
-        .kind = constant->kind,
-        .v.ref =
-            {
-                .class =
-                    codegen_import_constant(dst, src, method_ref.class, arena),
-                .name_and_type = codegen_import_constant(
-                    dst, src, method_ref.name_and_type, arena),
-            },
-    };
-    return jvm_constant_array_push(dst, &constant_gen, arena);
-  }
-
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
     const Jvm_constant_name_and_type name_and_type = constant->v.name_and_type;
     Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
-        .v =
+        .v.name_and_type =
             {
-                .name_and_type =
-                    {
-                        .name = codegen_import_constant(
-                            dst, src, name_and_type.name, arena),
-                        .descriptor = codegen_import_constant(
-                            dst, src, name_and_type.descriptor, arena),
-                    },
+                .name = codegen_import_constant(dst, src, name_and_type.name,
+                                                arena),
+                .descriptor = codegen_import_constant(
+                    dst, src, name_and_type.descriptor, arena),
             },
     };
     return jvm_constant_array_push(dst, &constant_gen, arena);
@@ -6985,14 +6952,24 @@ static u16 codegen_import_constant(Array32(Jvm_constant_pool_entry) * dst,
   }
 
   case CONSTANT_POOL_KIND_CLASS_INFO: {
+    const Jvm_constant_pool_entry constant_gen = {
+        .kind = constant->kind,
+        .v.java_class_name = codegen_import_constant(
+            dst, src, constant->v.java_class_name, arena),
+    };
+    return jvm_constant_array_push(dst, &constant_gen, arena);
+  }
+  case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF:
+  case CONSTANT_POOL_KIND_METHOD_REF:
+  case CONSTANT_POOL_KIND_FIELD_REF: {
+    const Jvm_constant_ref ref = constant->v.ref;
     Jvm_constant_pool_entry constant_gen = {
         .kind = constant->kind,
-        .v =
-            {
-                .java_class_name = codegen_import_constant(
-                    dst, src, constant->v.java_class_name, arena),
-            },
-    };
+        .v.ref = {
+            .class = codegen_import_constant(dst, src, ref.class, arena),
+            .name_and_type =
+                codegen_import_constant(dst, src, ref.name_and_type, arena),
+        }};
     return jvm_constant_array_push(dst, &constant_gen, arena);
   }
   default:
