@@ -399,11 +399,13 @@ ut_file_mmap(char *path) {
 
   const u64 len = (u64)st.st_size;
 
-  void *data = mmap(NULL, len, PROT_READ, MAP_FILE, fd, -1);
-  if (data == NULL)
-    return (Read_result){.error = errno};
+  void *data = mmap(NULL, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fd, 0);
 
   close(fd);
+
+  if (data == NULL) {
+    return (Read_result){.error = errno};
+  }
 
   return (Read_result){.content = str_new(data, len)};
 }

@@ -306,9 +306,9 @@ struct Type {
   Str super_class_name;
   Str package_name;
   union {
-    Method method;                 // TYPE_METHOD, TYPE_CONSTRUCTOR
+    Method method;                  // TYPE_METHOD, TYPE_CONSTRUCTOR
     Type_handle array_type_handles; // TYPE_ARRAY_REFERENCE
-    u16 integer_literal_types;     // TYPE_INTEGER_LITERAL: OR'ed integer types.
+    u16 integer_literal_types; // TYPE_INTEGER_LITERAL: OR'ed integer types.
   } v;
   Type_kind kind;
   u16 flags;
@@ -3778,8 +3778,8 @@ static Str type_to_human_string(Type_handle type_handle, Arena *arena) {
   case TYPE_ARRAY: {
     Str_builder res = sb_new(type->this_class_name.len + 256, arena);
     res = sb_append_c(res, "Array<", arena);
-    res = sb_append(res, type_to_human_string(type->v.array_type_handles, arena),
-                    arena);
+    res = sb_append(
+        res, type_to_human_string(type->v.array_type_handles, arena), arena);
     res = sb_append_char(res, '>', arena);
     return sb_build(res);
   }
@@ -5497,12 +5497,7 @@ static bool jvm_read_jmod_file(Resolver *resolver, Str path,
   pg_assert(arena != NULL);
 
   char *path_cstr = str_to_c(path, &scratch_arena);
-  Read_result read_res =
-      // IMPORTANT: We store the content of JMOD files in the *scratch* arena,
-      // not the *main* arena. That's because most of the stuff in there is
-      // irrelevant. We pick afterwards just the few bits we want to retain and
-      // clone them into the main arena.
-      ut_file_read_all(path_cstr, &scratch_arena);
+  Read_result read_res = ut_file_mmap(path_cstr);
   if (read_res.error) {
     fprintf(stderr, "Failed to read the file %.*s: %s\n", (int)path.len,
             path.data, strerror(read_res.error));
@@ -5520,7 +5515,12 @@ static bool jvm_read_jmod_file(Resolver *resolver, Str path,
   }
 
   content = str_advance(content, 4);
-  return jvm_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
+  const bool success =
+      jvm_buf_read_jar_file(resolver, content, path, scratch_arena, arena);
+
+  munmap(read_res.content.data, read_res.content.len);
+
+  return success;
 }
 
 static bool jvm_read_jar_file(Resolver *resolver, Str path, Arena scratch_arena,
@@ -6044,8 +6044,8 @@ static bool resolver_resolve_fully_qualified_name(Resolver *resolver, Str fqn,
       // TODO: check if we can read the file content into `scratch_arena`
       char *tentative_class_file_path_cstr =
           str_to_c(tentative_class_file_path, &scratch_arena);
-      Read_result read_res = ut_file_read_all(
-          tentative_class_file_path_cstr, &scratch_arena);
+      Read_result read_res =
+          ut_file_read_all(tentative_class_file_path_cstr, &scratch_arena);
       if (read_res.error) // Silently swallow the error and skip this entry.
         continue;
 
