@@ -1,6 +1,6 @@
 .PHONY: clean all
 
-MY_CFLAGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment -Wno-gnu-alignof-expression -Wconversion
+MY_CFLAGS := -Wall -Wextra -Wpadded -Wunused -Wno-array-bounds -Wno-comment -Wno-gnu-alignof-expression -Wconversion -fno-omit-frame-pointer
 
 WITH_ZLIB ?= 0
 LDFLAGS_WITH_ZLIB_0 =

@@ -222,7 +222,7 @@ int main(int argc, char *argv[]) {
               strerror(errno));
       return errno;
     }
-    jvm_write(&class_file, file);
+    jvm_write_class_file(&class_file, file);
     fclose(file);
 
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);

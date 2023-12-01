@@ -938,10 +938,17 @@ static u16 jvm_constant_array_push(Array32(Jvm_constant_pool_entry) * pool,
   const u64 hash = fnv1_hash((u8 *)x, sizeof(*x));
 
   for (u64 i = 0; i < pool->len; i++) {
-    pg_assert(pool->data[i].hash != 0);
+    const Jvm_constant_pool_entry *const it = &pool->data[i];
+    pg_assert(it->hash != 0);
 
-    if (pool->data[i].hash == hash) {
+    if (it->hash == hash) {
       return (u16)(i + 1);
+    }
+
+    if (it->kind == CONSTANT_POOL_KIND_LONG ||
+        it->kind == CONSTANT_POOL_KIND_DOUBLE) {
+      // Skip incoming dummy
+      i += 1;
     }
   }
 
@@ -956,14 +963,15 @@ static u16 jvm_constant_array_push2(Array32(Jvm_constant_pool_entry) * pool,
   pg_assert(x->kind == CONSTANT_POOL_KIND_LONG ||
             x->kind == CONSTANT_POOL_KIND_DOUBLE);
 
-  const u64 hash = fnv1_hash((u8 *)x, sizeof(*x));
+  // Hash the entry but ignore the hash field.
+  const u64 hash = fnv1_hash((u8 *)x + sizeof(x->hash), sizeof(*x));
 
   *array32_push(pool, arena) = *x;
   array32_last(*pool)->hash = hash;
   const u16 res = (u16)pool->len;
 
-  *array32_push(pool, arena) = *x;
-  array32_last(*pool)->hash = hash;
+  // Dummy.
+  *array32_push(pool, arena) = (Jvm_constant_pool_entry){0};
 
   return res;
 }
@@ -2397,7 +2405,7 @@ static void jvm_buf_read_class_file(Str buf, u8 **current,
 
   // Worst case: only LONG or DOUBLE entries which take 2 slots.
   class_file->constant_pool =
-      array32_make(Jvm_constant_pool_entry, 0, constant_pool_count * 2, arena);
+      array32_make(Jvm_constant_pool_entry, 0, constant_pool_count - 1, arena);
 
   jvm_buf_read_constants(buf, current, class_file, constant_pool_count, arena);
 
@@ -2428,11 +2436,8 @@ static void jvm_buf_read_class_file(Str buf, u8 **current,
   pg_assert(remaining == 0);
 }
 
-// Returns the number of incoming slots to skip:
-// - `1` in the case of CONSTANT_POOL_KIND_LONG or CONSTANT_POOL_KIND_DOUBLE
-// - `0` otherwise
-static u8 jvm_write_constant(const Class_file *class_file, FILE *file,
-                             const Jvm_constant_pool_entry *constant) {
+static void jvm_write_constant(const Class_file *class_file, FILE *file,
+                               const Jvm_constant_pool_entry *constant) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
   pg_assert(constant != NULL);
@@ -2454,33 +2459,24 @@ static u8 jvm_write_constant(const Class_file *class_file, FILE *file,
   case CONSTANT_POOL_KIND_LONG:
   case CONSTANT_POOL_KIND_DOUBLE:
     file_write_be_u64(file, constant->v.number);
-    return 1;
+    break;
+
   case CONSTANT_POOL_KIND_CLASS_INFO:
     file_write_be_u16(file, constant->v.java_class_name);
     break;
   case CONSTANT_POOL_KIND_STRING:
     file_write_be_u16(file, constant->v.string_utf8_i);
     break;
-  case CONSTANT_POOL_KIND_FIELD_REF: {
+  case CONSTANT_POOL_KIND_FIELD_REF:
+  case CONSTANT_POOL_KIND_METHOD_REF:
+  case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF: {
     const Jvm_constant_ref *const ref = &constant->v.ref;
 
     file_write_be_u16(file, ref->class);
     file_write_be_u16(file, ref->name_and_type);
     break;
   }
-  case CONSTANT_POOL_KIND_METHOD_REF: {
-
-    const Jvm_constant_ref *const method_ref = &constant->v.ref;
-
-    file_write_be_u16(file, method_ref->class);
-    file_write_be_u16(file, method_ref->name_and_type);
-    break;
-  }
-  case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF:
-    pg_assert(0 && "unimplemented");
-    break;
   case CONSTANT_POOL_KIND_NAME_AND_TYPE: {
-
     const Jvm_constant_name_and_type *const name_and_type =
         &constant->v.name_and_type;
 
@@ -2494,7 +2490,6 @@ static u8 jvm_write_constant(const Class_file *class_file, FILE *file,
   default:
     pg_assert(0 && "unreachable/unimplemented");
   }
-  return 0;
 }
 
 static void jvm_write_constant_pool(const Class_file *class_file, FILE *file) {
@@ -2506,9 +2501,15 @@ static void jvm_write_constant_pool(const Class_file *class_file, FILE *file) {
   for (u64 i = 0; i < class_file->constant_pool.len; i++) {
     const Jvm_constant_pool_entry *const constant =
         &class_file->constant_pool.data[i];
-    i += jvm_write_constant(class_file, file, constant);
+    jvm_write_constant(class_file, file, constant);
+    if (constant->kind == CONSTANT_POOL_KIND_LONG ||
+        constant->kind == CONSTANT_POOL_KIND_DOUBLE) {
+      // Skip incoming dummy
+      i += 1;
+    }
   }
 }
+
 static void jvm_write_interfaces(const Class_file *class_file, FILE *file) {
   pg_assert(class_file != NULL);
   pg_assert(file != NULL);
@@ -2891,7 +2892,7 @@ static void jvm_write_methods(const Class_file *class_file, FILE *file) {
   }
 }
 
-static void jvm_write(const Class_file *class_file, FILE *file) {
+static void jvm_write_class_file(const Class_file *class_file, FILE *file) {
   fwrite(&jvm_MAGIC_NUMBER, sizeof(jvm_MAGIC_NUMBER), 1, file);
 
   file_write_be_u16(file, class_file->minor_version);
@@ -8239,11 +8240,15 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .v.number = number,
     };
     const u16 number_i =
-        jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
+        (pool_kind == CONSTANT_POOL_KIND_LONG ||
+         pool_kind == CONSTANT_POOL_KIND_DOUBLE)
+            ? jvm_constant_array_push2(&class_file->constant_pool, &constant,
+                                       arena)
+            : jvm_constant_array_push(&class_file->constant_pool, &constant,
+                                      arena);
+
     if (pool_kind == CONSTANT_POOL_KIND_LONG ||
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
-      jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
-
       codegen_emit_load_constant_double_word(
           gen, number_i,
           (Jvm_verification_info){.kind = verification_info_kind}, arena);
