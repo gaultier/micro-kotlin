@@ -184,8 +184,8 @@ int main(int argc, char *argv[]) {
     LOG("After loading known types: arena_available=%lu",
         arena.end - arena.start);
 
-    resolver_user_defined_function_signatures(&resolver, root_handle,
-                                              scratch_arena, &arena);
+    const u32 methods_count = resolver_user_defined_function_signatures(
+        &resolver, root_handle, scratch_arena, &arena);
     resolver_resolve_ast(&resolver, root_handle, scratch_arena, &arena);
 
     // Debug types.
@@ -208,7 +208,7 @@ int main(int argc, char *argv[]) {
             17, // TODO: Add a CLI option to choose the jdk/jre version
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
-    jvm_init(&class_file, &arena);
+    jvm_init(&class_file,methods_count, &arena);
     codegen_emit(&resolver, &class_file, root_handle, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;

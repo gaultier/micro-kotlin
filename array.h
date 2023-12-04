@@ -12,11 +12,12 @@
   } Array32(T);
 
 #define array32_make(T, _len, _cap, _arena)                                    \
-  ((Array32(T)){                                                               \
-      .len = _len,                                                             \
-      .cap = _cap,                                                             \
-      .data = arena_alloc(_arena, sizeof(T), _Alignof(T), _cap),               \
-  })
+  (pg_assert(_len <= _cap),                                                    \
+   ((Array32(T)){                                                              \
+       .len = _len,                                                            \
+       .cap = _cap,                                                            \
+       .data = arena_alloc(_arena, sizeof(T), _Alignof(T), _cap),              \
+   }))
 
 static void array32_grow(u32 len, u32 *cap, void **data, u32 item_size,
                          u32 item_align, Arena *arena) {

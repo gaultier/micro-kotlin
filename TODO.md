@@ -52,8 +52,10 @@
 - [x] Remove builtin println
 - [x] Split `string_t` into `string_builder_t` and `string_t` (immutable, allows for trivial equality comparison with interning)
 - [x] Use a pg_array in the constant pool
-- [ ] Hash every string in ty_type_t
-- [ ] Move `resolver->types` to a hash trie
+- [x] Heap dump on Linux with function names (instead of addresses)
+- [x] Constant pool deduplication
+- [ ] *Hash every string in ty_type_t*
+- [ ] *Move `resolver->types` to a hash trie*
 - [ ] Decode UCS-2 Strings in class files (in constant pool)
 - [ ] Field access
 - [ ] Explicit casts
@@ -67,11 +69,9 @@
 - [ ] Multiple files - what about ordering and type hole filling?
 - [ ] Defend against integer overflows
 - [ ] Hex/other number literals
-- [ ] Constant pool deduplication
 - [ ] Hashes/Hashtables in judicious places in the compiler (strings, types?)
-- [ ] Heap dump on other OSes
-- [ ] Heap dump on Linux with function names (instead of addresses)
-- [ ] Heap dump on other OSes with function names (instead of addresses)
+- [ ] *Heap dump on other OSes*
+- [ ] *Heap dump on other OSes with function names (instead of addresses)*
 - [ ] ~~Union/intersection of integer types for integer literals => constraint solver for type inference inside a function body!~~
 - [ ] Package name
 - [ ] Imports

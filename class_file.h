@@ -2939,12 +2939,13 @@ static void jvm_write_class_file(const Class_file *class_file, FILE *file) {
   fflush(file);
 }
 
-static void jvm_init(Class_file *class_file, Arena *arena) {
+static void jvm_init(Class_file *class_file, u32 methods_count, Arena *arena) {
   pg_assert(class_file != NULL);
   pg_assert(arena != NULL);
 
   class_file->constant_pool =
       array32_make(Jvm_constant_pool_entry, 0, 1024, arena);
+  class_file->methods = array32_make(Jvm_method, 0, methods_count, arena);
 }
 
 static u16 jvm_add_constant_string(Array32(Jvm_constant_pool_entry) *
@@ -6823,24 +6824,27 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
 // First pass to resolve all the function signatures so that they can be called
 // before their definition in the source order.
-static void resolver_user_defined_function_signatures(Resolver *resolver,
-                                                      Ast_handle ast_handle,
-                                                      Arena scratch_arena,
-                                                      Arena *arena) {
+__attribute__((warn_unused_result)) static u32
+resolver_user_defined_function_signatures(Resolver *resolver,
+                                          Ast_handle ast_handle,
+                                          Arena scratch_arena, Arena *arena) {
 
   if (ast_handle_is_nil(ast_handle))
-    return;
+    return 0;
 
+  u32 count = 0;
   Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   switch (node->kind) {
   case AST_KIND_LIST:
     for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_user_defined_function_signatures(resolver, node->nodes.data[i],
-                                                scratch_arena, arena);
+      count += resolver_user_defined_function_signatures(
+          resolver, node->nodes.data[i], scratch_arena, arena);
 
-    break;
+    return count;
 
   case AST_KIND_FUNCTION_DEFINITION: {
+    count += 1;
+
     typechecker_begin_scope(resolver);
     resolver->current_function_handle = ast_handle;
 
@@ -6897,13 +6901,15 @@ static void resolver_user_defined_function_signatures(Resolver *resolver,
 
     resolver->current_function_handle = ast_handle_nil;
     typechecker_end_scope(resolver);
-  } break;
+
+    return count;
+  }
   default:
-    resolver_user_defined_function_signatures(resolver, node->lhs,
-                                              scratch_arena, arena);
-    resolver_user_defined_function_signatures(resolver, node->rhs,
-                                              scratch_arena, arena);
-    break;
+    count += resolver_user_defined_function_signatures(resolver, node->lhs,
+                                                       scratch_arena, arena);
+    count += resolver_user_defined_function_signatures(resolver, node->rhs,
+                                                       scratch_arena, arena);
+    return count;
   }
 }
 
@@ -8413,7 +8419,8 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     };
     method.attributes = array32_make(Jvm_attribute, 0, 1, arena);
 
-    Jvm_attribute_code code = {0};
+    Jvm_attribute_code code = {.attributes =
+                                   array32_make(Jvm_attribute, 0, 4, arena)};
     gen->code = &code;
     codegen_frame frame = {0};
     codegen_frame_init(&frame, arena);
