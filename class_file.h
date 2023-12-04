@@ -930,8 +930,8 @@ struct Jvm_constant_pool {
 };
 
 static u16 jvm_constant_pool_push(Array32(Jvm_constant_pool_entry) * pool,
-                                   const Jvm_constant_pool_entry *x,
-                                   Arena *arena) {
+                                  const Jvm_constant_pool_entry *x,
+                                  Arena *arena) {
   pg_assert(pool->len < UINT16_MAX);
   pg_assert(x->kind != 0);
 
@@ -8833,7 +8833,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     const Jvm_verification_info verification_info = {
         .kind = VERIFICATION_INFO_OBJECT,
         .extra_data = jvm_constant_pool_push(&class_file->constant_pool,
-                                              &string_class_info, arena),
+                                             &string_class_info, arena),
     };
     codegen_emit_load_constant_single_word(gen, jstring_i, verification_info,
                                            arena);
@@ -8935,7 +8935,7 @@ static void codegen_emit_synthetic_class(codegen_generator *gen,
             .java_class_name = this_class_name_i,
         }};
     class_file->this_class = jvm_constant_pool_push(&class_file->constant_pool,
-                                                     &this_class_info, arena);
+                                                    &this_class_info, arena);
   }
 
   { // Super class
@@ -8948,8 +8948,8 @@ static void codegen_emit_synthetic_class(codegen_generator *gen,
             .java_class_name = constant_java_lang_object_string_i,
         }};
 
-    class_file->super_class = jvm_constant_pool_push(
-        &class_file->constant_pool, &super_class_info, arena);
+    class_file->super_class = jvm_constant_pool_push(&class_file->constant_pool,
+                                                     &super_class_info, arena);
   }
 }
 
