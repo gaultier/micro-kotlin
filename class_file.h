@@ -935,7 +935,9 @@ static u16 jvm_constant_array_push(Array32(Jvm_constant_pool_entry) * pool,
   pg_assert(pool->len < UINT16_MAX);
   pg_assert(x->kind != 0);
 
-  const u64 hash = fnv1_hash((u8 *)x, sizeof(*x));
+  const u8 *const to_hash = (u8 *)x + sizeof(x->hash);
+  const u64 to_hash_len = sizeof(*x) - sizeof(x->hash);
+  const u64 hash = fnv1_hash(to_hash, to_hash_len);
 
   for (u64 i = 0; i < pool->len; i++) {
     const Jvm_constant_pool_entry *const it = &pool->data[i];
@@ -954,24 +956,14 @@ static u16 jvm_constant_array_push(Array32(Jvm_constant_pool_entry) * pool,
 
   *array32_push(pool, arena) = *x;
   array32_last(*pool)->hash = hash;
-  return (u16)pool->len;
-}
 
-static u16 jvm_constant_array_push2(Array32(Jvm_constant_pool_entry) * pool,
-                                    const Jvm_constant_pool_entry *x,
-                                    Arena *arena) {
-  pg_assert(x->kind == CONSTANT_POOL_KIND_LONG ||
-            x->kind == CONSTANT_POOL_KIND_DOUBLE);
-
-  // Hash the entry but ignore the hash field.
-  const u64 hash = fnv1_hash((u8 *)x + sizeof(x->hash), sizeof(*x));
-
-  *array32_push(pool, arena) = *x;
-  array32_last(*pool)->hash = hash;
   const u16 res = (u16)pool->len;
 
-  // Dummy.
-  *array32_push(pool, arena) = (Jvm_constant_pool_entry){0};
+  if (x->kind == CONSTANT_POOL_KIND_LONG ||
+      x->kind == CONSTANT_POOL_KIND_DOUBLE) {
+    // Dummy.
+    *array32_push(pool, arena) = (Jvm_constant_pool_entry){0};
+  }
 
   return res;
 }
@@ -2139,7 +2131,7 @@ static u8 jvm_buf_read_constant(Str buf, u8 **current, Class_file *class_file,
         .kind = kind,
         .v.number = ((u64)high << 32) | low,
     };
-    jvm_constant_array_push2(&class_file->constant_pool, &constant, arena);
+    jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
     return 1;
   }
   case CONSTANT_POOL_KIND_CLASS_INFO: {
@@ -2400,12 +2392,13 @@ static void jvm_buf_read_class_file(Str buf, u8 **current,
   class_file->minor_version = buf_read_be_u16(buf, current);
   class_file->major_version = buf_read_be_u16(buf, current);
 
-  const u16 constant_pool_count = buf_read_be_u16(buf, current) - 1;
+  u16 constant_pool_count = buf_read_be_u16(buf, current);
   pg_assert(constant_pool_count > 0);
+  constant_pool_count -= 1; // Per spec: -1.
 
   // Worst case: only LONG or DOUBLE entries which take 2 slots.
   class_file->constant_pool =
-      array32_make(Jvm_constant_pool_entry, 0, constant_pool_count - 1, arena);
+      array32_make(Jvm_constant_pool_entry, 0, constant_pool_count, arena);
 
   jvm_buf_read_constants(buf, current, class_file, constant_pool_count, arena);
 
@@ -8210,7 +8203,9 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
   case AST_KIND_BOOL: {
     pg_assert(node->main_token_i < gen->resolver->parser->lexer->tokens.len);
     const Jvm_constant_pool_entry constant = {
-        .kind = CONSTANT_POOL_KIND_INT, .v = {.number = node->extra_data}};
+        .kind = CONSTANT_POOL_KIND_INT,
+        .v.number = node->extra_data,
+    };
     const u16 number_i =
         jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
@@ -8240,12 +8235,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .v.number = number,
     };
     const u16 number_i =
-        (pool_kind == CONSTANT_POOL_KIND_LONG ||
-         pool_kind == CONSTANT_POOL_KIND_DOUBLE)
-            ? jvm_constant_array_push2(&class_file->constant_pool, &constant,
-                                       arena)
-            : jvm_constant_array_push(&class_file->constant_pool, &constant,
-                                      arena);
+        jvm_constant_array_push(&class_file->constant_pool, &constant, arena);
 
     if (pool_kind == CONSTANT_POOL_KIND_LONG ||
         pool_kind == CONSTANT_POOL_KIND_DOUBLE) {
@@ -9036,15 +9026,18 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         class_file->constant_pool, target_method->descriptor);
     const Jvm_constant_pool_entry target_descriptor = {
         .kind = CONSTANT_POOL_KIND_UTF8,
-        .v = {.s = target_descriptor_string},
+        .v.s = target_descriptor_string,
     };
     const u16 target_descriptor_i = jvm_constant_array_push(
         &class_file->constant_pool, &target_descriptor, arena);
 
     const Jvm_constant_pool_entry target_name_and_type = {
         .kind = CONSTANT_POOL_KIND_NAME_AND_TYPE,
-        .v = {.name_and_type = {.name = target_method->name,
-                                .descriptor = target_descriptor_i}},
+        .v.name_and_type =
+            {
+                .name = target_method->name,
+                .descriptor = target_descriptor_i,
+            },
     };
     const u16 target_name_and_type_handle = jvm_constant_array_push(
         &class_file->constant_pool, &target_name_and_type, arena);
@@ -9081,7 +9074,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
       Type source_method_argument_types = {
           .kind = TYPE_ARRAY,
           .this_class_name = str_from_c("FIXME"),
-          .v = {.array_type_handles = string_type_handle},
+          .v.array_type_handles = string_type_handle,
       };
 
       const Type_handle source_argument_types_i = resolver_add_type(
@@ -9091,9 +9084,8 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
 
       const Jvm_constant_pool_entry source_method_arg0_class = {
           .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-          .v = {
-              .java_class_name = source_method_arg0_string,
-          }};
+          .v.java_class_name = source_method_arg0_string,
+      };
       const u16 source_method_arg0_class_i = jvm_constant_array_push(
           &class_file->constant_pool, &source_method_arg0_class, arena);
 
