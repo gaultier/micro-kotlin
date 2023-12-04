@@ -208,7 +208,7 @@ int main(int argc, char *argv[]) {
             17, // TODO: Add a CLI option to choose the jdk/jre version
         .access_flags = ACCESS_FLAGS_SUPER | ACCESS_FLAGS_PUBLIC,
     };
-    jvm_init(&class_file,methods_count, &arena);
+    jvm_init(&class_file, methods_count, &arena);
     codegen_emit(&resolver, &class_file, root_handle, &arena);
     if (parser.state != PARSER_STATE_OK)
       return 1;
