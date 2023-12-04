@@ -1037,7 +1037,7 @@ static codegen_frame *codegen_frame_clone(const codegen_frame *src,
 
 static Array32(Jvm_constant_pool_entry)
     jvm_constant_pool_clone(Array32(Jvm_constant_pool_entry) src,
-                             Arena *arena) {
+                            Arena *arena) {
   Array32(Jvm_constant_pool_entry) dst = {0};
   array32_clone(Jvm_constant_pool_entry, &dst, src, arena);
 
@@ -1509,8 +1509,8 @@ static u8 buf_read_u8(Str buf, u8 **current) {
 }
 
 static Str jvm_constant_pool_get_as_string(Array32(Jvm_constant_pool_entry)
-                                                constant_pool,
-                                            u16 i) {
+                                               constant_pool,
+                                           u16 i) {
   const Jvm_constant_pool_entry *const constant =
       jvm_constant_pool_get(constant_pool, i);
   pg_assert(constant->kind == CONSTANT_POOL_KIND_UTF8);
@@ -3022,7 +3022,7 @@ jvm_get_this_class_name(const Class_file *class_file) {
   pg_assert(this_class->kind == CONSTANT_POOL_KIND_CLASS_INFO);
   const u16 this_class_i = this_class->v.java_class_name;
   return jvm_constant_pool_get_as_string(class_file->constant_pool,
-                                          this_class_i);
+                                         this_class_i);
 }
 
 static const Jvm_attribute *
@@ -3060,8 +3060,8 @@ static void jvm_get_source_location_of_function(const Class_file *class_file,
       code->v.code.attributes, ATTRIBUTE_KIND_SOURCE_FILE);
   if (source_file != NULL) {
     *filename = str_clone(
-        jvm_constant_pool_get_as_string(
-            class_file->constant_pool, source_file->v.source_file.source_file),
+        jvm_constant_pool_get_as_string(class_file->constant_pool,
+                                        source_file->v.source_file.source_file),
         arena);
   }
 
@@ -5169,9 +5169,9 @@ static void resolver_load_methods_from_class_file(
   for (u64 i = 0; i < class_file->methods.len; i++) {
     const Jvm_method *const method = &class_file->methods.data[i];
     Str descriptor = jvm_constant_pool_get_as_string(class_file->constant_pool,
-                                                      method->descriptor);
+                                                     method->descriptor);
     Str name = jvm_constant_pool_get_as_string(class_file->constant_pool,
-                                                method->name);
+                                               method->name);
 
     Type type = {
         .this_class_name = this_class_type->this_class_name,
@@ -5414,7 +5414,7 @@ static bool jvm_buf_read_jar_file(Resolver *resolver, Str content, Str path,
         if (class_file.super_class != 0) {
           const Jvm_constant_pool_entry *const constant_super =
               jvm_constant_pool_get(class_file.constant_pool,
-                                     class_file.super_class);
+                                    class_file.super_class);
 
           pg_assert(constant_super->kind == CONSTANT_POOL_KIND_CLASS_INFO);
         }
@@ -9031,12 +9031,12 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
 
     // A function not named `main`, skip.
     Str name = jvm_constant_pool_get_as_string(class_file->constant_pool,
-                                                method->name);
+                                               method->name);
     if (!str_eq_c(name, "main"))
       continue;
 
     Str descriptor = jvm_constant_pool_get_as_string(class_file->constant_pool,
-                                                      method->descriptor);
+                                                     method->descriptor);
 
     // The entrypoint already exists as the JVM expects it, nothing to do.
     if (str_eq(descriptor, source_descriptor_str))
