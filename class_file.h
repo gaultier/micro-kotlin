@@ -865,10 +865,9 @@ typedef enum __attribute__((packed)) {
 } Jvm_access_flags;
 
 struct Jvm_constant_pool_entry {
-  u64 hash;
   union {
-    u64 number;        // CONSTANT_POOL_KIND_INT
-    Str s;             // CONSTANT_POOL_KIND_UTF8
+    u64 number; // CONSTANT_POOL_KIND_INT,CONSTANT_POOL_KIND_FLOAT,CONSTANT_POOL_KIND_LONG,CONSTANT_POOL_KIND_DOUBLE
+    Str s;      // CONSTANT_POOL_KIND_UTF8
     u16 string_utf8_i; // CONSTANT_POOL_KIND_STRING
     u16 module;        // CONSTANT_POOL_KIND_MODULE
     u16 package;       // CONSTANT_POOL_KIND_PACKAGE
@@ -929,21 +928,61 @@ struct Jvm_constant_pool {
   Jvm_constant_pool_entry *values;
 };
 
+static bool jvm_constant_eq(const Jvm_constant_pool_entry *a,
+                            const Jvm_constant_pool_entry *b) {
+  if (a->kind != b->kind)
+    return false;
+
+  switch (a->kind) {
+  case CONSTANT_POOL_KIND_UTF8:
+    return str_eq(a->v.s, b->v.s); // TODO: Can we do a value check here?
+  case CONSTANT_POOL_KIND_INT:
+  case CONSTANT_POOL_KIND_FLOAT:
+  case CONSTANT_POOL_KIND_LONG:
+  case CONSTANT_POOL_KIND_DOUBLE:
+    return a->v.number == b->v.number;
+  case CONSTANT_POOL_KIND_METHOD_REF:
+  case CONSTANT_POOL_KIND_FIELD_REF:
+  case CONSTANT_POOL_KIND_INTERFACE_METHOD_REF:
+    return a->v.ref.class == b->v.ref.class &&
+           a->v.ref.name_and_type == b->v.ref.name_and_type;
+  case CONSTANT_POOL_KIND_CLASS_INFO:
+    return a->v.java_class_name == b->v.java_class_name;
+  case CONSTANT_POOL_KIND_NAME_AND_TYPE:
+    return a->v.name_and_type.name == b->v.name_and_type.name &&
+           a->v.name_and_type.descriptor == b->v.name_and_type.descriptor;
+  case CONSTANT_POOL_KIND_STRING:
+    return a->v.string_utf8_i == b->v.string_utf8_i;
+  case CONSTANT_POOL_KIND_MODULE:
+    return a->v.module == b->v.module;
+  case CONSTANT_POOL_KIND_PACKAGE:
+    return a->v.package == b->v.package;
+  case CONSTANT_POOL_KIND_METHOD_HANDLE:
+    return a->v.method_handle.reference_kind ==
+               b->v.method_handle.reference_kind &&
+           a->v.method_handle.reference_index ==
+               b->v.method_handle.reference_index;
+
+  case CONSTANT_POOL_KIND_INVOKE_DYNAMIC:
+    return a->v.invoke_dynamic.bootstrap_method_attr_index ==
+               b->v.invoke_dynamic.bootstrap_method_attr_index &&
+           a->v.invoke_dynamic.name_and_type_index ==
+               b->v.invoke_dynamic.name_and_type_index;
+  case CONSTANT_POOL_KIND_METHOD_TYPE:
+    return a->v.method_type.descriptor == b->v.method_type.descriptor;
+  }
+}
+
 static u16 jvm_constant_pool_push(Array32(Jvm_constant_pool_entry) * pool,
                                   const Jvm_constant_pool_entry *x,
                                   Arena *arena) {
   pg_assert(pool->len < UINT16_MAX);
   pg_assert(x->kind != 0);
 
-  const u8 *const to_hash = (u8 *)x + sizeof(x->hash);
-  const u64 to_hash_len = sizeof(*x) - sizeof(x->hash);
-  const u64 hash = fnv1_hash(to_hash, to_hash_len);
-
   for (u64 i = 0; i < pool->len; i++) {
     const Jvm_constant_pool_entry *const it = &pool->data[i];
-    pg_assert(it->hash != 0);
 
-    if (it->hash == hash) {
+    if (jvm_constant_eq(it, x)) {
       return (u16)(i + 1);
     }
 
@@ -955,8 +994,6 @@ static u16 jvm_constant_pool_push(Array32(Jvm_constant_pool_entry) * pool,
   }
 
   *array32_push(pool, arena) = *x;
-  array32_last(*pool)->hash = hash;
-
   const u16 res = (u16)pool->len;
 
   if (x->kind == CONSTANT_POOL_KIND_LONG ||
