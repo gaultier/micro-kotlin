@@ -485,8 +485,7 @@ static void resolver_init(Resolver *resolver, Parser *parser,
 
   resolver->variables = array_make(Type_variable, 0, 512, arena);
   resolver->imported_package_names = array_make(Str, 0, 256, arena);
-  *array_push(&resolver->imported_package_names, arena) =
-      str_from_c("kotlin");
+  *array_push(&resolver->imported_package_names, arena) = str_from_c("kotlin");
 
   *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.annotation");
@@ -1036,8 +1035,7 @@ static codegen_frame *codegen_frame_clone(const codegen_frame *src,
 }
 
 static Array(Jvm_constant_pool_entry)
-    jvm_constant_pool_clone(Array(Jvm_constant_pool_entry) src,
-                            Arena *arena) {
+    jvm_constant_pool_clone(Array(Jvm_constant_pool_entry) src, Arena *arena) {
   Array(Jvm_constant_pool_entry) dst = {0};
   array_clone(Jvm_constant_pool_entry, &dst, src, arena);
 
@@ -1522,10 +1520,10 @@ static void jvm_buf_read_attributes(Str buf, u8 **current,
                                     Array(Jvm_attribute) * attributes,
                                     Arena *arena);
 
-static void
-jvm_buf_read_sourcefile_attribute(Str buf, u8 **current, Class_file *class_file,
-                                  Array(Jvm_attribute) * attributes,
-                                  Arena *arena) {
+static void jvm_buf_read_sourcefile_attribute(Str buf, u8 **current,
+                                              Class_file *class_file,
+                                              Array(Jvm_attribute) * attributes,
+                                              Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1827,9 +1825,11 @@ static void jvm_buf_read_signature_attribute(Str buf, u8 **current,
 }
 
 // TODO: store this data.
-static void jvm_buf_read_exceptions_attribute(
-    Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Array(Jvm_attribute) * attributes, Arena *arena) {
+static void jvm_buf_read_exceptions_attribute(Str buf, u8 **current,
+                                              Class_file *class_file,
+                                              u32 attribute_len,
+                                              Array(Jvm_attribute) * attributes,
+                                              Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1994,8 +1994,7 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
   for (u64 i = 0; i < table_len; i++) {
     Jvm_annotation annotation = {0};
     jvm_buf_read_annotation(buf, current, class_file, &annotation, arena);
-    *array_push(&attribute.v.runtime_invisible_annotations, arena) =
-        annotation;
+    *array_push(&attribute.v.runtime_invisible_annotations, arena) = annotation;
   }
   *array_push(attributes, arena) = attribute;
 
@@ -2890,8 +2889,7 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
   }
 }
 
-static void jvm_write_attributes(FILE *file,
-                                 Array(Jvm_attribute) attributes) {
+static void jvm_write_attributes(FILE *file, Array(Jvm_attribute) attributes) {
   pg_assert(attributes.len <= UINT16_MAX);
   file_write_be_u16(file, (u16)attributes.len);
 
@@ -4120,9 +4118,11 @@ static Ast_handle parser_parse_jump_expression(Parser *parser, Arena *arena) {
       return ast_handle_nil;
     }
 
-    const Ast node = {.kind = AST_KIND_RETURN,
-                      .main_token_i = parser->tokens_i - 1,
-                      .lhs = parser_parse_expression(parser, arena),};
+    const Ast node = {
+        .kind = AST_KIND_RETURN,
+        .main_token_i = parser->tokens_i - 1,
+        .lhs = parser_parse_expression(parser, arena),
+    };
     return new_ast(&node, arena);
   }
   return ast_handle_nil;
@@ -5212,7 +5212,7 @@ static void resolver_load_methods_from_class_file(
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           type.v.method.code =
               array_make_from_slice(u8, attribute->v.code.bytecode.data,
-                                      attribute->v.code.bytecode.len, arena);
+                                    attribute->v.code.bytecode.len, arena);
           break;
         }
       }
@@ -6888,8 +6888,7 @@ resolver_user_defined_function_signatures(Resolver *resolver,
         const Ast_handle ast_handle = lhs->nodes.data[i];
         const Type_handle type_handle =
             ast_handle_to_ptr(ast_handle, *arena)->type_handle;
-        *array_push(&type.v.method.argument_type_handles, arena) =
-            type_handle;
+        *array_push(&type.v.method.argument_type_handles, arena) = type_handle;
       }
     }
 
@@ -7507,8 +7506,7 @@ static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7600,8 +7598,7 @@ static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
 
@@ -7627,8 +7624,7 @@ static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7655,8 +7651,7 @@ static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7890,8 +7885,7 @@ static void codegen_emit_gt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7916,8 +7910,7 @@ static void codegen_emit_ne(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7941,8 +7934,7 @@ static void codegen_emit_eq(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7966,8 +7958,7 @@ static void codegen_emit_ge(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -7992,8 +7983,7 @@ static void codegen_emit_le(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;
@@ -8018,8 +8008,7 @@ static void codegen_emit_lt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
-  const Jvm_verification_info_kind kind_a =
-      array_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind_a = array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
       array_penultimate(gen->frame->stack)->kind;

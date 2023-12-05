@@ -490,8 +490,8 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
       .in_use_space = bytes_count,
-      .call_stack = array_make_from_slice(
-          u64, call_stack, (u32)call_stack_len, &profile->arena),
+      .call_stack = array_make_from_slice(u64, call_stack, (u32)call_stack_len,
+                                          &profile->arena),
   };
 
   *array_push(&profile->records, &profile->arena) = record;
