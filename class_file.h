@@ -4122,7 +4122,7 @@ static Ast_handle parser_parse_jump_expression(Parser *parser, Arena *arena) {
 
     const Ast node = {.kind = AST_KIND_RETURN,
                       .main_token_i = parser->tokens_i - 1,
-                      .lhs = parser_parse_expression(parser, arena)};
+                      .lhs = parser_parse_expression(parser, arena),};
     return new_ast(&node, arena);
   }
   return ast_handle_nil;
@@ -8308,15 +8308,15 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       u64 stack_index = array32_last_index(gen->frame->stack);
 
       for (u64 i = 0; i < node->nodes.len; i++) {
-        const Ast_handle argument_i = node->nodes.data[i];
-        const Ast *const argument = ast_handle_to_ptr(argument_i, *arena);
+        const Ast_handle argument_handle = node->nodes.data[i];
+        const Ast *const argument = ast_handle_to_ptr(argument_handle, *arena);
 
         // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
         // b c` with the corresponding verification info.
         const Jvm_verification_info verification_info =
             gen->frame->stack.data[stack_index];
         const Jvm_variable variable = {
-            .ast_handle = argument_i,
+            .ast_handle = argument_handle,
             .type_handle = argument->type_handle,
             .scope_depth = gen->frame->scope_depth,
             .verification_info = verification_info,
@@ -8744,19 +8744,19 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     }
 
     for (u64 i = 0; i < node->nodes.len; i++) {
-      const Ast_handle child_i = node->nodes.data[i];
+      const Ast_handle child_handle = node->nodes.data[i];
 
       if (gen->frame != NULL) {
         pg_assert(array32_is_empty(gen->frame->stack));
       }
-      codegen_emit_node(gen, class_file, child_i, arena);
+      codegen_emit_node(gen, class_file, child_handle, arena);
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames
       // don't have to be a full_frame but can be something smaller e.g.
       // append_frame.
-      const Ast *const child = ast_handle_to_ptr(child_i, *arena);
+      const Ast *const child = ast_handle_to_ptr(child_handle, *arena);
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
         while (!array32_is_empty(gen->frame->stack))
