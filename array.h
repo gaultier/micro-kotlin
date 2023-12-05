@@ -118,13 +118,15 @@ typedef struct {
 #define container_of(ptr, type, member)                                        \
   ((type *)((char *)(List *)ptr - offsetof(type, member)))
 
-static void list_add(List *first, List *last, List *new) {
+static List *list_add(List *first, List *last, List *new) {
   pg_assert(new);
   pg_assert(first);
   pg_assert(last);
 
   new->next = first;
   last->next = new;
+
+  return new;
 }
 
 #define list_for_each(pos, head)                                               \
@@ -140,22 +142,22 @@ void do_foo() {
   Foo f3 = {.x = 3, .list = {.next = &f3.list}};
 
   List head = {.next = &f1.list};
-  list_add(&head, &f1.list, &f2.list);
-  list_add(&head, &f2.list, &f3.list);
+  List *last = &f1.list;
+  last = list_add(&head, last, &f2.list);
+  last = list_add(&head, last, &f3.list);
 
   {
-  List *it = NULL;
-  list_for_each(it, &head) {
-    Foo *f = container_of(it, Foo, list);
-    printf("x=%d\n", f->x);
+    List *it = NULL;
+    list_for_each(it, &head) {
+      Foo *f = container_of(it, Foo, list);
+      printf("[D001] x=%d\n", f->x);
+    }
   }
-}
 
-{
-  Foo* it=NULL;
-  list_for_each_entry(Foo, it, &head, list){
-    printf("x=%d\n", it->x);
-
+  {
+    Foo *it = NULL;
+    list_for_each_entry(Foo, it, &head, list) {
+      printf("[D002] x=%d\n", it->x);
+    }
   }
-      }
 }

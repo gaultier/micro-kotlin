@@ -329,8 +329,7 @@ struct Ast {
   Ast_handle lhs;
   Ast_handle rhs;
   Array32(Ast_handle) nodes;
-  Ast_handle next;
-  pg_pad(4);
+  List nodes_list;
   u64 num; // TODO: Only used when lhs, rhs are unused => fold them together.
   u16 flags;
   Ast_kind kind;
