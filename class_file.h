@@ -4428,14 +4428,14 @@ static Ast_handle parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
       .main_token_i = parser->tokens_i - 1,
   };
   const Ast_handle res_handle = new_ast(&res, arena);
+  ast_handle_to_ptr(res_handle, *arena)->nodes_list.next =
+      &ast_handle_to_ptr(res_handle, *arena)->nodes_list;
 
   // Calling a function with zero arguments.
   if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
     return res_handle;
   }
 
-  ast_handle_to_ptr(res_handle, *arena)->nodes_list.next =
-      &ast_handle_to_ptr(res_handle, *arena)->nodes_list;
   parser_parse_value_arguments(parser, res_handle, arena);
 
   return res_handle;
@@ -4728,6 +4728,7 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
   Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
   const Ast_handle res_handle = new_ast(&res, arena);
   Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
+  res_ptr->nodes_list.next = &res_ptr->nodes_list;
 
   List *last = &res_ptr->nodes_list;
   do {
@@ -4832,6 +4833,7 @@ static Ast_handle parser_parse_function_value_parameters(Parser *parser,
   Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
   const Ast_handle res_handle = new_ast(&res, arena);
   Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
+  res_ptr->nodes_list.next = &res_ptr->nodes_list;
 
   List *last = &res_ptr->nodes_list;
   do {
@@ -5003,6 +5005,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
   const Ast_handle res_handle = new_ast(&res, arena);
   Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
+  res_ptr->nodes_list.next = &res_ptr->nodes_list;
 
   List *last = &res_ptr->nodes_list;
 
