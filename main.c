@@ -194,7 +194,8 @@ int main(int argc, char *argv[]) {
       LOG("After type checking: arena_available=%lu", arena.end - arena.start);
 
       Arena tmp_arena = arena;
-      resolver_ast_fprint(&resolver, root_handle, stderr, 0, 0, &tmp_arena);
+      resolver_ast_fprint(&resolver, root_handle, stderr, 0, 0, tmp_arena,
+                          arena);
     }
 
     if (parser.state != PARSER_STATE_OK)
