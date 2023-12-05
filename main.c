@@ -42,7 +42,7 @@ static void print_usage_and_exit(const char *executable_name) {
   exit(0);
 }
 
-Array32_struct(int);
+Array_struct(int);
 
 int main(int argc, char *argv[]) {
   pg_assert(argc > 0);
@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
 
   Arena scratch_arena = arena_new(8 * MiB, NULL);
 
-  Array32(Str) class_path_entries =
+  Array(Str) class_path_entries =
       class_path_string_to_class_path_entries(cli_classpath, &arena);
 
   {

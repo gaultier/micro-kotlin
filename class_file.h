@@ -28,7 +28,7 @@ typedef enum {
 typedef struct {
   u32 value;
 } Ast_handle;
-Array32_struct(Ast_handle);
+Array_struct(Ast_handle);
 
 static const Ast_handle ast_handle_nil = {0};
 
@@ -37,26 +37,26 @@ static bool ast_handle_is_nil(Ast_handle handle) { return handle.value == 0; }
 typedef struct {
   u32 value;
 } Type_handle;
-Array32_struct(Type_handle);
+Array_struct(Type_handle);
 
 static const Type_handle type_handle_nil = {0};
 static bool type_handle_handles_nil(Type_handle handle) {
   return handle.value == 0;
 }
 
-static Array32(Str)
+static Array(Str)
     class_path_string_to_class_path_entries(Str class_path, Arena *arena) {
   pg_assert(!str_is_empty(class_path));
 
   const u8 sep = ':';
   const u32 sep_count = str_count(class_path, sep);
-  Array32(Str) entries = array32_make(Str, 0, sep_count, arena);
+  Array(Str) entries = array_make(Str, 0, sep_count, arena);
 
   Str_split_result split = {.right = class_path};
   do {
     split = str_split(split.right, sep);
     if (!str_is_empty(split.left))
-      *array32_push(&entries, arena) = split.left;
+      *array_push(&entries, arena) = split.left;
   } while (split.found);
 
   // Ensure "." is in the array so that it will be searched (but also do not
@@ -73,7 +73,7 @@ static Array32(Str)
     }
 
     if (!found)
-      *array32_push(&entries, arena) = needle;
+      *array_push(&entries, arena) = needle;
   }
 
   return entries;
@@ -148,7 +148,7 @@ typedef struct {
   Ast_handle var_definition_ast_handle;
   Str name;
 } Type_variable;
-Array32_struct(Type_variable);
+Array_struct(Type_variable);
 
 typedef enum __attribute__((packed)) {
   VERIFICATION_INFO_TOP = 0,
@@ -166,7 +166,7 @@ typedef struct {
   pg_pad(1);
   u16 extra_data;
 } Jvm_verification_info;
-Array32_struct(Jvm_verification_info);
+Array_struct(Jvm_verification_info);
 
 typedef struct {
   Ast_handle ast_handle;
@@ -174,7 +174,7 @@ typedef struct {
   u32 scope_depth;
   Jvm_verification_info verification_info;
 } Jvm_variable;
-Array32_struct(Jvm_variable);
+Array_struct(Jvm_variable);
 
 struct codegen_frame;
 typedef struct codegen_frame codegen_frame;
@@ -189,13 +189,13 @@ typedef struct {
   // frame was created.
   codegen_frame *frame;
 } Stack_map_frame;
-Array32_struct(Stack_map_frame);
+Array_struct(Stack_map_frame);
 
 static char *const CONSTRUCTOR_JVM_NAME = "<init>";
 
 struct codegen_frame {
-  Array32(Jvm_variable) locals;
-  Array32(Jvm_verification_info) stack;
+  Array(Jvm_variable) locals;
+  Array(Jvm_verification_info) stack;
   u16 max_physical_stack;
   u16 max_physical_locals;
   u32 scope_depth;
@@ -210,7 +210,7 @@ typedef struct {
   u16 handler_pc;
   u16 catch_type;
 } Jvm_exception;
-Array32_struct(Jvm_exception);
+Array_struct(Jvm_exception);
 
 typedef enum __attribute__((packed)) {
   AST_KIND_NONE,
@@ -281,15 +281,15 @@ enum __attribute__((packed)) Type_kind {
 };
 
 typedef struct Jvm_constant_pool_entry Jvm_constant_pool_entry;
-Array32_struct(Jvm_constant_pool_entry);
+Array_struct(Jvm_constant_pool_entry);
 
 typedef enum Type_kind Type_kind;
 typedef struct {
   Str name;
   Str source_file_name;
-  Array32(u8) code;                               // In case of InlineOnly.
-  Array32(Jvm_constant_pool_entry) constant_pool; // In case of InlineOnly.
-  Array32(Type_handle) argument_type_handles;
+  Array(u8) code;                               // In case of InlineOnly.
+  Array(Jvm_constant_pool_entry) constant_pool; // In case of InlineOnly.
+  Array(Type_handle) argument_type_handles;
   Type_handle return_type_handle;
   Type_handle this_class_type_handle;
   // TODO: Move to `type.flags` to reduce size?
@@ -319,7 +319,7 @@ struct Type {
 };
 
 typedef struct Type Type;
-Array32_struct(Type);
+Array_struct(Type);
 
 // TODO: compact fields.
 typedef struct Ast Ast;
@@ -328,7 +328,7 @@ struct Ast {
   Ast_handle lhs;
   Ast_handle rhs;
   Type_handle type_handle; // TODO: should it be separate?
-  Array32(Ast_handle) nodes;
+  Array(Ast_handle) nodes;
   u64 num;
   u16 flags;
   Ast_kind kind;
@@ -336,7 +336,7 @@ struct Ast {
   Ast_handle return_type_ast; // Type if it's a function definition and the
                               // return type was specified.
 };
-Array32_struct(Ast);
+Array_struct(Ast);
 
 static Ast_handle new_ast(const Ast *ast, Arena *arena) {
   Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
@@ -430,12 +430,12 @@ typedef struct {
   pg_pad(3);
 } Token;
 
-Array32_struct(Token);
+Array_struct(Token);
 
 typedef struct {
   Str file_path;
-  Array32(Token) tokens;
-  Array32(u32) line_table; // line_table[i] is the start offset of the LOC `i+1`
+  Array(Token) tokens;
+  Array(u32) line_table; // line_table[i] is the start offset of the LOC `i+1`
 } Lexer;
 
 typedef struct {
@@ -455,10 +455,10 @@ typedef struct {
 
   Parser *parser;
   Str this_class_name;
-  Array32(Str) class_path_entries;
-  Array32(Str) imported_package_names;
+  Array(Str) class_path_entries;
+  Array(Str) imported_package_names;
   u64 class_file_loaded_count;
-  Array32(Type_variable) variables;
+  Array(Type_variable) variables;
   Type_handle current_type_handle;
   u32 scope_depth;
   Ast_handle current_function_handle;
@@ -470,7 +470,7 @@ static Type_handle resolver_add_type(Resolver *resolver, Type *new_type,
                                      Arena *arena);
 
 static void resolver_init(Resolver *resolver, Parser *parser,
-                          Array32(Str) class_path_entries, Str class_file_path,
+                          Array(Str) class_path_entries, Str class_file_path,
                           Arena *arena) {
 
   resolver->parser = parser;
@@ -483,30 +483,30 @@ static void resolver_init(Resolver *resolver, Parser *parser,
   resolver->this_class_name =
       codegen_make_class_name_from_path(class_file_path, arena);
 
-  resolver->variables = array32_make(Type_variable, 0, 512, arena);
-  resolver->imported_package_names = array32_make(Str, 0, 256, arena);
-  *array32_push(&resolver->imported_package_names, arena) =
+  resolver->variables = array_make(Type_variable, 0, 512, arena);
+  resolver->imported_package_names = array_make(Str, 0, 256, arena);
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin");
 
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.annotation");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.collections");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.comparisons");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.io");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.ranges");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.sequences");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.text");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("java.lang");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       str_from_c("kotlin.jvm");
-  *array32_push(&resolver->imported_package_names, arena) =
+  *array_push(&resolver->imported_package_names, arena) =
       parser->current_package;
 }
 
@@ -718,7 +718,7 @@ static bool resolver_is_type_subtype_of(Resolver *resolver,
 }
 
 static bool resolver_is_function_candidate_applicable(
-    Resolver *resolver, Array32(Type_handle) call_site_argument_types_handle,
+    Resolver *resolver, Array(Type_handle) call_site_argument_types_handle,
     Type_handle function_definition_type_handle, Arena scratch_arena,
     Arena *arena) {
   const Type *const function_definition_type =
@@ -812,7 +812,7 @@ static void codegen_frame_stack_push(codegen_frame *frame,
       jvm_verification_info_kind_word_count(verification_info.kind);
 
   pg_assert(frame->stack_physical_count + word_count < UINT16_MAX);
-  *array32_push(&frame->stack, arena) = verification_info;
+  *array_push(&frame->stack, arena) = verification_info;
 
   frame->stack_physical_count += word_count;
   frame->max_physical_stack =
@@ -825,7 +825,7 @@ static void codegen_frame_stack_pop(codegen_frame *frame) {
   pg_assert(frame->stack_physical_count >= 1);
   pg_assert(frame->max_physical_stack >= 1);
 
-  array32_drop(&frame->stack, 1);
+  array_drop(&frame->stack, 1);
 
   frame->stack_physical_count -= 1;
 }
@@ -833,11 +833,11 @@ static void codegen_frame_stack_pop(codegen_frame *frame) {
 static codegen_frame *codegen_frame_clone(const codegen_frame *src,
                                           Arena *arena);
 
-static void jvm_code_push_u8(Array32(u8) * array, u8 x, Arena *arena) {
-  *array32_push(array, arena) = x;
+static void jvm_code_push_u8(Array(u8) * array, u8 x, Arena *arena) {
+  *array_push(array, arena) = x;
 }
 
-static void jvm_code_array_push_u16(Array32(u8) * array, u16 x, Arena *arena) {
+static void jvm_code_array_push_u16(Array(u8) * array, u16 x, Arena *arena) {
   jvm_code_push_u8(array, (u8)((x & 0xff00) >> 8), arena);
   jvm_code_push_u8(array, (u8)(x & 0x00ff), arena);
 }
@@ -973,7 +973,7 @@ static bool jvm_constant_eq(const Jvm_constant_pool_entry *a,
   }
 }
 
-static u16 jvm_constant_pool_push(Array32(Jvm_constant_pool_entry) * pool,
+static u16 jvm_constant_pool_push(Array(Jvm_constant_pool_entry) * pool,
                                   const Jvm_constant_pool_entry *x,
                                   Arena *arena) {
   pg_assert(pool->len < UINT16_MAX);
@@ -993,13 +993,13 @@ static u16 jvm_constant_pool_push(Array32(Jvm_constant_pool_entry) * pool,
     }
   }
 
-  *array32_push(pool, arena) = *x;
+  *array_push(pool, arena) = *x;
   const u16 res = (u16)pool->len;
 
   if (x->kind == CONSTANT_POOL_KIND_LONG ||
       x->kind == CONSTANT_POOL_KIND_DOUBLE) {
     // Dummy.
-    *array32_push(pool, arena) = (Jvm_constant_pool_entry){0};
+    *array_push(pool, arena) = (Jvm_constant_pool_entry){0};
   }
 
   return res;
@@ -1009,8 +1009,8 @@ static void codegen_frame_init(codegen_frame *frame, Arena *arena) {
   pg_assert(frame != NULL);
   pg_assert(arena != NULL);
 
-  frame->locals = array32_make(Jvm_variable, 0, 512, arena);
-  frame->stack = array32_make(Jvm_verification_info, 0, 256, arena);
+  frame->locals = array_make(Jvm_variable, 0, 512, arena);
+  frame->stack = array_make(Jvm_verification_info, 0, 256, arena);
 }
 
 static codegen_frame *codegen_frame_clone(const codegen_frame *src,
@@ -1029,17 +1029,17 @@ static codegen_frame *codegen_frame_clone(const codegen_frame *src,
   dst->stack_physical_count = src->stack_physical_count;
   dst->locals_physical_count = src->locals_physical_count;
 
-  array32_clone(Jvm_variable, &dst->locals, src->locals, arena);
-  array32_clone(Jvm_verification_info, &dst->stack, src->stack, arena);
+  array_clone(Jvm_variable, &dst->locals, src->locals, arena);
+  array_clone(Jvm_verification_info, &dst->stack, src->stack, arena);
 
   return dst;
 }
 
-static Array32(Jvm_constant_pool_entry)
-    jvm_constant_pool_clone(Array32(Jvm_constant_pool_entry) src,
+static Array(Jvm_constant_pool_entry)
+    jvm_constant_pool_clone(Array(Jvm_constant_pool_entry) src,
                             Arena *arena) {
-  Array32(Jvm_constant_pool_entry) dst = {0};
-  array32_clone(Jvm_constant_pool_entry, &dst, src, arena);
+  Array(Jvm_constant_pool_entry) dst = {0};
+  array_clone(Jvm_constant_pool_entry, &dst, src, arena);
 
   for (u64 i = 0; i < dst.len; i++) {
     const Jvm_constant_pool_entry constant = dst.data[i];
@@ -1052,7 +1052,7 @@ static Array32(Jvm_constant_pool_entry)
 }
 
 static const Jvm_constant_pool_entry *
-jvm_constant_pool_get(Array32(Jvm_constant_pool_entry) constant_pool, u16 i) {
+jvm_constant_pool_get(Array(Jvm_constant_pool_entry) constant_pool, u16 i) {
   // 1-indexed.
   pg_assert(i > 0);
   return &constant_pool.data[i - 1];
@@ -1227,8 +1227,8 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
     type->kind = TYPE_METHOD;
     remaining = str_advance(remaining, 1);
 
-    Array32(Type_handle) argument_types_handle =
-        array32_make(Type_handle, 0, (u32)remaining.len, arena);
+    Array(Type_handle) argument_types_handle =
+        array_make(Type_handle, 0, (u32)remaining.len, arena);
 
     for (u64 i = 0; i < 255; i++) {
       if (str_first(remaining) == ')')
@@ -1239,7 +1239,7 @@ static Str jvm_parse_descriptor(Resolver *resolver, Str descriptor, Type *type,
           jvm_parse_descriptor(resolver, remaining, &argument_type, arena);
       const Type_handle argument_type_handle =
           resolver_add_type(resolver, &argument_type, arena);
-      *array32_push(&argument_types_handle, arena) = argument_type_handle;
+      *array_push(&argument_types_handle, arena) = argument_type_handle;
     }
     pg_assert(remaining.len >= 1);
     pg_assert(remaining.data[0] == ')');
@@ -1267,10 +1267,10 @@ typedef struct {
 } Jvm_enum_const_value;
 
 typedef struct Jvm_element_value Jvm_element_value;
-Array32_struct(Jvm_element_value);
+Array_struct(Jvm_element_value);
 
 typedef struct Jvm_annotation Jvm_annotation;
-Array32_struct(Jvm_annotation);
+Array_struct(Jvm_annotation);
 
 struct Jvm_element_value {
   union {
@@ -1278,7 +1278,7 @@ struct Jvm_element_value {
     Jvm_enum_const_value enum_const_value;
     u16 class_info_index;
     Jvm_annotation *annotation_value;
-    Array32(Jvm_element_value) array_value;
+    Array(Jvm_element_value) array_value;
   } v;
   u8 tag;
   pg_pad(7);
@@ -1289,28 +1289,28 @@ typedef struct {
   pg_pad(6);
   Jvm_element_value element_value;
 } Jvm_element_value_pair;
-Array32_struct(Jvm_element_value_pair);
+Array_struct(Jvm_element_value_pair);
 
 struct Jvm_annotation {
   u16 type_index;
   pg_pad(6);
-  Array32(Jvm_element_value_pair) element_value_pairs;
+  Array(Jvm_element_value_pair) element_value_pairs;
 };
 
 typedef struct Jvm_attribute Jvm_attribute;
-Array32_struct(Jvm_attribute);
+Array_struct(Jvm_attribute);
 
 typedef struct {
   u16 access_flags;
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Array32(Jvm_attribute) attributes;
+  Array(Jvm_attribute) attributes;
 } Jvm_field;
-Array32_struct(Jvm_field);
+Array_struct(Jvm_field);
 
 typedef struct Jvm_method Jvm_method;
-Array32_struct(Jvm_method);
+Array_struct(Jvm_method);
 
 typedef struct Jvm_interfaces Jvm_interfaces;
 
@@ -1318,7 +1318,7 @@ typedef struct {
   u16 start_pc;
   u16 line_number;
 } Jvm_line_number_table_entry;
-Array32_struct(Jvm_line_number_table_entry);
+Array_struct(Jvm_line_number_table_entry);
 
 struct Jvm_attribute {
   union {
@@ -1326,23 +1326,23 @@ struct Jvm_attribute {
       u16 max_physical_stack;
       u16 max_physical_locals;
       pg_pad(4);
-      Array32(u8) bytecode;
-      Array32(Jvm_exception) exceptions;
-      Array32(Jvm_attribute) attributes;
+      Array(u8) bytecode;
+      Array(Jvm_exception) exceptions;
+      Array(Jvm_attribute) attributes;
     } code; // ATTRIBUTE_KIND_CODE
 
     struct Jvm_attribute_source_file {
       u16 source_file;
     } source_file; // ATTRIBUTE_KIND_SOURCE_FILE
 
-    Array32(Jvm_line_number_table_entry)
+    Array(Jvm_line_number_table_entry)
         line_number_table_entries; // ATTRIBUTE_KIND_LINE_NUMBER_TABLE
 
-    Array32(Stack_map_frame) stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
-    Array32(Jvm_annotation)
+    Array(Stack_map_frame) stack_map_table; // ATTRIBUTE_KIND_STACK_MAP_TABLE
+    Array(Jvm_annotation)
         runtime_invisible_annotations; // ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS
 
-    Array32(u16) exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
+    Array(u16) exception_index_table; // ATTRIBUTE_KIND_EXCEPTIONS
   } v;
   u16 name;
   enum __attribute__((packed)) Jvm_attribute_kind {
@@ -1369,7 +1369,7 @@ struct Jvm_method {
   u16 name;
   u16 descriptor;
   pg_pad(2);
-  Array32(Jvm_attribute) attributes;
+  Array(Jvm_attribute) attributes;
 };
 
 static const u32 jvm_MAGIC_NUMBER = 0xbebafeca;
@@ -1389,11 +1389,11 @@ struct Jvm_class_file {
   u16 interfaces_count;
   u16 fields_count;
   pg_pad(2);
-  Array32(u16) interfaces;
-  Array32(Jvm_field) fields;
-  Array32(Jvm_method) methods;
-  Array32(Jvm_attribute) attributes;
-  Array32(Jvm_constant_pool_entry) constant_pool;
+  Array(u16) interfaces;
+  Array(Jvm_field) fields;
+  Array(Jvm_method) methods;
+  Array(Jvm_attribute) attributes;
+  Array(Jvm_constant_pool_entry) constant_pool;
 };
 typedef struct Jvm_class_file Class_file;
 
@@ -1508,7 +1508,7 @@ static u8 buf_read_u8(Str buf, u8 **current) {
   return x;
 }
 
-static Str jvm_constant_pool_get_as_string(Array32(Jvm_constant_pool_entry)
+static Str jvm_constant_pool_get_as_string(Array(Jvm_constant_pool_entry)
                                                constant_pool,
                                            u16 i) {
   const Jvm_constant_pool_entry *const constant =
@@ -1519,12 +1519,12 @@ static Str jvm_constant_pool_get_as_string(Array32(Jvm_constant_pool_entry)
 
 static void jvm_buf_read_attributes(Str buf, u8 **current,
                                     Class_file *class_file,
-                                    Array32(Jvm_attribute) * attributes,
+                                    Array(Jvm_attribute) * attributes,
                                     Arena *arena);
 
 static void
 jvm_buf_read_sourcefile_attribute(Str buf, u8 **current, Class_file *class_file,
-                                  Array32(Jvm_attribute) * attributes,
+                                  Array(Jvm_attribute) * attributes,
                                   Arena *arena) {
 
   pg_assert(!str_is_empty(buf));
@@ -1545,12 +1545,12 @@ jvm_buf_read_sourcefile_attribute(Str buf, u8 **current, Class_file *class_file,
 
   Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_SOURCE_FILE,
                              .v = {.source_file = source_file}};
-  *array32_push(&*attributes, arena) = attribute;
+  *array_push(&*attributes, arena) = attribute;
 }
 
 static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
                                                    Class_file *class_file,
-                                                   Array32(Jvm_exception) *
+                                                   Array(Jvm_exception) *
                                                        exceptions,
                                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
@@ -1561,7 +1561,7 @@ static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
   const u8 *const current_start = *current;
 
   const u16 table_len = buf_read_be_u16(buf, current);
-  *exceptions = array32_make(Jvm_exception, 0, table_len, arena);
+  *exceptions = array_make(Jvm_exception, 0, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
     Jvm_exception exception = {0};
@@ -1571,7 +1571,7 @@ static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
     exception.handler_pc = buf_read_be_u16(buf, current);
     exception.catch_type = buf_read_be_u16(buf, current);
 
-    *array32_push(&*exceptions, arena) = exception;
+    *array_push(&*exceptions, arena) = exception;
   }
 
   const u8 *const current_end = *current;
@@ -1582,7 +1582,7 @@ static void jvm_buf_read_code_attribute_exceptions(Str buf, u8 **current,
 static void jvm_buf_read_code_attribute(Str buf, u8 **current,
                                         Class_file *class_file,
                                         u32 attribute_len, u16 name_i,
-                                        Array32(Jvm_attribute) * attributes,
+                                        Array(Jvm_attribute) * attributes,
                                         Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -1602,7 +1602,7 @@ static void jvm_buf_read_code_attribute(Str buf, u8 **current,
   pg_assert(code_len <= UINT16_MAX); // Actual limit per spec.
 
   Str code_slice = buf_read_n_u8(buf, code_len, current);
-  code.bytecode = array32_make_from_slice(u8, code_slice.data, code_len, arena);
+  code.bytecode = array_make_from_slice(u8, code_slice.data, code_len, arena);
 
   jvm_buf_read_code_attribute_exceptions(buf, current, class_file,
                                          &code.exceptions, arena);
@@ -1611,7 +1611,7 @@ static void jvm_buf_read_code_attribute(Str buf, u8 **current,
 
   Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_CODE, .name = name_i, .v = {.code = code}};
-  *array32_push(&*attributes, arena) = attribute;
+  *array_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1639,7 +1639,7 @@ jvm_buf_read_stack_map_table_attribute_verification_infos(Str buf, u8 **current,
 
 static void jvm_buf_read_stack_map_table_attribute(
     Str buf, u8 **current, u32 attribute_len, u16 name_i,
-    Array32(Jvm_attribute) * attributes, Arena *arena) {
+    Array(Jvm_attribute) * attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(attributes != NULL);
@@ -1648,8 +1648,8 @@ static void jvm_buf_read_stack_map_table_attribute(
   const u8 *const current_start = *current;
 
   const u16 len = buf_read_be_u16(buf, current);
-  Array32(Stack_map_frame) stack_map_frames =
-      array32_make(Stack_map_frame, 0, len, arena);
+  Array(Stack_map_frame) stack_map_frames =
+      array_make(Stack_map_frame, 0, len, arena);
 
   for (u16 i = 0; i < len; i++) {
     Stack_map_frame stack_map_frame = {
@@ -1699,7 +1699,7 @@ static void jvm_buf_read_stack_map_table_attribute(
       jvm_buf_read_stack_map_table_attribute_verification_infos(
           buf, current, stack_items_count);
     }
-    *array32_push(&stack_map_frames, arena) = stack_map_frame;
+    *array_push(&stack_map_frames, arena) = stack_map_frame;
   }
 
   Jvm_attribute attribute = {
@@ -1707,7 +1707,7 @@ static void jvm_buf_read_stack_map_table_attribute(
       .name = name_i,
       .v = {.stack_map_table = stack_map_frames},
   };
-  *array32_push(&*attributes, arena) = attribute;
+  *array_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1716,7 +1716,7 @@ static void jvm_buf_read_stack_map_table_attribute(
 
 static void jvm_buf_read_line_number_table_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Array32(Jvm_attribute) * attributes, Arena *arena) {
+    Array(Jvm_attribute) * attributes, Arena *arena) {
   pg_unused(arena);
   pg_unused(class_file);
 
@@ -1728,17 +1728,17 @@ static void jvm_buf_read_line_number_table_attribute(
 
   Jvm_attribute attribute = {.kind = ATTRIBUTE_KIND_LINE_NUMBER_TABLE};
   attribute.v.line_number_table_entries =
-      array32_make(Jvm_line_number_table_entry, 0, table_len, arena);
+      array_make(Jvm_line_number_table_entry, 0, table_len, arena);
 
   for (u16 i = 0; i < table_len; i++) {
     Jvm_line_number_table_entry entry = {
         .start_pc = buf_read_be_u16(buf, current),
         .line_number = buf_read_be_u16(buf, current),
     };
-    *array32_push(&attribute.v.line_number_table_entries, arena) = entry;
+    *array_push(&attribute.v.line_number_table_entries, arena) = entry;
   }
 
-  *array32_push(&*attributes, arena) = attribute;
+  *array_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1829,7 +1829,7 @@ static void jvm_buf_read_signature_attribute(Str buf, u8 **current,
 // TODO: store this data.
 static void jvm_buf_read_exceptions_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Array32(Jvm_attribute) * attributes, Arena *arena) {
+    Array(Jvm_attribute) * attributes, Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
   pg_assert(class_file != NULL);
@@ -1844,7 +1844,7 @@ static void jvm_buf_read_exceptions_attribute(
 
   Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_EXCEPTIONS,
-      .v.exception_index_table = array32_make(u16, 0, table_len, arena),
+      .v.exception_index_table = array_make(u16, 0, table_len, arena),
   };
 
   for (u16 i = 0; i < table_len; i++) {
@@ -1853,7 +1853,7 @@ static void jvm_buf_read_exceptions_attribute(
     pg_assert(exception_i <= class_file->constant_pool.len);
   }
 
-  *array32_push(&*attributes, arena) = attribute;
+  *array_push(&*attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -1939,14 +1939,14 @@ static void jvm_buf_read_element_value(Str buf, u8 **current,
   case '[': {
     const u16 table_len = buf_read_be_u16(buf, current);
     element_value->v.array_value =
-        array32_make(Jvm_element_value, 0, table_len, arena);
+        array_make(Jvm_element_value, 0, table_len, arena);
 
     for (u64 i = 0; i < table_len; i++) {
       Jvm_element_value element_value_child = {0};
       jvm_buf_read_element_value(buf, current, class_file, &element_value_child,
                                  arena);
 
-      *array32_push(&element_value->v.array_value, arena) = element_value_child;
+      *array_push(&element_value->v.array_value, arena) = element_value_child;
     }
     break;
   }
@@ -1964,7 +1964,7 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
   const u16 num_element_value_pairs = buf_read_be_u16(buf, current);
 
   annotation->element_value_pairs =
-      array32_make(Jvm_element_value_pair, 0, num_element_value_pairs, arena);
+      array_make(Jvm_element_value_pair, 0, num_element_value_pairs, arena);
 
   for (u64 i = 0; i < num_element_value_pairs; i++) {
     Jvm_element_value_pair element_value_pair = {
@@ -1973,13 +1973,13 @@ static void jvm_buf_read_annotation(Str buf, u8 **current,
     jvm_buf_read_element_value(buf, current, class_file,
                                &element_value_pair.element_value, arena);
 
-    *array32_push(&annotation->element_value_pairs, arena) = element_value_pair;
+    *array_push(&annotation->element_value_pairs, arena) = element_value_pair;
   }
 }
 
 static void jvm_buf_read_runtime_invisible_annotations_attribute(
     Str buf, u8 **current, Class_file *class_file, u32 attribute_len,
-    Array32(Jvm_attribute) * attributes, Arena *arena) {
+    Array(Jvm_attribute) * attributes, Arena *arena) {
 
   const u8 *const current_start = *current;
 
@@ -1988,16 +1988,16 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
   Jvm_attribute attribute = {
       .kind = ATTRIBUTE_KIND_RUNTIME_INVISIBLE_ANNOTATIONS,
       .v.runtime_invisible_annotations =
-          array32_make(Jvm_annotation, 0, table_len, arena),
+          array_make(Jvm_annotation, 0, table_len, arena),
   };
 
   for (u64 i = 0; i < table_len; i++) {
     Jvm_annotation annotation = {0};
     jvm_buf_read_annotation(buf, current, class_file, &annotation, arena);
-    *array32_push(&attribute.v.runtime_invisible_annotations, arena) =
+    *array_push(&attribute.v.runtime_invisible_annotations, arena) =
         annotation;
   }
-  *array32_push(attributes, arena) = attribute;
+  *array_push(attributes, arena) = attribute;
 
   const u8 *const current_end = *current;
   const u64 read_bytes = (u64)current_end - (u64)current_start;
@@ -2006,7 +2006,7 @@ static void jvm_buf_read_runtime_invisible_annotations_attribute(
 
 static void jvm_buf_read_attribute(Str buf, u8 **current,
                                    Class_file *class_file,
-                                   Array32(Jvm_attribute) * attributes,
+                                   Array(Jvm_attribute) * attributes,
                                    Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2095,7 +2095,7 @@ static void jvm_buf_read_attribute(Str buf, u8 **current,
 
 static void jvm_buf_read_attributes(Str buf, u8 **current,
                                     Class_file *class_file,
-                                    Array32(Jvm_attribute) * attributes,
+                                    Array(Jvm_attribute) * attributes,
                                     Arena *arena) {
   pg_assert(!str_is_empty(buf));
   pg_assert(current != NULL);
@@ -2104,7 +2104,7 @@ static void jvm_buf_read_attributes(Str buf, u8 **current,
   pg_assert(arena != NULL);
 
   const u16 attribute_count = buf_read_be_u16(buf, current);
-  *attributes = array32_make(Jvm_attribute, 0, attribute_count, arena);
+  *attributes = array_make(Jvm_attribute, 0, attribute_count, arena);
 
   for (u64 i = 0; i < attribute_count; i++) {
     jvm_buf_read_attribute(buf, current, class_file, attributes, arena);
@@ -2336,14 +2336,14 @@ static void jvm_buf_read_method(Str buf, u8 **current, Class_file *class_file,
 
   jvm_buf_read_attributes(buf, current, class_file, &method.attributes, arena);
 
-  *array32_push(&class_file->methods, arena) = method;
+  *array_push(&class_file->methods, arena) = method;
 }
 
 static void jvm_buf_read_methods(Str buf, u8 **current, Class_file *class_file,
                                  Arena *arena) {
 
   const u16 methods_count = buf_read_be_u16(buf, current);
-  class_file->methods = array32_make(Jvm_method, 0, methods_count, arena);
+  class_file->methods = array_make(Jvm_method, 0, methods_count, arena);
 
   for (u64 i = 0; i < methods_count; i++) {
     jvm_buf_read_method(buf, current, class_file, arena);
@@ -2362,14 +2362,14 @@ static void jvm_buf_read_interfaces(Str buf, u8 **current,
   const u8 *const current_start = *current;
 
   const u16 interfaces_count = buf_read_be_u16(buf, current);
-  class_file->interfaces = array32_make(u16, 0, interfaces_count, arena);
+  class_file->interfaces = array_make(u16, 0, interfaces_count, arena);
 
   for (u16 i = 0; i < interfaces_count; i++) {
     const u16 interface_i = buf_read_be_u16(buf, current);
     pg_assert(interface_i > 0);
     pg_assert(interface_i <= class_file->constant_pool.len);
 
-    *array32_push(&class_file->interfaces, arena) = interface_i;
+    *array_push(&class_file->interfaces, arena) = interface_i;
   }
 
   const u8 *const current_end = *current;
@@ -2397,14 +2397,14 @@ static void jvm_buf_read_field(Str buf, u8 **current, Class_file *class_file,
 
   jvm_buf_read_attributes(buf, current, class_file, &field.attributes, arena);
 
-  *array32_push(&class_file->fields, arena) = field;
+  *array_push(&class_file->fields, arena) = field;
 }
 
 static void jvm_buf_read_fields(Str buf, u8 **current, Class_file *class_file,
                                 Arena *arena) {
 
   const u16 fields_count = buf_read_be_u16(buf, current);
-  class_file->fields = array32_make(Jvm_field, 0, fields_count, arena);
+  class_file->fields = array_make(Jvm_field, 0, fields_count, arena);
 
   for (u16 i = 0; i < fields_count; i++) {
     jvm_buf_read_field(buf, current, class_file, arena);
@@ -2435,7 +2435,7 @@ static void jvm_buf_read_class_file(Str buf, u8 **current,
 
   // Worst case: only LONG or DOUBLE entries which take 2 slots.
   class_file->constant_pool =
-      array32_make(Jvm_constant_pool_entry, 0, constant_pool_count, arena);
+      array_make(Jvm_constant_pool_entry, 0, constant_pool_count, arena);
 
   jvm_buf_read_constants(buf, current, class_file, constant_pool_count, arena);
 
@@ -2575,7 +2575,7 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
   } else if (64 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     const Jvm_verification_info verification_info =
-        *array32_last(stack_map_frame->frame->stack);
+        *array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return jvm_compute_verification_info_size(verification_info);
@@ -2586,7 +2586,7 @@ jvm_compute_verification_infos_size(const Stack_map_frame *stack_map_frame) {
              stack_map_frame->kind <=
                  247) { // same_locals_1_stack_item_frame_extended
     const Jvm_verification_info verification_info =
-        *array32_last(stack_map_frame->frame->stack);
+        *array_last(stack_map_frame->frame->stack);
     pg_assert(verification_info.kind != VERIFICATION_INFO_TOP);
 
     return jvm_compute_verification_info_size(verification_info);
@@ -2666,7 +2666,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
                (u32)sizeof(Jvm_line_number_table_entry);
   }
   case ATTRIBUTE_KIND_STACK_MAP_TABLE: {
-    const Array32(Stack_map_frame) stack_map_frames =
+    const Array(Stack_map_frame) stack_map_frames =
         attribute->v.stack_map_table;
 
     u32 size = sizeof(u16) /* count */;
@@ -2731,7 +2731,7 @@ static u32 jvm_compute_attribute_size(const Jvm_attribute *attribute) {
   pg_assert(0 && "unreachable");
 }
 
-static void jvm_write_attributes(FILE *file, Array32(Jvm_attribute) attributes);
+static void jvm_write_attributes(FILE *file, Array(Jvm_attribute) attributes);
 
 static void
 jvm_write_verification_info(FILE *file,
@@ -2760,7 +2760,7 @@ jvm_write_stack_map_table_attribute(FILE *file,
              stack_map_frame->kind <= 127) { // same_locals_1_stack_item_frame
     file_write_u8(file, stack_map_frame->kind);
     jvm_write_verification_info(file,
-                                *array32_last(stack_map_frame->frame->stack));
+                                *array_last(stack_map_frame->frame->stack));
   } else if (128 <= stack_map_frame->kind &&
              stack_map_frame->kind <= 246) { // reserved
     pg_assert(0 && "unreachable");
@@ -2891,7 +2891,7 @@ static void jvm_write_attribute(FILE *file, const Jvm_attribute *attribute) {
 }
 
 static void jvm_write_attributes(FILE *file,
-                                 Array32(Jvm_attribute) attributes) {
+                                 Array(Jvm_attribute) attributes) {
   pg_assert(attributes.len <= UINT16_MAX);
   file_write_be_u16(file, (u16)attributes.len);
 
@@ -2944,11 +2944,11 @@ static void jvm_init(Class_file *class_file, u32 methods_count, Arena *arena) {
   pg_assert(arena != NULL);
 
   class_file->constant_pool =
-      array32_make(Jvm_constant_pool_entry, 0, 1024, arena);
-  class_file->methods = array32_make(Jvm_method, 0, methods_count, arena);
+      array_make(Jvm_constant_pool_entry, 0, 1024, arena);
+  class_file->methods = array_make(Jvm_method, 0, methods_count, arena);
 }
 
-static u16 jvm_add_constant_string(Array32(Jvm_constant_pool_entry) *
+static u16 jvm_add_constant_string(Array(Jvm_constant_pool_entry) *
                                        constant_pool,
                                    Str s, Arena *arena) {
   pg_assert(constant_pool != NULL);
@@ -2959,7 +2959,7 @@ static u16 jvm_add_constant_string(Array32(Jvm_constant_pool_entry) *
   return jvm_constant_pool_push(constant_pool, &constant, arena);
 }
 
-static u16 jvm_add_constant_cstring(Array32(Jvm_constant_pool_entry) *
+static u16 jvm_add_constant_cstring(Array(Jvm_constant_pool_entry) *
                                         constant_pool,
                                     char *s, Arena *arena) {
   pg_assert(constant_pool != NULL);
@@ -2970,7 +2970,7 @@ static u16 jvm_add_constant_cstring(Array32(Jvm_constant_pool_entry) *
   return jvm_constant_pool_push(constant_pool, &constant, arena);
 }
 
-static u16 jvm_add_constant_jstring(Array32(Jvm_constant_pool_entry) *
+static u16 jvm_add_constant_jstring(Array(Jvm_constant_pool_entry) *
                                         constant_pool,
                                     u16 constant_utf8_i, Arena *arena) {
   pg_assert(constant_pool != NULL);
@@ -3036,7 +3036,7 @@ jvm_method_find_code_attribute(const Jvm_method *method) {
   return NULL;
 }
 
-static const Jvm_attribute *jvm_attribute_by_kind(Array32(Jvm_attribute)
+static const Jvm_attribute *jvm_attribute_by_kind(Array(Jvm_attribute)
                                                       attributes,
                                                   Jvm_attribute_kind kind) {
   for (u64 i = 0; i < attributes.len; i++) {
@@ -3068,7 +3068,7 @@ static void jvm_get_source_location_of_function(const Class_file *class_file,
   const Jvm_attribute *const line_number_table = jvm_attribute_by_kind(
       code->v.code.attributes, ATTRIBUTE_KIND_LINE_NUMBER_TABLE);
   if (line_number_table != NULL) {
-    const Array32(Jvm_line_number_table_entry) entries =
+    const Array(Jvm_line_number_table_entry) entries =
         line_number_table->v.line_number_table_entries;
 
     if (entries.len > 0)
@@ -3254,55 +3254,55 @@ static void lex_identifier(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
         .kind = TOKEN_KIND_KEYWORD_FUN,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "true")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_TRUE,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "false")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_FALSE,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "var")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_VAR,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "if")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_IF,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "else")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_ELSE,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "while")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_WHILE,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else if (str_eq_c(identifier, "return")) {
     const Token token = {
         .kind = TOKEN_KIND_KEYWORD_RETURN,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   } else {
     const Token token = {
         .kind = TOKEN_KIND_IDENTIFIER,
         .source_offset = start_offset,
     };
-    *array32_push(&lexer->tokens, arena) = token;
+    *array_push(&lexer->tokens, arena) = token;
   }
 }
 
@@ -3331,7 +3331,7 @@ static void lex_number(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
       .kind = TOKEN_KIND_NUMBER,
       .source_offset = start_offset,
   };
-  *array32_push(&lexer->tokens, arena) = token;
+  *array_push(&lexer->tokens, arena) = token;
 }
 
 static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
@@ -3340,10 +3340,10 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   pg_assert(*current != NULL);
 
   // tokens[0] is a dummy token.
-  lexer->tokens = array32_make(Token, 1, (u32)buf.len, arena);
+  lexer->tokens = array_make(Token, 1, (u32)buf.len, arena);
 
   // First line is 0.
-  lexer->line_table = array32_make(u32, 1, (u32)buf.len, arena);
+  lexer->line_table = array_make(u32, 1, (u32)buf.len, arena);
 
   while (!lex_is_at_end(buf, current)) {
     const u8 c = **current;
@@ -3354,7 +3354,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_LEFT_PAREN,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3363,7 +3363,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_RIGHT_PAREN,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3372,7 +3372,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_COMMA,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3381,7 +3381,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_COLON,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3393,13 +3393,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_NOT_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_NOT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3408,7 +3408,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_LEFT_BRACE,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3417,7 +3417,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_RIGHT_BRACE,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3426,7 +3426,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_PLUS,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3435,7 +3435,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_MINUS,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3444,7 +3444,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_STAR,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3459,7 +3459,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_SLASH,
             .source_offset = lex_get_current_offset(buf, current),
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
 
       break;
@@ -3469,7 +3469,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_PERCENT,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3478,7 +3478,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
           .kind = TOKEN_KIND_DOT,
           .source_offset = lex_get_current_offset(buf, current),
       };
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       lex_advance(buf, current);
       break;
     }
@@ -3490,13 +3490,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_AMPERSAND_AMPERSAND,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_AMPERSAND,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3508,13 +3508,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_PIPE_PIPE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_PIPE,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3526,13 +3526,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_EQUAL_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_EQUAL,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3544,13 +3544,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_LE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_LT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3562,13 +3562,13 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
             .kind = TOKEN_KIND_GE,
             .source_offset = lex_get_current_offset(buf, current) - 2,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       } else {
         const Token token = {
             .kind = TOKEN_KIND_GT,
             .source_offset = lex_get_current_offset(buf, current) - 1,
         };
-        *array32_push(&lexer->tokens, arena) = token;
+        *array_push(&lexer->tokens, arena) = token;
       }
       break;
     }
@@ -3584,14 +3584,14 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
       while (!lex_match(buf, current, '"')) {
         lex_advance(buf, current);
       }
-      *array32_push(&lexer->tokens, arena) = token;
+      *array_push(&lexer->tokens, arena) = token;
       break;
     }
     case '\n': {
       lex_advance(buf, current);
 
       if (!lex_is_at_end(buf, current))
-        *array32_push(&lexer->line_table, arena) =
+        *array_push(&lexer->line_table, arena) =
             lex_get_current_offset(buf, current);
 
       break;
@@ -3614,7 +3614,7 @@ static void lex_lex(Lexer *lexer, Str buf, u8 **current, Arena *arena) {
   // Ensure the line table has at least 2 items: line_table=[0]=0,
   // line_table[last]=buf.len, for easier logic later to find token
   // positions.
-  *array32_push(&lexer->line_table, arena) = (u32)buf.len;
+  *array_push(&lexer->line_table, arena) = (u32)buf.len;
 }
 
 static u32 lex_find_token_length(const Lexer *lexer, Str buf, Token token) {
@@ -4380,10 +4380,10 @@ static Ast_handle parser_parse_navigation_suffix(Parser *parser,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static Array32(Ast_handle)
+static Array(Ast_handle)
     parser_parse_value_arguments(Parser *parser, Arena *arena) {
 
-  Array32(Ast_handle) nodes = array32_make(Ast_handle, 0, 256, arena);
+  Array(Ast_handle) nodes = array_make(Ast_handle, 0, 256, arena);
 
   while (!parser_is_at_end(parser)) {
     Ast_handle argument_i = parser_parse_expression(parser, arena);
@@ -4395,7 +4395,7 @@ static Array32(Ast_handle)
           "arguments");
       return nodes;
     }
-    *array32_push(&nodes, arena) = argument_i;
+    *array_push(&nodes, arena) = argument_i;
 
     parser_match_token(parser, TOKEN_KIND_COMMA);
 
@@ -4404,7 +4404,7 @@ static Array32(Ast_handle)
   }
 
   if (parser_is_at_end(parser)) {
-    parser_error(parser, *array32_last(parser->lexer->tokens),
+    parser_error(parser, *array_last(parser->lexer->tokens),
                  "Expect matching right parenthesis after function call");
   }
   return nodes;
@@ -4718,10 +4718,10 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
     return ast_handle;
 
   Ast node = {.kind = AST_KIND_LIST};
-  *array32_push(&node.nodes, arena) = ast_handle;
+  *array_push(&node.nodes, arena) = ast_handle;
 
   while (!ast_handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
-    *array32_push(&node.nodes, arena) = ast_handle;
+    *array_push(&node.nodes, arena) = ast_handle;
 
   return new_ast(&node, arena);
 }
@@ -4819,7 +4819,7 @@ static Ast_handle parser_parse_function_value_parameters(Parser *parser,
   Ast node = {.kind = AST_KIND_LIST};
 
   do {
-    *array32_push(&node.nodes, arena) =
+    *array_push(&node.nodes, arena) =
         parser_parse_function_value_parameter(parser, arena);
   } while (parser_match_token(parser, TOKEN_KIND_COMMA));
 
@@ -4963,7 +4963,7 @@ static Ast_handle parser_parse_top_level_object(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
-  pg_assert(!array32_is_empty(parser->lexer->tokens));
+  pg_assert(!array_is_empty(parser->lexer->tokens));
 
   return parser_parse_declaration(parser, arena);
 }
@@ -4980,7 +4980,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
-  pg_assert(!array32_is_empty(parser->lexer->tokens));
+  pg_assert(!array_is_empty(parser->lexer->tokens));
 
   Ast node = {.kind = AST_KIND_LIST};
 
@@ -4989,7 +4989,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   Ast_handle ast_handle = ast_handle_nil;
   while (!ast_handle_is_nil(ast_handle =
                                 parser_parse_top_level_object(parser, arena))) {
-    *array32_push(&node.nodes, arena) = ast_handle;
+    *array_push(&node.nodes, arena) = ast_handle;
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -5004,7 +5004,7 @@ static Ast_handle parser_parse(Parser *parser, Arena *arena) {
   pg_assert(parser != NULL);
   pg_assert(parser->lexer != NULL);
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
-  pg_assert(!array32_is_empty(parser->lexer->tokens));
+  pg_assert(!array_is_empty(parser->lexer->tokens));
 
   parser->tokens_i = 1; // Skip the dummy token.
 
@@ -5165,7 +5165,7 @@ static void resolver_load_methods_from_class_file(
   const Type *const this_class_type =
       type_handle_to_ptr(this_class_type_handle, *arena);
 
-  Array32(Jvm_constant_pool_entry) constant_pool_clone = {0};
+  Array(Jvm_constant_pool_entry) constant_pool_clone = {0};
   for (u64 i = 0; i < class_file->methods.len; i++) {
     const Jvm_method *const method = &class_file->methods.data[i];
     Str descriptor = jvm_constant_pool_get_as_string(class_file->constant_pool,
@@ -5211,12 +5211,12 @@ static void resolver_load_methods_from_class_file(
         const Jvm_attribute *const attribute = &method->attributes.data[i];
         if (attribute->kind == ATTRIBUTE_KIND_CODE) {
           type.v.method.code =
-              array32_make_from_slice(u8, attribute->v.code.bytecode.data,
+              array_make_from_slice(u8, attribute->v.code.bytecode.data,
                                       attribute->v.code.bytecode.len, arena);
           break;
         }
       }
-      pg_assert(!array32_is_empty(type.v.method.code));
+      pg_assert(!array_is_empty(type.v.method.code));
     }
 
     const Type_handle type_handle = resolver_add_type(resolver, &type, arena);
@@ -5563,7 +5563,7 @@ static bool resolver_is_package_imported(const Resolver *resolver,
 // TODO: Keep an hashtable/hashtrie of callables by name.
 static void resolver_collect_callables_with_name(const Resolver *resolver,
                                                  Str function_name,
-                                                 Array32(Type_handle) *
+                                                 Array(Type_handle) *
                                                      candidate_functions_i,
                                                  Arena *arena) {
   pg_assert(resolver != NULL);
@@ -5588,7 +5588,7 @@ static void resolver_collect_callables_with_name(const Resolver *resolver,
       if (!resolver_is_package_imported(resolver, type->package_name))
         continue;
 
-      *array32_push(candidate_functions_i, arena) = handle;
+      *array_push(candidate_functions_i, arena) = handle;
     }
   }
 
@@ -5663,8 +5663,8 @@ static Str resolver_function_to_human_string(Type_handle type_handle,
 }
 
 static void resolver_remove_non_applicable_function_candidates(
-    Resolver *resolver, Array32(Type_handle) * candidate_functions_i,
-    Array32(Type_handle) call_site_argument_types_i, Arena scratch_arena,
+    Resolver *resolver, Array(Type_handle) * candidate_functions_i,
+    Array(Type_handle) call_site_argument_types_i, Arena scratch_arena,
     Arena *arena) {
 
   u64 i = 0;
@@ -5672,7 +5672,7 @@ static void resolver_remove_non_applicable_function_candidates(
     if (!resolver_is_function_candidate_applicable(
             resolver, call_site_argument_types_i,
             candidate_functions_i->data[i], scratch_arena, arena)) {
-      array32_remove_at_unordered(candidate_functions_i, i);
+      array_remove_at_unordered(candidate_functions_i, i);
     } else {
       i++;
     }
@@ -5713,11 +5713,11 @@ static Type_applicability resolver_check_applicability_of_candidate_pair(
 }
 
 static Type_handle resolver_select_most_specific_candidate_function(
-    Resolver *resolver, Array32(Type_handle) candidates, Arena scratch_arena,
+    Resolver *resolver, Array(Type_handle) candidates, Arena scratch_arena,
     Arena *arena) {
 
-  Array32(bool) tombstones =
-      array32_make(bool, candidates.len, candidates.len, &scratch_arena);
+  Array(bool) tombstones =
+      array_make(bool, candidates.len, candidates.len, &scratch_arena);
   u32 tombstones_count = 0;
 
   while (tombstones_count < candidates.len - 1) {
@@ -5790,9 +5790,9 @@ static Type_handle resolver_select_most_specific_candidate_function(
 // default).
 static bool
 resolver_resolve_free_function(Resolver *resolver, Str method_name,
-                               Array32(Type_handle) call_site_argument_types_i,
+                               Array(Type_handle) call_site_argument_types_i,
                                Type_handle *picked_method_type_handle,
-                               Array32(Type_handle) * candidate_functions_i,
+                               Array(Type_handle) * candidate_functions_i,
                                Arena scratch_arena, Arena *arena) {
   pg_assert(resolver != NULL);
   pg_assert(method_name.len > 0);
@@ -6177,7 +6177,7 @@ static void typechecker_end_scope(Resolver *resolver) {
   for (i64 i = (i64)resolver->variables.len - 1; i >= 0; i--) {
     const Type_variable *const variable = &resolver->variables.data[i];
     if (variable->scope_depth == resolver->scope_depth)
-      array32_drop(&resolver->variables, 1);
+      array_drop(&resolver->variables, 1);
     else if (variable->scope_depth < resolver->scope_depth)
       break;
     else
@@ -6199,8 +6199,8 @@ static u32 typechecker_declare_variable(Resolver *resolver, Str name,
       .scope_depth = UINT32_MAX,
       .var_definition_ast_handle = ast_handle,
   };
-  *array32_push(&resolver->variables, arena) = variable;
-  return (u32)array32_last_index(resolver->variables);
+  *array_push(&resolver->variables, arena) = variable;
+  return (u32)array_last_index(resolver->variables);
 }
 
 static void typechecker_mark_variable_as_initialized(Resolver *resolver,
@@ -6321,21 +6321,21 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     Str name = parser_token_to_str_view(resolver->parser, lhs->main_token_i);
 
     // Resolve arguments.
-    Array32(Type_handle) call_site_argument_types_i =
-        array32_make(Type_handle, 0, node->nodes.len, &tmp_arena);
+    Array(Type_handle) call_site_argument_types_i =
+        array_make(Type_handle, 0, node->nodes.len, &tmp_arena);
 
     for (u64 i = 0; i < node->nodes.len; i++) {
       const Ast_handle ast_handle = node->nodes.data[i];
 
       const Type_handle type_handle =
           resolver_resolve_ast(resolver, ast_handle, tmp_arena, arena);
-      *array32_push(&call_site_argument_types_i, &tmp_arena) = type_handle;
+      *array_push(&call_site_argument_types_i, &tmp_arena) = type_handle;
     }
 
     Type_handle picked_method_type_handle = type_handle_nil;
     {
-      Array32(Type_handle) candidate_functions_i =
-          array32_make(Type_handle, 0, 128, &tmp_arena);
+      Array(Type_handle) candidate_functions_i =
+          array_make(Type_handle, 0, 128, &tmp_arena);
 
       if (!resolver_resolve_free_function(
               resolver, name, call_site_argument_types_i,
@@ -6883,12 +6883,12 @@ resolver_user_defined_function_signatures(Resolver *resolver,
       pg_assert(lhs->kind == AST_KIND_LIST);
 
       type.v.method.argument_type_handles =
-          array32_make(Type_handle, 0, lhs->nodes.len, arena);
+          array_make(Type_handle, 0, lhs->nodes.len, arena);
       for (u64 i = 0; i < lhs->nodes.len; i++) {
         const Ast_handle ast_handle = lhs->nodes.data[i];
         const Type_handle type_handle =
             ast_handle_to_ptr(ast_handle, *arena)->type_handle;
-        *array32_push(&type.v.method.argument_type_handles, arena) =
+        *array_push(&type.v.method.argument_type_handles, arena) =
             type_handle;
       }
     }
@@ -6919,14 +6919,14 @@ typedef struct {
   Jvm_variable variable;
   u32 scope_id;
 } Codegen_scope_variable;
-Array32_struct(Codegen_scope_variable);
+Array_struct(Codegen_scope_variable);
 
 typedef struct {
   Resolver *resolver;
   Jvm_attribute_code *code;
   codegen_frame *frame;
-  Array32(Codegen_scope_variable) locals;
-  Array32(Stack_map_frame) stack_map_frames;
+  Array(Codegen_scope_variable) locals;
+  Array(Stack_map_frame) stack_map_frames;
   u32 scope_id;
   pg_pad(4);
 } codegen_generator;
@@ -6945,12 +6945,12 @@ static void codegen_frame_locals_push(codegen_generator *gen,
 
   pg_assert(gen->frame->locals_physical_count + 1 < UINT16_MAX);
 
-  *array32_push(&gen->frame->locals, arena) = *variable;
+  *array_push(&gen->frame->locals, arena) = *variable;
 
   const u16 word_count =
       jvm_verification_info_kind_word_count(variable->verification_info.kind);
 
-  *logical_local_index = (u16)array32_last_index(gen->frame->locals);
+  *logical_local_index = (u16)array_last_index(gen->frame->locals);
   *physical_local_index = gen->frame->locals_physical_count;
   gen->frame->locals_physical_count += word_count;
   gen->frame->max_physical_locals = pg_max(gen->frame->max_physical_locals,
@@ -6958,11 +6958,11 @@ static void codegen_frame_locals_push(codegen_generator *gen,
 
   Codegen_scope_variable scope_variable = {.variable = *variable,
                                            .scope_id = gen->scope_id};
-  *array32_push(&gen->locals, arena) = scope_variable;
+  *array_push(&gen->locals, arena) = scope_variable;
 }
 
-static u16 codegen_import_constant(Array32(Jvm_constant_pool_entry) * dst,
-                                   Array32(Jvm_constant_pool_entry) src,
+static u16 codegen_import_constant(Array(Jvm_constant_pool_entry) * dst,
+                                   Array(Jvm_constant_pool_entry) src,
                                    u16 constant_i, Arena *arena) {
   const Jvm_constant_pool_entry *const constant =
       jvm_constant_pool_get(src, constant_i);
@@ -7082,7 +7082,7 @@ static void codegen_emit_store_variable_int(codegen_generator *gen, u8 var_i,
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
+  pg_assert(array_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
 
   jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ISTORE, arena);
   jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7099,7 +7099,7 @@ static void codegen_emit_store_variable_object(codegen_generator *gen, u8 var_i,
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_OBJECT);
+  pg_assert(array_last(gen->frame->stack)->kind == VERIFICATION_INFO_OBJECT);
 
   jvm_code_push_u8(&gen->code->bytecode, BYTECODE_ASTORE, arena);
   jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7115,7 +7115,7 @@ static void codegen_emit_store_variable_long(codegen_generator *gen, u8 var_i,
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_LONG);
+  pg_assert(array_last(gen->frame->stack)->kind == VERIFICATION_INFO_LONG);
 
   jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LSTORE, arena);
   jvm_code_push_u8(&gen->code->bytecode, var_i, arena);
@@ -7128,7 +7128,7 @@ static void codegen_emit_store_variable(codegen_generator *gen, u8 var_i,
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   pg_assert(var_i < gen->frame->locals_physical_count);
-  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind = array_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7183,7 +7183,7 @@ static void codegen_emit_load_variable_object(codegen_generator *gen, u8 var_i,
 }
 
 static void codegen_emit_ldc(codegen_generator *gen,
-                             Array32(Jvm_constant_pool_entry) constant_pool,
+                             Array(Jvm_constant_pool_entry) constant_pool,
                              u16 constant_i, Arena *arena) {
 
   jvm_code_push_u8(&gen->code->bytecode, BYTECODE_LDC_W, arena);
@@ -7328,7 +7328,7 @@ static void codegen_emit_invoke_special(codegen_generator *gen,
 // Only useful when inlined code invokes another method (referencing it by its
 // descriptor).
 static Type_handle codegen_make_type_from_method_descriptor(
-    codegen_generator *gen, Array32(Jvm_constant_pool_entry) constant_pool,
+    codegen_generator *gen, Array(Jvm_constant_pool_entry) constant_pool,
     u16 constant_i, Arena *arena) {
   const Jvm_constant_pool_entry *const constant =
       jvm_constant_pool_get(constant_pool, constant_i);
@@ -7355,15 +7355,15 @@ static void codegen_emit_inlined_method_call(codegen_generator *gen,
   pg_assert(method_type->flags & TYPE_FLAG_INLINE_ONLY);
 
   const Method *const method = &method_type->v.method;
-  pg_assert(!array32_is_empty(method->code));
+  pg_assert(!array_is_empty(method->code));
 
   const u32 code_size = method->code.len;
-  Array32(u8) code = method->code;
+  Array(u8) code = method->code;
   u8 *current = code.data;
 
   u64 stack_size_before_inline_snippet = gen->frame->stack.len;
 
-  while (current < array32_last(code)) {
+  while (current < array_last(code)) {
     const u8 opcode = buf_read_u8(str_new(code.data, code_size), &current);
 
     switch (opcode) {
@@ -7508,10 +7508,10 @@ static void codegen_emit_add(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7534,7 +7534,7 @@ static void codegen_emit_neg(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->code != NULL);
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
-  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind = array_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7585,8 +7585,8 @@ static void codegen_emit_ixor(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame != NULL);
   pg_assert(gen->frame->stack.len >= 2);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
-  pg_assert(array32_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
-  pg_assert(array32_penultimate(gen->frame->stack)->kind ==
+  pg_assert(array_last(gen->frame->stack)->kind == VERIFICATION_INFO_INT);
+  pg_assert(array_penultimate(gen->frame->stack)->kind ==
             VERIFICATION_INFO_INT);
 
   jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IXOR, arena);
@@ -7601,9 +7601,9 @@ static void codegen_emit_mul(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7628,10 +7628,10 @@ static void codegen_emit_div(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7656,10 +7656,10 @@ static void codegen_emit_rem(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7730,7 +7730,7 @@ static void codegen_emit_return_value(codegen_generator *gen, Arena *arena) {
 
   pg_assert(gen->frame->stack.len >= 1);
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
-  const Jvm_verification_info_kind kind = array32_last(gen->frame->stack)->kind;
+  const Jvm_verification_info_kind kind = array_last(gen->frame->stack)->kind;
 
   switch (kind) {
   case VERIFICATION_INFO_INT:
@@ -7753,7 +7753,7 @@ static void codegen_begin_scope(codegen_generator *gen) {
 }
 
 static void stack_map_record_frame_at_pc(const codegen_frame *frame,
-                                         Array32(Stack_map_frame) *
+                                         Array(Stack_map_frame) *
                                              stack_map_frames,
                                          u16 pc, Arena *arena) {
   pg_assert(frame != NULL);
@@ -7763,7 +7763,7 @@ static void stack_map_record_frame_at_pc(const codegen_frame *frame,
       .frame = codegen_frame_clone(frame, arena),
       .pc = pc,
   };
-  *array32_push(stack_map_frames, arena) = stack_map_frame;
+  *array_push(stack_map_frames, arena) = stack_map_frame;
 }
 
 static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
@@ -7781,7 +7781,7 @@ static void codegen_frame_drop_current_scope_variables(codegen_frame *frame) {
     to_drop += 1;
   }
 
-  array32_drop(&frame->locals, to_drop);
+  array_drop(&frame->locals, to_drop);
 }
 
 static void codegen_end_scope(codegen_generator *gen) {
@@ -7891,10 +7891,10 @@ static void codegen_emit_gt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7917,10 +7917,10 @@ static void codegen_emit_ne(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7942,10 +7942,10 @@ static void codegen_emit_eq(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7967,10 +7967,10 @@ static void codegen_emit_ge(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -7993,10 +7993,10 @@ static void codegen_emit_le(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -8019,10 +8019,10 @@ static void codegen_emit_lt(codegen_generator *gen, Arena *arena) {
   pg_assert(gen->frame->stack.len <= UINT16_MAX);
 
   const Jvm_verification_info_kind kind_a =
-      array32_last(gen->frame->stack)->kind;
+      array_last(gen->frame->stack)->kind;
 
   const Jvm_verification_info_kind kind_b =
-      array32_penultimate(gen->frame->stack)->kind;
+      array_penultimate(gen->frame->stack)->kind;
 
   pg_assert(kind_a == kind_b);
 
@@ -8141,12 +8141,12 @@ static int stack_map_frame_sort(const void *a, const void *b) {
 }
 
 static void stack_map_resolve_frames(const codegen_frame *first_method_frame,
-                                     Array32(Stack_map_frame) stack_map_frames,
+                                     Array(Stack_map_frame) stack_map_frames,
                                      Arena *arena) {
   pg_assert(first_method_frame != NULL);
   pg_assert(arena != NULL);
 
-  if (array32_is_empty(stack_map_frames))
+  if (array_is_empty(stack_map_frames))
     return;
 
   // TODO: Better sort.
@@ -8305,7 +8305,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const u16 initial_locals_physical_count =
           gen->frame->locals_physical_count;
 
-      u64 stack_index = array32_last_index(gen->frame->stack);
+      u64 stack_index = array_last_index(gen->frame->stack);
 
       for (u64 i = 0; i < node->nodes.len; i++) {
         const Ast_handle argument_handle = node->nodes.data[i];
@@ -8390,7 +8390,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     break;
   }
   case AST_KIND_FUNCTION_DEFINITION: {
-    array32_clear(&gen->locals);
+    array_clear(&gen->locals);
 
     const u32 token_name_i = node->main_token_i;
     pg_assert(token_name_i < gen->resolver->parser->lexer->tokens.len);
@@ -8417,10 +8417,10 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .name = method_name_i,
         .descriptor = descriptor_i,
     };
-    method.attributes = array32_make(Jvm_attribute, 0, 1, arena);
+    method.attributes = array_make(Jvm_attribute, 0, 1, arena);
 
     Jvm_attribute_code code = {.attributes =
-                                   array32_make(Jvm_attribute, 0, 4, arena)};
+                                   array_make(Jvm_attribute, 0, 4, arena)};
     gen->code = &code;
     codegen_frame frame = {0};
     codegen_frame_init(&frame, arena);
@@ -8451,7 +8451,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         if (rhs->nodes.len == 0) {
           codegen_emit_return_nothing(gen, arena);
         } else {
-          const Ast_handle last_ast_handle = *array32_last(rhs->nodes);
+          const Ast_handle last_ast_handle = *array_last(rhs->nodes);
           const Ast *const last_node =
               ast_handle_to_ptr(last_ast_handle, *arena);
 
@@ -8474,29 +8474,29 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         .name = jvm_add_constant_cstring(&class_file->constant_pool,
                                          "StackMapTable", arena),
         .v.stack_map_table =
-            array32_make(Stack_map_frame, 0, gen->stack_map_frames.len, arena),
+            array_make(Stack_map_frame, 0, gen->stack_map_frames.len, arena),
     };
 
     for (u64 i = 0; i < gen->stack_map_frames.len; i++) {
       if (!gen->stack_map_frames.data[i].tombstone)
-        *array32_push(&attribute_stack_map_frames.v.stack_map_table, arena) =
+        *array_push(&attribute_stack_map_frames.v.stack_map_table, arena) =
             gen->stack_map_frames.data[i];
     }
 
-    *array32_push(&code.attributes, arena) = attribute_stack_map_frames;
+    *array_push(&code.attributes, arena) = attribute_stack_map_frames;
 
     const Jvm_attribute attribute_code = {
         .kind = ATTRIBUTE_KIND_CODE,
         .name =
             jvm_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
-    *array32_push(&method.attributes, arena) = attribute_code;
+    *array_push(&method.attributes, arena) = attribute_code;
 
-    *array32_push(&class_file->methods, arena) = method;
+    *array_push(&class_file->methods, arena) = method;
 
     gen->code = NULL;
     gen->frame = NULL;
-    array32_clear(&gen->stack_map_frames);
+    array_clear(&gen->stack_map_frames);
     break;
   }
   case AST_KIND_UNARY: {
@@ -8747,7 +8747,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const Ast_handle child_handle = node->nodes.data[i];
 
       if (gen->frame != NULL) {
-        pg_assert(array32_is_empty(gen->frame->stack));
+        pg_assert(array_is_empty(gen->frame->stack));
       }
       codegen_emit_node(gen, class_file, child_handle, arena);
 
@@ -8759,7 +8759,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       const Ast *const child = ast_handle_to_ptr(child_handle, *arena);
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
-        while (!array32_is_empty(gen->frame->stack))
+        while (!array_is_empty(gen->frame->stack))
           codegen_emit_pop(gen, arena);
       }
     }
@@ -8999,7 +8999,7 @@ static void codegen_emit_synthetic_class(codegen_generator *gen,
 
 static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
                               u16 name, u16 descriptor,
-                              Array32(Jvm_attribute) attributes, Arena *arena) {
+                              Array(Jvm_attribute) attributes, Arena *arena) {
   pg_assert(class_file != NULL);
 
   Jvm_method method = {
@@ -9008,8 +9008,8 @@ static u16 codegen_add_method(Class_file *class_file, u16 access_flags,
       .descriptor = descriptor,
       .name = name,
   };
-  *array32_push(&class_file->methods, arena) = method;
-  return (u16)array32_last_index(class_file->methods);
+  *array_push(&class_file->methods, arena) = method;
+  return (u16)array_last_index(class_file->methods);
 }
 
 static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
@@ -9061,7 +9061,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
   pg_assert((u16)method_i < class_file->methods.len);
   const Jvm_method *const target_method = &class_file->methods.data[method_i];
 
-  Array32(Jvm_attribute) attributes = array32_make(Jvm_attribute, 0, 1, arena);
+  Array(Jvm_attribute) attributes = array_make(Jvm_attribute, 0, 1, arena);
 
   // Generate code section for the new method.
   {
@@ -9098,7 +9098,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
     };
 
     Jvm_attribute_code code = {0};
-    code.bytecode = array32_make(u8, 0, 4, arena);
+    code.bytecode = array_make(u8, 0, 4, arena);
 
     gen->code = &code;
     gen->frame =
@@ -9162,7 +9162,7 @@ static void codegen_supplement_entrypoint_if_exists(codegen_generator *gen,
         .name =
             jvm_add_constant_cstring(&class_file->constant_pool, "Code", arena),
         .v = {.code = code}};
-    *array32_push(&attributes, arena) = attribute_code;
+    *array_push(&attributes, arena) = attribute_code;
   }
 
   // Add new method.
@@ -9187,8 +9187,8 @@ static void codegen_emit(Resolver *resolver, Class_file *class_file,
 
   codegen_generator gen = {
       .resolver = resolver,
-      .stack_map_frames = array32_make(Stack_map_frame, 0, 64, arena),
-      .locals = array32_make(Codegen_scope_variable, 0, 1 << 12, arena),
+      .stack_map_frames = array_make(Stack_map_frame, 0, 64, arena),
+      .locals = array_make(Codegen_scope_variable, 0, 1 << 12, arena),
   };
 
   codegen_emit_synthetic_class(&gen, class_file, arena);

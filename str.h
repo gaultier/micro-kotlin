@@ -26,7 +26,7 @@ typedef struct {
   u8 *data;
   u64 len;
 } Str;
-Array32_struct(Str);
+Array_struct(Str);
 
 __attribute__((warn_unused_result)) static u32 str_count(Str s, u8 c) {
   u32 res = 0;
@@ -414,12 +414,12 @@ ut_file_mmap(char *path) {
 
 typedef struct {
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
-  Array32(u64) call_stack;
+  Array(u64) call_stack;
 } Mem_record;
-Array32_struct(Mem_record);
+Array_struct(Mem_record);
 
 struct Mem_profile {
-  Array32(Mem_record) records;
+  Array(Mem_record) records;
   u64 in_use_space, in_use_objects, alloc_space, alloc_objects;
   Arena arena;
 };
@@ -490,11 +490,11 @@ static void mem_profile_record_alloc(Mem_profile *profile, u64 objects_count,
       .alloc_space = bytes_count,
       .in_use_objects = objects_count,
       .in_use_space = bytes_count,
-      .call_stack = array32_make_from_slice(
+      .call_stack = array_make_from_slice(
           u64, call_stack, (u32)call_stack_len, &profile->arena),
   };
 
-  *array32_push(&profile->records, &profile->arena) = record;
+  *array_push(&profile->records, &profile->arena) = record;
 }
 
 static void mem_profile_write(Mem_profile *profile, FILE *out) {
