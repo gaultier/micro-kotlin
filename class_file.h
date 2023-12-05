@@ -329,7 +329,7 @@ struct Ast {
   Ast_handle rhs;
   Type_handle type_handle; // TODO: should it be separate?
   Array32(Ast_handle) nodes;
-  u64 extra_data;
+  u64 num;
   u16 flags;
   Ast_kind kind;
   pg_pad(1);
@@ -4163,7 +4163,7 @@ static Ast_handle parser_parse_primary_expression(Parser *parser,
     const Ast node = {
         .kind = AST_KIND_BOOL,
         .main_token_i = parser->tokens_i - 1,
-        .extra_data = is_true,
+        .num = is_true,
     };
     return new_ast(&node, arena);
   } else if (parser_match_token(parser, TOKEN_KIND_LEFT_PAREN)) {
@@ -6400,7 +6400,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
             resolver_add_type(resolver, &(Type){.kind = TYPE_LONG}, arena);
       }
     }
-    node->extra_data = number;
+    node->num = number;
 
     return node->type_handle;
   }
@@ -8247,7 +8247,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     pg_assert(node->main_token_i < gen->resolver->parser->lexer->tokens.len);
     const Jvm_constant_pool_entry constant = {
         .kind = CONSTANT_POOL_KIND_INT,
-        .v.number = node->extra_data,
+        .v.number = node->num,
     };
     const u16 number_i =
         jvm_constant_pool_push(&class_file->constant_pool, &constant, arena);
@@ -8272,7 +8272,7 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     }
     // TODO: Float, Double, etc.
 
-    const u64 number = node->extra_data;
+    const u64 number = node->num;
     const Jvm_constant_pool_entry constant = {
         .kind = pool_kind,
         .v.number = number,
