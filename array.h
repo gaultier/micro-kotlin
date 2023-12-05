@@ -109,19 +109,23 @@ struct List {
 };
 
 typedef struct {
-  int x;
   List list;
+  int x;
+  pg_pad(4);
 } Foo;
 
-#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
+#define offset_of(T, member) __builtin_offsetof(T, member)
 
-#define container_of(ptr, type, member)                                        \
-  ((type *)((char *)(List *)ptr - offsetof(type, member)))
+#define container_of(x, T, name) (T *)((((char *)(x)) - offset_of(T, name)))
 
-static List *list_add(List *first, List *last, List *new) {
-  pg_assert(new);
-  pg_assert(first);
-  pg_assert(last);
+static List *list_add(void *_first, void *_last, void *_new) {
+  pg_assert(_new);
+  pg_assert(_first);
+  pg_assert(_last);
+
+  List *const first = _first, *const last = _last, *const new = _new;
+  pg_assert(first->next != NULL);
+  pg_assert(last->next != NULL);
 
   new->next = first;
   last->next = new;
@@ -132,32 +136,36 @@ static List *list_add(List *first, List *last, List *new) {
 #define list_for_each(pos, head)                                               \
   for (pos = (head)->next; pos != (head); pos = pos->next)
 
-#define list_for_each_entry(type, pos, head, member)                           \
-  for (pos = container_of((head)->next, type, member); &pos->member != (head); \
-       pos = container_of(pos->member.next, type, member))
+#define list_for_each_entry(T, pos, head)                                      \
+  for (pos = (T *)(((List *)(head))->next); pos != (head);                     \
+       pos = (T *)((List *)(pos))->next)
+
+static bool list_is_empty(const List *l) {
+  pg_assert(l->next != NULL);
+  return l->next == l;
+}
+
+// FIXME: Only there as a temporary hack in the absence of CFG. O(n)!
+static const List *list_last(const List *l) {
+
+  List *it = NULL;
+  list_for_each(it, l) {}
+  return it;
+}
 
 void do_foo() {
-  Foo f1 = {.x = 1, .list = {.next = &f1.list}};
-  Foo f2 = {.x = 2, .list = {.next = &f2.list}};
-  Foo f3 = {.x = 3, .list = {.next = &f3.list}};
+  Foo f1 = {.x = 1};
+  Foo f2 = {.x = 2};
+  Foo f3 = {.x = 3};
 
-  List head = {.next = &f1.list};
-  List *last = &f1.list;
-  last = list_add(&head, last, &f2.list);
-  last = list_add(&head, last, &f3.list);
-
-  {
-    List *it = NULL;
-    list_for_each(it, &head) {
-      Foo *f = container_of(it, Foo, list);
-      printf("[D001] x=%d\n", f->x);
-    }
-  }
+  Foo head = {.list.next = &head.list};
+  List *last = (List *)&head;
+  last = list_add(&head, last, &f1);
+  last = list_add(&head, last, &f2);
+  last = list_add(&head, last, &f3);
 
   {
     Foo *it = NULL;
-    list_for_each_entry(Foo, it, &head, list) {
-      printf("[D002] x=%d\n", it->x);
-    }
+    list_for_each_entry(Foo, it, &head) { printf("[D002] x=%d\n", it->x); }
   }
 }

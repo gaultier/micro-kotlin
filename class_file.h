@@ -324,6 +324,7 @@ Array32_struct(Type);
 // TODO: compact fields.
 typedef struct Ast Ast;
 struct Ast {
+  List nodes_list;
   u32 main_token_i;
   Ast_handle lhs;
   Ast_handle rhs;
@@ -338,15 +339,19 @@ struct Ast {
 };
 Array32_struct(Ast);
 
-static Ast_handle new_ast(const Ast *ast, Arena *arena) {
-  Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
-  *ast_ptr = *ast;
-
-  const u32 offset = arena_offset_from_end(ast_ptr, *arena);
+static Ast_handle ast_ptr_to_handle(const Ast *ast, Arena arena) {
+  const u32 offset = arena_offset_from_end((void *)ast, arena);
 
   pg_assert((offset & (u32)HANDLE_FLAGS_AST) == 0);
 
   return (Ast_handle){offset | (u32)HANDLE_FLAGS_AST};
+}
+
+static Ast_handle new_ast(const Ast *ast, Arena *arena) {
+  Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
+  *ast_ptr = *ast;
+
+  return ast_ptr_to_handle(ast_ptr, *arena);
 }
 
 static Ast *ast_handle_to_ptr(Ast_handle handle, Arena arena) {
@@ -4713,17 +4718,20 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
   if (parser_peek_token(parser).kind == TOKEN_KIND_RIGHT_BRACE)
     return ast_handle_nil;
 
-  Ast_handle ast_handle = parser_parse_statement(parser, arena);
-  if (ast_handle_is_nil(ast_handle))
-    return ast_handle;
+  Ast_handle stmt_handle = parser_parse_statement(parser, arena);
+  if (ast_handle_is_nil(stmt_handle))
+    return stmt_handle;
 
-  Ast node = {.kind = AST_KIND_LIST};
-  *array32_push(&node.nodes, arena) = ast_handle;
+  Ast res = {.kind = AST_KIND_LIST, .nodes_list = {.next = &res.nodes_list}};
 
-  while (!ast_handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
-    *array32_push(&node.nodes, arena) = ast_handle;
+  List *last = &res.nodes_list;
+  do {
+    List *const new = &ast_handle_to_ptr(stmt_handle, *arena)->nodes_list;
+    last = list_add(&res.nodes_list, last, new);
+  } while (
+      !ast_handle_is_nil(stmt_handle = parser_parse_statement(parser, arena)));
 
-  return new_ast(&node, arena);
+  return new_ast(&res, arena);
 }
 
 // TODO: Parse more complex types.
@@ -4816,16 +4824,19 @@ static Ast_handle parser_parse_function_value_parameters(Parser *parser,
   if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
     return ast_handle_nil;
 
-  Ast node = {.kind = AST_KIND_LIST};
+  Ast res = {.kind = AST_KIND_LIST, .nodes_list = {.next = &res.nodes_list}};
 
+  List *last = &res.nodes_list;
   do {
-    *array32_push(&node.nodes, arena) =
+    const Ast_handle param_handle =
         parser_parse_function_value_parameter(parser, arena);
+    List *const new = &ast_handle_to_ptr(param_handle, *arena)->nodes_list;
+    last = list_add(&res.nodes_list, last, new);
   } while (parser_match_token(parser, TOKEN_KIND_COMMA));
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                       "expected right parenthesis after the arguments");
-  return new_ast(&node, arena);
+  return new_ast(&res, arena);
 }
 
 // functionBody:
@@ -4982,14 +4993,16 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(!array32_is_empty(parser->lexer->tokens));
 
-  Ast node = {.kind = AST_KIND_LIST};
+  Ast res = {.kind = AST_KIND_LIST, .nodes_list = {.next = &res.nodes_list}};
 
   // TODO: package, import, etc.
 
-  Ast_handle ast_handle = ast_handle_nil;
-  while (!ast_handle_is_nil(ast_handle =
+  Ast_handle stmt_handle = ast_handle_nil;
+  List *last = &res.nodes_list;
+  while (!ast_handle_is_nil(stmt_handle =
                                 parser_parse_top_level_object(parser, arena))) {
-    *array32_push(&node.nodes, arena) = ast_handle;
+    List *const new = &ast_handle_to_ptr(stmt_handle, *arena)->nodes_list;
+    last = list_add(&res.nodes_list, last, new);
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -4997,7 +5010,7 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
                  "Unexpected trailing code");
   }
 
-  return new_ast(&node, arena);
+  return new_ast(&res, arena);
 }
 
 static Ast_handle parser_parse(Parser *parser, Arena *arena) {
@@ -5048,15 +5061,16 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%u] %.*s %.*s at %.*s:%u:%u:%u), %u children", count,
-        (int)kind_string.len, kind_string.data, (int)token_string.len,
-        token_string.data, (int)parser->lexer->file_path.len,
-        parser->lexer->file_path.data, line, column, token.source_offset,
-        node->nodes.len);
+    LOG("[%u] %.*s %.*s at %.*s:%u:%u:%u)", count, (int)kind_string.len,
+        kind_string.data, (int)token_string.len, token_string.data,
+        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
+        column, token.source_offset);
 
-    for (u64 i = 0; i < node->nodes.len; i++)
-      parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2, ++count,
-                        arena);
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, arena);
+      parser_ast_fprint(parser, child_handle, file, indent + 2, ++count, arena);
+    }
 
     break;
   case AST_KIND_CALL: {
@@ -5929,16 +5943,19 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children", count,
+    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u)", count,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset, node->nodes.len);
+        token.source_offset);
 
-    for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
-                          ++count, arena);
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+      resolver_ast_fprint(resolver, child_handle, file, indent + 2, ++count,
+                          arena);
+    }
     break;
   case AST_KIND_CALL: {
 
@@ -6477,8 +6494,10 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
     }
   }
   case AST_KIND_LIST: {
-    for (u64 i = 0; i < node->nodes.len; i++) {
-      resolver_resolve_ast(resolver, node->nodes.data[i], scratch_arena, arena);
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+      resolver_resolve_ast(resolver, child_handle, scratch_arena, arena);
       // Clean up after each statement.
       resolver->current_type_handle = type_handle_nil;
     }
@@ -6835,12 +6854,15 @@ resolver_user_defined_function_signatures(Resolver *resolver,
   u32 count = 0;
   Ast *const node = ast_handle_to_ptr(ast_handle, *arena);
   switch (node->kind) {
-  case AST_KIND_LIST:
-    for (u64 i = 0; i < node->nodes.len; i++)
-      count += resolver_user_defined_function_signatures(
-          resolver, node->nodes.data[i], scratch_arena, arena);
-
+  case AST_KIND_LIST: {
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+      count += resolver_user_defined_function_signatures(resolver, child_handle,
+                                                         scratch_arena, arena);
+    }
     return count;
+  }
 
   case AST_KIND_FUNCTION_DEFINITION: {
     count += 1;
@@ -6884,10 +6906,12 @@ resolver_user_defined_function_signatures(Resolver *resolver,
 
       type.v.method.argument_type_handles =
           array32_make(Type_handle, 0, lhs->nodes.len, arena);
-      for (u64 i = 0; i < lhs->nodes.len; i++) {
-        const Ast_handle ast_handle = lhs->nodes.data[i];
+
+      Ast *it = NULL;
+      list_for_each_entry(Ast, it, node) {
+        const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
         const Type_handle type_handle =
-            ast_handle_to_ptr(ast_handle, *arena)->type_handle;
+            ast_handle_to_ptr(child_handle, *arena)->type_handle;
         *array32_push(&type.v.method.argument_type_handles, arena) =
             type_handle;
       }
@@ -8448,13 +8472,12 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         const Ast *const rhs = ast_handle_to_ptr(node->rhs, *arena);
         pg_assert(rhs->kind == AST_KIND_LIST);
 
-        if (rhs->nodes.len == 0) {
+        if (list_is_empty(&rhs->nodes_list)) {
           codegen_emit_return_nothing(gen, arena);
         } else {
-          const Ast_handle last_ast_handle = *array32_last(rhs->nodes);
-          const Ast *const last_node =
-              ast_handle_to_ptr(last_ast_handle, *arena);
-
+          // FIXME: Hack, need a real CFG!
+          const List *const last = list_last(&rhs->nodes_list);
+          const Ast *const last_node = container_of(last, Ast, nodes_list);
           if (last_node->kind != AST_KIND_RETURN) {
             codegen_emit_return_nothing(gen, arena);
           }
@@ -8743,20 +8766,21 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       pg_assert(gen->frame != NULL);
     }
 
-    for (u64 i = 0; i < node->nodes.len; i++) {
-      const Ast_handle child_i = node->nodes.data[i];
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
 
       if (gen->frame != NULL) {
         pg_assert(array32_is_empty(gen->frame->stack));
       }
-      codegen_emit_node(gen, class_file, child_i, arena);
+      codegen_emit_node(gen, class_file, child_handle, arena);
 
       // If the 'statement' was in fact an expression, we need to pop it
       // out.
       // IMPROVEMENT: If we emit the pop earlier, some stack map frames
       // don't have to be a full_frame but can be something smaller e.g.
       // append_frame.
-      const Ast *const child = ast_handle_to_ptr(child_i, *arena);
+      const Ast *const child = ast_handle_to_ptr(child_handle, *arena);
       if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
           gen->frame != NULL) {
         while (!array32_is_empty(gen->frame->stack))
