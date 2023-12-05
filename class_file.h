@@ -325,12 +325,11 @@ Array32_struct(Type);
 typedef struct Ast Ast;
 struct Ast {
   u32 main_token_i;
-  Type_handle type_handle; // TODO: should it be separate?
   Ast_handle lhs;
   Ast_handle rhs;
+  Type_handle type_handle; // TODO: should it be separate?
   Array32(Ast_handle) nodes;
-  List nodes_list;
-  u64 num; // TODO: Only used when lhs, rhs are unused => fold them together.
+  u64 num;
   u16 flags;
   Ast_kind kind;
   pg_pad(1);
@@ -338,10 +337,6 @@ struct Ast {
                               // return type was specified.
 };
 Array32_struct(Ast);
-
-typedef struct {
-  Ast_handle first, last;
-} Ast_list;
 
 static Ast_handle new_ast(const Ast *ast, Arena *arena) {
   Ast *const ast_ptr = arena_alloc(arena, sizeof(Ast), _Alignof(Ast), 1);
@@ -4385,26 +4380,22 @@ static Ast_handle parser_parse_navigation_suffix(Parser *parser,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static Ast_handle parser_parse_value_arguments(Parser *parser, Arena *arena) {
+static Array32(Ast_handle)
+    parser_parse_value_arguments(Parser *parser, Arena *arena) {
 
-  Ast_handle first = ast_handle_nil;
-  Ast_handle last = ast_handle_nil;
+  Array32(Ast_handle) nodes = array32_make(Ast_handle, 0, 256, arena);
 
   while (!parser_is_at_end(parser)) {
-    Ast_handle argument_handle = parser_parse_expression(parser, arena);
-    if (ast_handle_is_nil(argument_handle)) {
+    Ast_handle argument_i = parser_parse_expression(parser, arena);
+    if (ast_handle_is_nil(argument_i)) {
       const Token main_token = parser->lexer->tokens.data[parser->tokens_i];
       parser_error(
           parser, main_token,
           "Expected expression or closing right parenthesis for function "
           "arguments");
-      return first;
+      return nodes;
     }
-    if (ast_handle_is_nil(first)) {
-      last = first = argument_handle;
-    } else {
-      last = ast_handle_to_ptr(last, *arena)->next = argument_handle;
-    }
+    *array32_push(&nodes, arena) = argument_i;
 
     parser_match_token(parser, TOKEN_KIND_COMMA);
 
@@ -4416,7 +4407,7 @@ static Ast_handle parser_parse_value_arguments(Parser *parser, Arena *arena) {
     parser_error(parser, *array32_last(parser->lexer->tokens),
                  "Expect matching right parenthesis after function call");
   }
-  return first;
+  return nodes;
 }
 
 // callSuffix:
@@ -4437,7 +4428,7 @@ static Ast_handle parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
     return new_ast(&node, arena);
   }
 
-  node.next = parser_parse_value_arguments(parser, arena);
+  node.nodes = parser_parse_value_arguments(parser, arena);
 
   return new_ast(&node, arena);
 }
@@ -4726,14 +4717,11 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
   if (ast_handle_is_nil(ast_handle))
     return ast_handle;
 
-  Ast node = {
-      .kind = AST_KIND_LIST,
-      .next = ast_handle,
-  };
-  Ast_handle last = ast_handle;
+  Ast node = {.kind = AST_KIND_LIST};
+  *array32_push(&node.nodes, arena) = ast_handle;
 
   while (!ast_handle_is_nil(ast_handle = parser_parse_statement(parser, arena)))
-    ast_handle_to_ptr(last, *arena)->next = ast_handle;
+    *array32_push(&node.nodes, arena) = ast_handle;
 
   return new_ast(&node, arena);
 }
@@ -4829,21 +4817,14 @@ static Ast_handle parser_parse_function_value_parameters(Parser *parser,
     return ast_handle_nil;
 
   Ast node = {.kind = AST_KIND_LIST};
-  Ast_handle last = ast_handle_nil;
 
   do {
-    const Ast_handle param_handle =
+    *array32_push(&node.nodes, arena) =
         parser_parse_function_value_parameter(parser, arena);
-    if (ast_handle_is_nil(last)) {
-      last = node.next = param_handle;
-    } else {
-      ast_handle_to_ptr(last, *arena)->next = param_handle;
-    }
   } while (parser_match_token(parser, TOKEN_KIND_COMMA));
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
                       "expected right parenthesis after the arguments");
-
   return new_ast(&node, arena);
 }
 
@@ -5002,18 +4983,13 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(!array32_is_empty(parser->lexer->tokens));
 
   Ast node = {.kind = AST_KIND_LIST};
-  Ast_handle last = ast_handle_nil;
 
   // TODO: package, import, etc.
 
-  Ast_handle statement_handle = ast_handle_nil;
-  while (!ast_handle_is_nil(statement_handle =
+  Ast_handle ast_handle = ast_handle_nil;
+  while (!ast_handle_is_nil(ast_handle =
                                 parser_parse_top_level_object(parser, arena))) {
-    if (ast_handle_is_nil(last)) {
-      last = node.next = statement_handle;
-    } else {
-      ast_handle_to_ptr(last, *arena)->next = statement_handle;
-    }
+    *array32_push(&node.nodes, arena) = ast_handle;
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -5072,24 +5048,24 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%u] %.*s %.*s at %.*s:%u:%u:%u)", count, (int)kind_string.len,
-        kind_string.data, (int)token_string.len, token_string.data,
-        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
-        column, token.source_offset);
+    LOG("[%u] %.*s %.*s at %.*s:%u:%u:%u), %u children", count,
+        (int)kind_string.len, kind_string.data, (int)token_string.len,
+        token_string.data, (int)parser->lexer->file_path.len,
+        parser->lexer->file_path.data, line, column, token.source_offset,
+        node->nodes.len);
 
-    // FIXME
     for (u64 i = 0; i < node->nodes.len; i++)
       parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2, ++count,
                         arena);
 
     break;
   case AST_KIND_CALL: {
-    LOG("[%u] %.*s %.*s (at %.*s:%u:%u:%u)", count, (int)kind_string.len,
-        kind_string.data, (int)token_string.len, token_string.data,
-        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
-        column, token.source_offset);
+    LOG("[%u] %.*s %.*s (at %.*s:%u:%u:%u), %u children", count,
+        (int)kind_string.len, kind_string.data, (int)token_string.len,
+        token_string.data, (int)parser->lexer->file_path.len,
+        parser->lexer->file_path.data, line, column, token.source_offset,
+        node->nodes.len);
 
-    // FIXME
     for (u64 i = 0; i < node->nodes.len; i++)
       parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2, ++count,
                         arena);
@@ -5953,12 +5929,12 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
     break;
 
   case AST_KIND_LIST:
-    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u)", count,
+    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children", count,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset);
+        token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
       resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
@@ -5967,12 +5943,12 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
   case AST_KIND_CALL: {
 
     human_type = resolver_function_to_human_string(node->type_handle, arena);
-    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u)", count,
+    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children", count,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset);
+        token.source_offset, node->nodes.len);
 
     for (u64 i = 0; i < node->nodes.len; i++)
       resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
