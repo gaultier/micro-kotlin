@@ -324,7 +324,6 @@ Array32_struct(Type);
 // TODO: compact fields.
 typedef struct Ast Ast;
 struct Ast {
-  List nodes_list;
   u32 main_token_i;
   Ast_handle lhs;
   Ast_handle rhs;
@@ -4384,24 +4383,34 @@ static Ast_handle parser_parse_navigation_suffix(Parser *parser,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static void parser_parse_value_arguments(Parser *parser,
-                                         Ast_handle parent_handle,
-                                         Arena *arena) {
+static Ast_handle parser_parse_value_arguments(Parser *parser, Arena *arena) {
+  // Calling a function with zero arguments.
+  if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
+    return ast_handle_nil;
+  }
 
-  List *head = &ast_handle_to_ptr(parent_handle, *arena)->nodes_list;
-  List *last = head;
+  Ast_handle it_handle = ast_handle_nil;
+  Ast_handle root_handle = ast_handle_nil;
 
   while (!parser_is_at_end(parser)) {
-    const Ast_handle argument_handle = parser_parse_expression(parser, arena);
-    if (ast_handle_is_nil(argument_handle)) {
+    const Ast it = {
+        .kind = AST_KIND_BINARY,
+        .lhs = parser_parse_expression(parser, arena),
+        .main_token_i = parser->tokens_i,
+        .rhs = it_handle,
+    };
+
+    if (ast_handle_is_nil(it.lhs)) {
       const Token main_token = parser->lexer->tokens.data[parser->tokens_i];
       parser_error(
           parser, main_token,
           "Expected expression or closing right parenthesis for function "
           "arguments");
-      return;
+      return it_handle;
     }
-    last = list_add(head, last, ast_handle_to_ptr(argument_handle, *arena));
+
+    it_handle = new_ast(&it, arena);
+    root_handle = ast_handle_is_nil(root_handle) ? it_handle : root_handle;
 
     parser_match_token(parser, TOKEN_KIND_COMMA);
 
@@ -4413,6 +4422,8 @@ static void parser_parse_value_arguments(Parser *parser,
     parser_error(parser, *array32_last(parser->lexer->tokens),
                  "Expect matching right parenthesis after function call");
   }
+
+  return root_handle;
 }
 
 // callSuffix:
@@ -4426,19 +4437,9 @@ static Ast_handle parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
   Ast res = {
       .kind = AST_KIND_CALL,
       .main_token_i = parser->tokens_i - 1,
+      .lhs = parser_parse_value_arguments(parser, arena),
   };
-  const Ast_handle res_handle = new_ast(&res, arena);
-  ast_handle_to_ptr(res_handle, *arena)->nodes_list.next =
-      &ast_handle_to_ptr(res_handle, *arena)->nodes_list;
-
-  // Calling a function with zero arguments.
-  if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
-    return res_handle;
-  }
-
-  parser_parse_value_arguments(parser, res_handle, arena);
-
-  return res_handle;
+  return new_ast(&res, arena);
 }
 
 // postfixUnarySuffix:
@@ -4725,17 +4726,17 @@ static Ast_handle parser_parse_statements(Parser *parser, Arena *arena) {
   if (ast_handle_is_nil(stmt_handle))
     return stmt_handle;
 
-  Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
+  Ast res = {.kind = AST_KIND_LIST, .lhs = stmt_handle};
   const Ast_handle res_handle = new_ast(&res, arena);
-  Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
-  res_ptr->nodes_list.next = &res_ptr->nodes_list;
+  Ast_handle it_handle = res_handle;
 
-  List *last = &res_ptr->nodes_list;
-  do {
-    List *const new = &ast_handle_to_ptr(stmt_handle, *arena)->nodes_list;
-    last = list_add(res_ptr, last, new);
-  } while (
-      !ast_handle_is_nil(stmt_handle = parser_parse_statement(parser, arena)));
+  while (
+      !ast_handle_is_nil(stmt_handle = parser_parse_statement(parser, arena))) {
+    const Ast stmt_list = {.kind = AST_KIND_LIST, .lhs = stmt_handle};
+    const Ast_handle stmt_list_handle = new_ast(&stmt_list, arena);
+    ast_handle_to_ptr(it_handle, *arena)->rhs = stmt_list_handle;
+    it_handle = stmt_list_handle;
+  }
 
   return res_handle;
 }
@@ -4830,17 +4831,18 @@ static Ast_handle parser_parse_function_value_parameters(Parser *parser,
   if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN))
     return ast_handle_nil;
 
-  Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
+  Ast res = {.kind = AST_KIND_LIST};
   const Ast_handle res_handle = new_ast(&res, arena);
-  Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
-  res_ptr->nodes_list.next = &res_ptr->nodes_list;
 
-  List *last = &res_ptr->nodes_list;
+  Ast_handle it_handle = res_handle;
   do {
     const Ast_handle param_handle =
         parser_parse_function_value_parameter(parser, arena);
-    List *const new = &ast_handle_to_ptr(param_handle, *arena)->nodes_list;
-    last = list_add(res_ptr, last, new);
+
+    const Ast param_list = {.kind = AST_KIND_LIST, .lhs = param_handle};
+    const Ast_handle param_list_handle = new_ast(&param_list, arena);
+    ast_handle_to_ptr(it_handle, *arena)->rhs = param_list_handle;
+    it_handle = param_list_handle;
   } while (parser_match_token(parser, TOKEN_KIND_COMMA));
 
   parser_expect_token(parser, TOKEN_KIND_RIGHT_PAREN,
@@ -5002,20 +5004,19 @@ static Ast_handle parser_parse_kotlin_file(Parser *parser, Arena *arena) {
   pg_assert(parser->tokens_i <= parser->lexer->tokens.len);
   pg_assert(!array32_is_empty(parser->lexer->tokens));
 
-  Ast res = {.kind = AST_KIND_LIST, .nodes_list.next = &res.nodes_list};
+  Ast res = {.kind = AST_KIND_LIST};
   const Ast_handle res_handle = new_ast(&res, arena);
-  Ast *const res_ptr = ast_handle_to_ptr(res_handle, *arena);
-  res_ptr->nodes_list.next = &res_ptr->nodes_list;
-
-  List *last = &res_ptr->nodes_list;
+  Ast_handle it_handle = res_handle;
 
   // TODO: package, import, etc.
 
   Ast_handle stmt_handle = ast_handle_nil;
   while (!ast_handle_is_nil(stmt_handle =
                                 parser_parse_top_level_object(parser, arena))) {
-    List *const new = &ast_handle_to_ptr(stmt_handle, *arena)->nodes_list;
-    last = list_add(res_ptr, last, new);
+    const Ast stmt_list = {.kind = AST_KIND_LIST, .lhs = stmt_handle};
+    const Ast_handle stmt_list_handle = new_ast(&stmt_list, arena);
+    ast_handle_to_ptr(it_handle, *arena)->rhs = stmt_list_handle;
+    it_handle = stmt_list_handle;
   }
 
   if (parser->tokens_i != parser->lexer->tokens.len) {
@@ -6930,10 +6931,8 @@ resolver_user_defined_function_signatures(Resolver *resolver,
       const Ast *const lhs = ast_handle_to_ptr(node->lhs, *arena);
       pg_assert(lhs->kind == AST_KIND_LIST);
 
-      // Probably should change `argument_type_handles` to a list as well to
-      // avoid O(n) traversal here.
       type.v.method.argument_type_handles =
-          array32_make(Type_handle, 0, list_count(&lhs->nodes_list), arena);
+          array32_make(Type_handle, 0, 255, arena);
 
       Ast *it = NULL;
       list_for_each_entry(Ast, it, node) {
@@ -8503,18 +8502,15 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
         const Ast *const rhs = ast_handle_to_ptr(node->rhs, *arena);
         pg_assert(rhs->kind == AST_KIND_LIST);
 
-        if (list_is_empty(&rhs->nodes_list)) {
+        // FIXME: Hack, need a real CFG!
+        const List *const last = list_last(&rhs->nodes_list);
+        const Ast *const last_node = container_of(last, Ast, nodes_list);
+        if (last_node->kind != AST_KIND_RETURN) {
           codegen_emit_return_nothing(gen, arena);
-        } else {
-          // FIXME: Hack, need a real CFG!
-          const List *const last = list_last(&rhs->nodes_list);
-          const Ast *const last_node = container_of(last, Ast, nodes_list);
-          if (last_node->kind != AST_KIND_RETURN) {
-            codegen_emit_return_nothing(gen, arena);
-          }
         }
       }
     }
+  
 
     codegen_end_scope(gen);
 
@@ -8553,70 +8549,70 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     array32_clear(&gen->stack_map_frames);
     break;
   }
-  case AST_KIND_UNARY: {
+case AST_KIND_UNARY: {
 
-    switch (token.kind) {
-    case TOKEN_KIND_NOT:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_bipush(gen, 1, arena);
-      codegen_emit_ixor(gen, arena);
-      break;
-
-    case TOKEN_KIND_MINUS:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_neg(gen, arena);
-      break;
-
-    default:
-      pg_assert(0 && "unimplemented");
-    }
+  switch (token.kind) {
+  case TOKEN_KIND_NOT:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_bipush(gen, 1, arena);
+    codegen_emit_ixor(gen, arena);
     break;
+
+  case TOKEN_KIND_MINUS:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_neg(gen, arena);
+    break;
+
+  default:
+    pg_assert(0 && "unimplemented");
   }
-  case AST_KIND_BINARY: {
-    pg_assert(gen->frame != NULL);
+  break;
+}
+case AST_KIND_BINARY: {
+  pg_assert(gen->frame != NULL);
 
-    switch (token.kind) {
-    case TOKEN_KIND_NONE:
-      break; // Nothing to do.
+  switch (token.kind) {
+  case TOKEN_KIND_NONE:
+    break; // Nothing to do.
 
-    case TOKEN_KIND_PLUS:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_add(gen, arena);
-      break;
+  case TOKEN_KIND_PLUS:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_add(gen, arena);
+    break;
 
-    case TOKEN_KIND_MINUS:
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_neg(gen, arena);
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_add(gen, arena);
-      break;
+  case TOKEN_KIND_MINUS:
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_neg(gen, arena);
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_add(gen, arena);
+    break;
 
-    case TOKEN_KIND_STAR:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_mul(gen, arena);
-      break;
+  case TOKEN_KIND_STAR:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_mul(gen, arena);
+    break;
 
-    case TOKEN_KIND_SLASH:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_div(gen, arena);
-      break;
+  case TOKEN_KIND_SLASH:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_div(gen, arena);
+    break;
 
-    case TOKEN_KIND_PERCENT:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_rem(gen, arena);
-      break;
+  case TOKEN_KIND_PERCENT:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_rem(gen, arena);
+    break;
 
-    case TOKEN_KIND_AMPERSAND_AMPERSAND: {
-      // Since the if_xxx opcodes always pop the condition off the stack,
-      // there is no simple way to push 0 on the stack if `lhs` is falsey.
-      // We have to use this contrived way, short of advanced CFG analysis.
-      // :(
-      //
-      // clang-format off
+  case TOKEN_KIND_AMPERSAND_AMPERSAND: {
+    // Since the if_xxx opcodes always pop the condition off the stack,
+    // there is no simple way to push 0 on the stack if `lhs` is falsey.
+    // We have to use this contrived way, short of advanced CFG analysis.
+    // :(
+    //
+    // clang-format off
       //
       // a && b
       // 
@@ -8643,50 +8639,50 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       //  +   x  .  |--> bipush 0
       //  +      ......> ...           
       //
-      // clang-format on
-      codegen_emit_node(gen, class_file, node->lhs, arena);
+    // clang-format on
+    codegen_emit_node(gen, class_file, node->lhs, arena);
 
-      jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFEQ, arena);
-      const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
-      jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
-      codegen_frame_stack_pop(gen->frame);
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFEQ, arena);
+    const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
+    jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
+    codegen_frame_stack_pop(gen->frame);
 
-      const codegen_frame *const frame_before_rhs =
-          codegen_frame_clone(gen->frame, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
+    const codegen_frame *const frame_before_rhs =
+        codegen_frame_clone(gen->frame, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
 
-      const codegen_frame *const frame_after_rhs =
-          codegen_frame_clone(gen->frame, arena);
-      const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
+    const codegen_frame *const frame_after_rhs =
+        codegen_frame_clone(gen->frame, arena);
+    const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
-      {
-        const u16 pc_end = (u16)gen->code->bytecode.len;
-        codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
-        stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
-                                     pc_end, arena);
-      }
-
-      // Restore the frame as if the `rhs` branch never executed.
-      gen->frame = codegen_frame_clone(frame_before_rhs, arena);
-      codegen_emit_bipush(gen, false, arena);
-
-      {
-        const u16 pc_end = (u16)gen->code->bytecode.len;
-        codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
-        stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
-                                     pc_end, arena);
-      }
-
-      break;
+    {
+      const u16 pc_end = (u16)gen->code->bytecode.len;
+      codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
+      stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
+                                   pc_end, arena);
     }
 
-    case TOKEN_KIND_PIPE_PIPE: {
-      // Since the if_xxx opcodes always pop the condition off the stack,
-      // there is no simple way to push 0 on the stack if `lhs` is falsey.
-      // We have to use this contrived way, short of advanced CFG analysis.
-      // :(
-      //
-      // clang-format off
+    // Restore the frame as if the `rhs` branch never executed.
+    gen->frame = codegen_frame_clone(frame_before_rhs, arena);
+    codegen_emit_bipush(gen, false, arena);
+
+    {
+      const u16 pc_end = (u16)gen->code->bytecode.len;
+      codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
+      stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
+                                   pc_end, arena);
+    }
+
+    break;
+  }
+
+  case TOKEN_KIND_PIPE_PIPE: {
+    // Since the if_xxx opcodes always pop the condition off the stack,
+    // there is no simple way to push 0 on the stack if `lhs` is falsey.
+    // We have to use this contrived way, short of advanced CFG analysis.
+    // :(
+    //
+    // clang-format off
       //
       // a || b
       // 
@@ -8714,288 +8710,288 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
       //  +   x  .  |--> bipush 1
       //  +      ......> ...           
       //
-      // clang-format on
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-
-      jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFNE, arena);
-      const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
-      jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
-      codegen_frame_stack_pop(gen->frame);
-
-      const codegen_frame *const frame_before_rhs =
-          codegen_frame_clone(gen->frame, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-
-      const codegen_frame *const frame_after_rhs =
-          codegen_frame_clone(gen->frame, arena);
-      const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
-
-      {
-        const u16 pc_end = (u16)gen->code->bytecode.len;
-        codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
-        stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
-                                     pc_end, arena);
-      }
-
-      // Restore the frame as if the `rhs` branch never executed.
-      gen->frame = codegen_frame_clone(frame_before_rhs, arena);
-      codegen_emit_bipush(gen, true, arena);
-
-      {
-        const u16 pc_end = (u16)gen->code->bytecode.len;
-        codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
-        stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
-                                     pc_end, arena);
-      }
-
-      break;
-    }
-
-    case TOKEN_KIND_EQUAL_EQUAL:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_eq(gen, arena);
-      break;
-
-    case TOKEN_KIND_LE:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_le(gen, arena);
-      break;
-
-    case TOKEN_KIND_LT:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_lt(gen, arena);
-      break;
-
-    case TOKEN_KIND_GT:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_gt(gen, arena);
-      break;
-
-    case TOKEN_KIND_GE:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_ge(gen, arena);
-      break;
-
-    case TOKEN_KIND_NOT_EQUAL:
-      codegen_emit_node(gen, class_file, node->lhs, arena);
-      codegen_emit_node(gen, class_file, node->rhs, arena);
-      codegen_emit_ne(gen, arena);
-      break;
-
-    default:
-      pg_assert(0 && "todo");
-    }
-    break;
-  }
-  case AST_KIND_LIST: {
-    if (gen->code != NULL) {
-      pg_assert(gen->frame != NULL);
-    }
-
-    Ast *it = NULL;
-    list_for_each_entry(Ast, it, node) {
-      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
-
-      if (gen->frame != NULL) {
-        pg_assert(array32_is_empty(gen->frame->stack));
-      }
-      codegen_emit_node(gen, class_file, child_handle, arena);
-
-      // If the 'statement' was in fact an expression, we need to pop it
-      // out.
-      // IMPROVEMENT: If we emit the pop earlier, some stack map frames
-      // don't have to be a full_frame but can be something smaller e.g.
-      // append_frame.
-      const Ast *const child = ast_handle_to_ptr(child_handle, *arena);
-      if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
-          gen->frame != NULL) {
-        while (!array32_is_empty(gen->frame->stack))
-          codegen_emit_pop(gen, arena);
-      }
-    }
-
-    break;
-  }
-  case AST_KIND_VAR_DEFINITION: {
-    pg_assert(gen->frame != NULL);
-    pg_assert(!type_handle_handles_nil(node->type_handle));
-
+    // clang-format on
     codegen_emit_node(gen, class_file, node->lhs, arena);
+
+    jvm_code_push_u8(&gen->code->bytecode, BYTECODE_IFNE, arena);
+    const u16 conditional_jump_location = (u16)gen->code->bytecode.len;
+    jvm_code_array_push_u16(&gen->code->bytecode, 0, arena);
+    codegen_frame_stack_pop(gen->frame);
+
+    const codegen_frame *const frame_before_rhs =
+        codegen_frame_clone(gen->frame, arena);
     codegen_emit_node(gen, class_file, node->rhs, arena);
 
-    const Jvm_verification_info verification_info =
-        codegen_type_to_verification_info(
-            resolver_eval_type(node->type_handle, *arena));
-    const Jvm_variable variable = {
-        .ast_handle = ast_handle,
-        .type_handle = node->type_handle,
-        .scope_depth = gen->frame->scope_depth,
-        .verification_info = verification_info,
-    };
-
-    u16 logical_local_index = 0;
-    u16 physical_local_index = 0;
-    codegen_frame_locals_push(gen, &variable, &logical_local_index,
-                              &physical_local_index, arena);
-
-    codegen_emit_store_variable(gen, (u8)physical_local_index, arena);
-    break;
-  }
-  case AST_KIND_VAR_REFERENCE: {
-    pg_assert(gen->frame != NULL);
-    pg_assert(!type_handle_handles_nil(node->type_handle));
-
-    pg_assert(ast_handle_to_ptr(node->lhs, *arena)->kind ==
-                  AST_KIND_VAR_DEFINITION ||
-              ast_handle_to_ptr(node->lhs, *arena)->kind ==
-                  AST_KIND_FUNCTION_PARAMETER);
-
-    u16 logical_local_index = 0;
-    u16 physical_local_index = 0;
-    pg_assert(jvm_find_variable(gen->frame, node->lhs, &logical_local_index,
-                                &physical_local_index));
-
-    const Jvm_verification_info verification_info =
-        gen->frame->locals.data[logical_local_index].verification_info;
-    if (verification_info.kind == VERIFICATION_INFO_INT)
-      codegen_emit_load_variable_int(gen, (u8)physical_local_index, arena);
-    else if (verification_info.kind == VERIFICATION_INFO_LONG)
-      codegen_emit_load_variable_long(gen, (u8)physical_local_index, arena);
-    else
-      pg_assert(0 && "todo");
-
-    break;
-  }
-  case AST_KIND_IF: {
-    codegen_emit_if_then_else(gen, class_file, ast_handle, arena);
-    break;
-  }
-  case AST_KIND_WHILE_LOOP: {
-    const u16 pc_start = (u16)gen->code->bytecode.len;
-    const codegen_frame *const frame_before_loop =
+    const codegen_frame *const frame_after_rhs =
         codegen_frame_clone(gen->frame, arena);
+    const u16 unconditional_jump_location = codegen_emit_jump(gen, arena);
 
-    codegen_emit_node(gen, class_file, node->lhs, arena); // Condition.
-    const u16 conditional_jump =
-        codegen_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
-    codegen_emit_node(gen, class_file, node->rhs, arena); // Body.
-    const u16 unconditional_jump = codegen_emit_jump(gen, arena);
-
-    const i16 unconditional_jump_delta =
-        (i16) - ((i16)unconditional_jump - (i16)1 - (i16)pc_start);
-    gen->code->bytecode.data[unconditional_jump + 0] =
-        (u8)(((u16)(unconditional_jump_delta & 0xff00)) >> 8);
-    gen->code->bytecode.data[unconditional_jump + 1] =
-        (u8)(((u16)(unconditional_jump_delta & 0x00ff)) >> 0);
-
-    const u16 pc_end = (u16)gen->code->bytecode.len;
-
-    // This stack map frame covers the unconditional jump.
-    stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
-                                 pc_start, arena);
-
-    // Patch first, conditional, jump.
     {
-      codegen_patch_jump_at(gen, conditional_jump, pc_end);
-      stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
+      const u16 pc_end = (u16)gen->code->bytecode.len;
+      codegen_patch_jump_at(gen, conditional_jump_location, pc_end);
+      stack_map_record_frame_at_pc(frame_before_rhs, &gen->stack_map_frames,
+                                   pc_end, arena);
+    }
+
+    // Restore the frame as if the `rhs` branch never executed.
+    gen->frame = codegen_frame_clone(frame_before_rhs, arena);
+    codegen_emit_bipush(gen, true, arena);
+
+    {
+      const u16 pc_end = (u16)gen->code->bytecode.len;
+      codegen_patch_jump_at(gen, unconditional_jump_location, pc_end);
+      stack_map_record_frame_at_pc(frame_after_rhs, &gen->stack_map_frames,
                                    pc_end, arena);
     }
 
     break;
   }
-  case AST_KIND_STRING: {
-    const u32 length =
-        lex_string_length(gen->resolver->parser->buf, token.source_offset);
-    Str s = {
-        .data = gen->resolver->parser->buf.data + token.source_offset,
-        .len = length,
-    };
-    const u16 string_i =
-        jvm_add_constant_string(&class_file->constant_pool, s, arena);
-    const u16 jstring_i =
-        jvm_add_constant_jstring(&class_file->constant_pool, string_i, arena);
 
-    // TODO: Deduplicate.
-    const Jvm_constant_pool_entry string_class_info = {
-        .kind = CONSTANT_POOL_KIND_CLASS_INFO,
-        .v = {
-            .java_class_name =
-                jvm_add_constant_string(&class_file->constant_pool,
-                                        str_from_c("java/lang/String"), arena),
-        }};
-
-    const Jvm_verification_info verification_info = {
-        .kind = VERIFICATION_INFO_OBJECT,
-        .extra_data = jvm_constant_pool_push(&class_file->constant_pool,
-                                             &string_class_info, arena),
-    };
-    codegen_emit_load_constant_single_word(gen, jstring_i, verification_info,
-                                           arena);
-
-    break;
-  }
-  case AST_KIND_CLASS_REFERENCE: {
-    pg_assert(0 && "todo");
-    break;
-  }
-  case AST_KIND_NAVIGATION: {
-    pg_assert(0 && "todo");
-    break;
-  }
-  case AST_KIND_FUNCTION_PARAMETER: {
-    const Jvm_verification_info verification_info =
-        codegen_type_to_verification_info(
-            resolver_eval_type(node->type_handle, *arena));
-    const Jvm_variable argument = {
-        .ast_handle = ast_handle,
-        .type_handle = node->type_handle,
-        .scope_depth = gen->frame->scope_depth,
-        .verification_info = verification_info,
-    };
-    u16 logical_local_index = 0;
-    u16 physical_local_index = 0;
-    codegen_frame_locals_push(gen, &argument, &logical_local_index,
-                              &physical_local_index, arena);
-    break;
-  }
-
-  case AST_KIND_TYPE:
-    // No-op. Although at some point we might need to generate RTTI or such.
-    return;
-
-  case AST_KIND_THEN_ELSE:
-  case AST_KIND_UNRESOLVED_NAME:
-    pg_assert(0 && "unreachable");
-
-  case AST_KIND_ASSIGNMENT: {
-    const Ast *const lhs = ast_handle_to_ptr(node->lhs, *arena);
-    pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
-
-    codegen_emit_node(gen, class_file, node->rhs, arena);
-
-    u16 logical_local_index = 0;
-    u16 physical_local_index = 0;
-    pg_assert(jvm_find_variable(gen->frame, lhs->lhs, &logical_local_index,
-                                &physical_local_index));
-
-    codegen_emit_store_variable(gen, (u8)physical_local_index, arena);
-    break;
-  }
-
-  case AST_KIND_RETURN:
+  case TOKEN_KIND_EQUAL_EQUAL:
     codegen_emit_node(gen, class_file, node->lhs, arena);
-    type->kind == TYPE_UNIT ? codegen_emit_return_nothing(gen, arena)
-                            : codegen_emit_return_value(gen, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_eq(gen, arena);
     break;
 
-  case AST_KIND_MAX:
-    pg_assert(0 && "unreachable");
+  case TOKEN_KIND_LE:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_le(gen, arena);
+    break;
+
+  case TOKEN_KIND_LT:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_lt(gen, arena);
+    break;
+
+  case TOKEN_KIND_GT:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_gt(gen, arena);
+    break;
+
+  case TOKEN_KIND_GE:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_ge(gen, arena);
+    break;
+
+  case TOKEN_KIND_NOT_EQUAL:
+    codegen_emit_node(gen, class_file, node->lhs, arena);
+    codegen_emit_node(gen, class_file, node->rhs, arena);
+    codegen_emit_ne(gen, arena);
+    break;
+
+  default:
+    pg_assert(0 && "todo");
   }
+  break;
+}
+case AST_KIND_LIST: {
+  if (gen->code != NULL) {
+    pg_assert(gen->frame != NULL);
+  }
+
+  Ast *it = NULL;
+  list_for_each_entry(Ast, it, node) {
+    const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+
+    if (gen->frame != NULL) {
+      pg_assert(array32_is_empty(gen->frame->stack));
+    }
+    codegen_emit_node(gen, class_file, child_handle, arena);
+
+    // If the 'statement' was in fact an expression, we need to pop it
+    // out.
+    // IMPROVEMENT: If we emit the pop earlier, some stack map frames
+    // don't have to be a full_frame but can be something smaller e.g.
+    // append_frame.
+    const Ast *const child = ast_handle_to_ptr(child_handle, *arena);
+    if (child->kind != AST_KIND_RETURN && // Avoid: `return; pop;`
+        gen->frame != NULL) {
+      while (!array32_is_empty(gen->frame->stack))
+        codegen_emit_pop(gen, arena);
+    }
+  }
+
+  break;
+}
+case AST_KIND_VAR_DEFINITION: {
+  pg_assert(gen->frame != NULL);
+  pg_assert(!type_handle_handles_nil(node->type_handle));
+
+  codegen_emit_node(gen, class_file, node->lhs, arena);
+  codegen_emit_node(gen, class_file, node->rhs, arena);
+
+  const Jvm_verification_info verification_info =
+      codegen_type_to_verification_info(
+          resolver_eval_type(node->type_handle, *arena));
+  const Jvm_variable variable = {
+      .ast_handle = ast_handle,
+      .type_handle = node->type_handle,
+      .scope_depth = gen->frame->scope_depth,
+      .verification_info = verification_info,
+  };
+
+  u16 logical_local_index = 0;
+  u16 physical_local_index = 0;
+  codegen_frame_locals_push(gen, &variable, &logical_local_index,
+                            &physical_local_index, arena);
+
+  codegen_emit_store_variable(gen, (u8)physical_local_index, arena);
+  break;
+}
+case AST_KIND_VAR_REFERENCE: {
+  pg_assert(gen->frame != NULL);
+  pg_assert(!type_handle_handles_nil(node->type_handle));
+
+  pg_assert(ast_handle_to_ptr(node->lhs, *arena)->kind ==
+                AST_KIND_VAR_DEFINITION ||
+            ast_handle_to_ptr(node->lhs, *arena)->kind ==
+                AST_KIND_FUNCTION_PARAMETER);
+
+  u16 logical_local_index = 0;
+  u16 physical_local_index = 0;
+  pg_assert(jvm_find_variable(gen->frame, node->lhs, &logical_local_index,
+                              &physical_local_index));
+
+  const Jvm_verification_info verification_info =
+      gen->frame->locals.data[logical_local_index].verification_info;
+  if (verification_info.kind == VERIFICATION_INFO_INT)
+    codegen_emit_load_variable_int(gen, (u8)physical_local_index, arena);
+  else if (verification_info.kind == VERIFICATION_INFO_LONG)
+    codegen_emit_load_variable_long(gen, (u8)physical_local_index, arena);
+  else
+    pg_assert(0 && "todo");
+
+  break;
+}
+case AST_KIND_IF: {
+  codegen_emit_if_then_else(gen, class_file, ast_handle, arena);
+  break;
+}
+case AST_KIND_WHILE_LOOP: {
+  const u16 pc_start = (u16)gen->code->bytecode.len;
+  const codegen_frame *const frame_before_loop =
+      codegen_frame_clone(gen->frame, arena);
+
+  codegen_emit_node(gen, class_file, node->lhs, arena); // Condition.
+  const u16 conditional_jump =
+      codegen_emit_jump_conditionally(gen, BYTECODE_IFEQ, arena);
+  codegen_emit_node(gen, class_file, node->rhs, arena); // Body.
+  const u16 unconditional_jump = codegen_emit_jump(gen, arena);
+
+  const i16 unconditional_jump_delta =
+      (i16) - ((i16)unconditional_jump - (i16)1 - (i16)pc_start);
+  gen->code->bytecode.data[unconditional_jump + 0] =
+      (u8)(((u16)(unconditional_jump_delta & 0xff00)) >> 8);
+  gen->code->bytecode.data[unconditional_jump + 1] =
+      (u8)(((u16)(unconditional_jump_delta & 0x00ff)) >> 0);
+
+  const u16 pc_end = (u16)gen->code->bytecode.len;
+
+  // This stack map frame covers the unconditional jump.
+  stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
+                               pc_start, arena);
+
+  // Patch first, conditional, jump.
+  {
+    codegen_patch_jump_at(gen, conditional_jump, pc_end);
+    stack_map_record_frame_at_pc(frame_before_loop, &gen->stack_map_frames,
+                                 pc_end, arena);
+  }
+
+  break;
+}
+case AST_KIND_STRING: {
+  const u32 length =
+      lex_string_length(gen->resolver->parser->buf, token.source_offset);
+  Str s = {
+      .data = gen->resolver->parser->buf.data + token.source_offset,
+      .len = length,
+  };
+  const u16 string_i =
+      jvm_add_constant_string(&class_file->constant_pool, s, arena);
+  const u16 jstring_i =
+      jvm_add_constant_jstring(&class_file->constant_pool, string_i, arena);
+
+  // TODO: Deduplicate.
+  const Jvm_constant_pool_entry string_class_info = {
+      .kind = CONSTANT_POOL_KIND_CLASS_INFO,
+      .v = {
+          .java_class_name =
+              jvm_add_constant_string(&class_file->constant_pool,
+                                      str_from_c("java/lang/String"), arena),
+      }};
+
+  const Jvm_verification_info verification_info = {
+      .kind = VERIFICATION_INFO_OBJECT,
+      .extra_data = jvm_constant_pool_push(&class_file->constant_pool,
+                                           &string_class_info, arena),
+  };
+  codegen_emit_load_constant_single_word(gen, jstring_i, verification_info,
+                                         arena);
+
+  break;
+}
+case AST_KIND_CLASS_REFERENCE: {
+  pg_assert(0 && "todo");
+  break;
+}
+case AST_KIND_NAVIGATION: {
+  pg_assert(0 && "todo");
+  break;
+}
+case AST_KIND_FUNCTION_PARAMETER: {
+  const Jvm_verification_info verification_info =
+      codegen_type_to_verification_info(
+          resolver_eval_type(node->type_handle, *arena));
+  const Jvm_variable argument = {
+      .ast_handle = ast_handle,
+      .type_handle = node->type_handle,
+      .scope_depth = gen->frame->scope_depth,
+      .verification_info = verification_info,
+  };
+  u16 logical_local_index = 0;
+  u16 physical_local_index = 0;
+  codegen_frame_locals_push(gen, &argument, &logical_local_index,
+                            &physical_local_index, arena);
+  break;
+}
+
+case AST_KIND_TYPE:
+  // No-op. Although at some point we might need to generate RTTI or such.
+  return;
+
+case AST_KIND_THEN_ELSE:
+case AST_KIND_UNRESOLVED_NAME:
+  pg_assert(0 && "unreachable");
+
+case AST_KIND_ASSIGNMENT: {
+  const Ast *const lhs = ast_handle_to_ptr(node->lhs, *arena);
+  pg_assert(lhs->kind == AST_KIND_VAR_REFERENCE);
+
+  codegen_emit_node(gen, class_file, node->rhs, arena);
+
+  u16 logical_local_index = 0;
+  u16 physical_local_index = 0;
+  pg_assert(jvm_find_variable(gen->frame, lhs->lhs, &logical_local_index,
+                              &physical_local_index));
+
+  codegen_emit_store_variable(gen, (u8)physical_local_index, arena);
+  break;
+}
+
+case AST_KIND_RETURN:
+  codegen_emit_node(gen, class_file, node->lhs, arena);
+  type->kind == TYPE_UNIT ? codegen_emit_return_nothing(gen, arena)
+                          : codegen_emit_return_value(gen, arena);
+  break;
+
+case AST_KIND_MAX:
+  pg_assert(0 && "unreachable");
+}
 }
 
 static Str codegen_make_class_name_from_path(Str path, Arena *arena) {
