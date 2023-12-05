@@ -229,7 +229,7 @@ int main(int argc, char *argv[]) {
     LOG("After codegen: arena_available=%lu", arena.end - arena.start);
 
     {
-      LOG("\n----------- Verifiying%s", "");
+      LOG("\n----------- Verifying%s", "");
 
       Read_result read_res =
           ut_file_read_all(class_file_path_c_str, &scratch_arena);

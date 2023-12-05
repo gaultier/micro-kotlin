@@ -462,7 +462,7 @@ typedef struct {
   Type_handle current_type_handle;
   u32 scope_depth;
   Ast_handle current_function_handle;
-  pg_pad(4);
+  Type_handle this_class_type_handle;
 } Resolver;
 
 static Str codegen_make_class_name_from_path(Str path, Arena *arena);
@@ -482,7 +482,12 @@ static void resolver_init(Resolver *resolver, Parser *parser,
   resolver->class_path_entries = class_path_entries;
   resolver->this_class_name =
       codegen_make_class_name_from_path(class_file_path, arena);
-
+  resolver->this_class_type_handle = new_type(
+      &(Type){
+          .kind = TYPE_INSTANCE,
+          .this_class_name = resolver->this_class_name,
+      },
+      arena);
   resolver->variables = array_make(Type_variable, 0, 512, arena);
   resolver->imported_package_names = array_make(Str, 0, 256, arena);
   *array_push(&resolver->imported_package_names, arena) = str_from_c("kotlin");
@@ -5905,7 +5910,8 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
   if (!cli_log_verbose)
     return;
 
-  if (ast_handle_is_nil(ast_handle)) return;
+  if (ast_handle_is_nil(ast_handle))
+    return;
 
   const Ast *const node = ast_handle_to_ptr(ast_handle, handles_arena);
   if (node->kind == AST_KIND_NONE)
@@ -6508,7 +6514,7 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
                resolver_add_type(resolver, &(Type){.kind = TYPE_UNIT}, arena);
   }
   case AST_KIND_FUNCTION_DEFINITION: {
-    // Already resolved by resolver_collect_user_defined_function_signatures().
+    // Already resolved by resolver_user_defined_function_signatures().
     pg_assert(!type_handle_handles_nil(node->type_handle));
 
     typechecker_begin_scope(resolver);
@@ -6892,6 +6898,7 @@ resolver_user_defined_function_signatures(Resolver *resolver,
                 .return_type_handle = return_type_handle,
                 .source_file_name = resolver->parser->lexer->file_path,
                 .access_flags = ACCESS_FLAGS_PUBLIC | ACCESS_FLAGS_STATIC,
+                .this_class_type_handle = resolver->this_class_type_handle,
             },
     };
     u32 column = 0;
