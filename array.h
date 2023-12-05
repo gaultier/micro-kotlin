@@ -153,6 +153,15 @@ static const List *list_last(const List *l) {
   return it;
 }
 
+static u32 list_count(const List *l) {
+  u32 res = 0;
+
+  List *it = NULL;
+  list_for_each(it, l) { res += 1; }
+
+  return res;
+}
+
 void do_foo() {
   Foo f1 = {.x = 1};
   Foo f2 = {.x = 2};

@@ -329,7 +329,6 @@ struct Ast {
   Ast_handle lhs;
   Ast_handle rhs;
   Type_handle type_handle; // TODO: should it be separate?
-  Array32(Ast_handle) nodes;
   u64 num;
   u16 flags;
   Ast_kind kind;
@@ -4385,22 +4384,24 @@ static Ast_handle parser_parse_navigation_suffix(Parser *parser,
 // valueArguments:
 //     '(' {NL} [valueArgument {{NL} ',' {NL} valueArgument} [{NL} ','] {NL}]
 //     ')'
-static Array32(Ast_handle)
-    parser_parse_value_arguments(Parser *parser, Arena *arena) {
+static void parser_parse_value_arguments(Parser *parser,
+                                         Ast_handle parent_handle,
+                                         Arena *arena) {
 
-  Array32(Ast_handle) nodes = array32_make(Ast_handle, 0, 256, arena);
+  List *head = &ast_handle_to_ptr(parent_handle, *arena)->nodes_list;
+  List *last = head;
 
   while (!parser_is_at_end(parser)) {
-    Ast_handle argument_i = parser_parse_expression(parser, arena);
-    if (ast_handle_is_nil(argument_i)) {
+    const Ast_handle argument_handle = parser_parse_expression(parser, arena);
+    if (ast_handle_is_nil(argument_handle)) {
       const Token main_token = parser->lexer->tokens.data[parser->tokens_i];
       parser_error(
           parser, main_token,
           "Expected expression or closing right parenthesis for function "
           "arguments");
-      return nodes;
+      return;
     }
-    *array32_push(&nodes, arena) = argument_i;
+    last = list_add(head, last, ast_handle_to_ptr(argument_handle, *arena));
 
     parser_match_token(parser, TOKEN_KIND_COMMA);
 
@@ -4412,7 +4413,6 @@ static Array32(Ast_handle)
     parser_error(parser, *array32_last(parser->lexer->tokens),
                  "Expect matching right parenthesis after function call");
   }
-  return nodes;
 }
 
 // callSuffix:
@@ -4423,19 +4423,22 @@ static Ast_handle parser_parse_call_suffix(Parser *parser, u32 *main_token_i,
     return ast_handle_nil;
 
   *main_token_i = parser->tokens_i - 1;
-  Ast node = {
+  Ast res = {
       .kind = AST_KIND_CALL,
       .main_token_i = parser->tokens_i - 1,
   };
+  const Ast_handle res_handle = new_ast(&res, arena);
 
   // Calling a function with zero arguments.
   if (parser_match_token(parser, TOKEN_KIND_RIGHT_PAREN)) {
-    return new_ast(&node, arena);
+    return res_handle;
   }
 
-  node.nodes = parser_parse_value_arguments(parser, arena);
+  ast_handle_to_ptr(res_handle, *arena)->nodes_list.next =
+      &ast_handle_to_ptr(res_handle, *arena)->nodes_list;
+  parser_parse_value_arguments(parser, res_handle, arena);
 
-  return new_ast(&node, arena);
+  return res_handle;
 }
 
 // postfixUnarySuffix:
@@ -4883,7 +4886,7 @@ static Ast_handle parser_parse_function_declaration(Parser *parser,
       .main_token_i = start_token,
   };
 
-  const Ast_handle fn_i = parser->current_function_handle =
+  const Ast_handle fn_handle = parser->current_function_handle =
       new_ast(&node, arena);
 
   parser_expect_token(parser, TOKEN_KIND_LEFT_PAREN,
@@ -4902,7 +4905,7 @@ static Ast_handle parser_parse_function_declaration(Parser *parser,
 
   parser->current_function_handle = ast_handle_nil;
 
-  return fn_i;
+  return fn_handle;
 }
 
 static void parser_sync_if_panicked(Parser *parser) {
@@ -5083,16 +5086,16 @@ static void parser_ast_fprint(const Parser *parser, Ast_handle ast_handle,
     break;
   }
   case AST_KIND_CALL: {
-    LOG("[%u] %.*s %.*s (at %.*s:%u:%u:%u), %u children", *count,
-        (int)kind_string.len, kind_string.data, (int)token_string.len,
-        token_string.data, (int)parser->lexer->file_path.len,
-        parser->lexer->file_path.data, line, column, token.source_offset,
-        node->nodes.len);
+    LOG("[%u] %.*s %.*s (at %.*s:%u:%u:%u)", *count, (int)kind_string.len,
+        kind_string.data, (int)token_string.len, token_string.data,
+        (int)parser->lexer->file_path.len, parser->lexer->file_path.data, line,
+        column, token.source_offset);
 
-    for (u64 i = 0; i < node->nodes.len; i++) {
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, arena);
       *count += 1;
-      parser_ast_fprint(parser, node->nodes.data[i], file, indent + 2, count,
-                        arena);
+      parser_ast_fprint(parser, child_handle, file, indent + 2, count, arena);
     }
     break;
   }
@@ -5976,16 +5979,19 @@ static void resolver_ast_fprint(const Resolver *resolver, Ast_handle ast_handle,
   case AST_KIND_CALL: {
 
     human_type = resolver_function_to_human_string(node->type_handle, arena);
-    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u), %u children", count,
+    LOG("[%u] %.*s %.*s: %.*s %s (at %.*s:%u:%u:%u)", count,
         (int)kind_string.len, kind_string.data, (int)token_string.len,
         token_string.data, (int)human_type.len, human_type.data, type_kind,
         (int)resolver->parser->lexer->file_path.len,
         resolver->parser->lexer->file_path.data, line, column,
-        token.source_offset, node->nodes.len);
+        token.source_offset);
 
-    for (u64 i = 0; i < node->nodes.len; i++)
-      resolver_ast_fprint(resolver, node->nodes.data[i], file, indent + 2,
-                          ++count, arena);
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+      resolver_ast_fprint(resolver, child_handle, file, indent + 2, ++count,
+                          arena);
+    }
     break;
   }
   default:
@@ -6355,13 +6361,14 @@ static Type_handle resolver_resolve_ast(Resolver *resolver,
 
     // Resolve arguments.
     Array32(Type_handle) call_site_argument_types_i =
-        array32_make(Type_handle, 0, node->nodes.len, &tmp_arena);
+        array32_make(Type_handle, 0, 255, &tmp_arena);
 
-    for (u64 i = 0; i < node->nodes.len; i++) {
-      const Ast_handle ast_handle = node->nodes.data[i];
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
 
       const Type_handle type_handle =
-          resolver_resolve_ast(resolver, ast_handle, tmp_arena, arena);
+          resolver_resolve_ast(resolver, child_handle, tmp_arena, arena);
       *array32_push(&call_site_argument_types_i, &tmp_arena) = type_handle;
     }
 
@@ -6920,8 +6927,10 @@ resolver_user_defined_function_signatures(Resolver *resolver,
       const Ast *const lhs = ast_handle_to_ptr(node->lhs, *arena);
       pg_assert(lhs->kind == AST_KIND_LIST);
 
+      // Probably should change `argument_type_handles` to a list as well to
+      // avoid O(n) traversal here.
       type.v.method.argument_type_handles =
-          array32_make(Type_handle, 0, lhs->nodes.len, arena);
+          array32_make(Type_handle, 0, list_count(&lhs->nodes_list), arena);
 
       Ast *it = NULL;
       list_for_each_entry(Ast, it, node) {
@@ -8337,8 +8346,10 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
     pg_assert(type->this_class_name.len > 0);
     pg_assert(type->kind == TYPE_METHOD || type->kind == TYPE_CONSTRUCTOR);
 
-    for (u64 i = 0; i < node->nodes.len; i++) {
-      codegen_emit_node(gen, class_file, node->nodes.data[i], arena);
+    Ast *it = NULL;
+    list_for_each_entry(Ast, it, node) {
+      const Ast_handle child_handle = ast_ptr_to_handle(it, *arena);
+      codegen_emit_node(gen, class_file, child_handle, arena);
     }
 
     if (type->flags & TYPE_FLAG_INLINE_ONLY) {
@@ -8347,16 +8358,17 @@ static void codegen_emit_node(codegen_generator *gen, Class_file *class_file,
 
       u64 stack_index = array32_last_index(gen->frame->stack);
 
-      for (u64 i = 0; i < node->nodes.len; i++) {
-        const Ast_handle argument_i = node->nodes.data[i];
-        const Ast *const argument = ast_handle_to_ptr(argument_i, *arena);
+      Ast *it = NULL;
+      list_for_each_entry(Ast, it, node) {
+        const Ast_handle argument_handle = ast_ptr_to_handle(it, *arena);
+        const Ast *const argument = ast_handle_to_ptr(argument_handle, *arena);
 
         // Each argument `a, b, c` is now on the stack in order: `[..] [this] a
         // b c` with the corresponding verification info.
         const Jvm_verification_info verification_info =
             gen->frame->stack.data[stack_index];
         const Jvm_variable variable = {
-            .ast_handle = argument_i,
+            .ast_handle = argument_handle,
             .type_handle = argument->type_handle,
             .scope_depth = gen->frame->scope_depth,
             .verification_info = verification_info,
