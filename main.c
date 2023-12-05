@@ -169,7 +169,8 @@ int main(int argc, char *argv[]) {
         .lexer = &lexer,
     };
     const Ast_handle root_handle = parser_parse(&parser, &arena);
-    parser_ast_fprint(&parser, root_handle, stderr, 0, 0, arena);
+    u32 count = 0;
+    parser_ast_fprint(&parser, root_handle, stderr, 0, &count, arena);
 
     if (parser.state != PARSER_STATE_OK)
       return 1; // TODO: Should type checking still proceed?
