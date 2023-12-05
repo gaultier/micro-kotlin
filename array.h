@@ -101,3 +101,61 @@ Array32_struct(isize);
 //     List *last = list->last ? list->last : list;                               \
 //     list->last = last->next = new;                                             \
 //   } while (0)
+
+typedef struct List List;
+
+struct List {
+  List *next;
+};
+
+typedef struct {
+  int x;
+  List list;
+} Foo;
+
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
+
+#define container_of(ptr, type, member)                                        \
+  ((type *)((char *)(List *)ptr - offsetof(type, member)))
+
+static void list_add(List *first, List *last, List *new) {
+  pg_assert(new);
+  pg_assert(first);
+  pg_assert(last);
+
+  new->next = first;
+  last->next = new;
+}
+
+#define list_for_each(pos, head)                                               \
+  for (pos = (head)->next; pos != (head); pos = pos->next)
+
+#define list_for_each_entry(type, pos, head, member)                           \
+  for (pos = container_of((head)->next, type, member); &pos->member != (head); \
+       pos = container_of(pos->member.next, type, member))
+
+void do_foo() {
+  Foo f1 = {.x = 1, .list = {.next = &f1.list}};
+  Foo f2 = {.x = 2, .list = {.next = &f2.list}};
+  Foo f3 = {.x = 3, .list = {.next = &f3.list}};
+
+  List head = {.next = &f1.list};
+  list_add(&head, &f1.list, &f2.list);
+  list_add(&head, &f2.list, &f3.list);
+
+  {
+  List *it = NULL;
+  list_for_each(it, &head) {
+    Foo *f = container_of(it, Foo, list);
+    printf("x=%d\n", f->x);
+  }
+}
+
+{
+  Foo* it=NULL;
+  list_for_each_entry(Foo, it, &head, list){
+    printf("x=%d\n", it->x);
+
+  }
+      }
+}

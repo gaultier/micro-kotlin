@@ -47,6 +47,8 @@ Array32_struct(int);
 int main(int argc, char *argv[]) {
   pg_assert(argc > 0);
 
+  do_foo();
+
   int opt = 0;
   Str cli_classpath = str_from_c(".");
   Str cli_java_home = {0};
